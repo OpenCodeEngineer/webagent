@@ -1,24 +1,44 @@
-// In-memory session map (will later use DB)
-const sessionMap = new Map<string, string>();
+import { and, eq } from 'drizzle-orm';
+import type { Database } from '../db/client.js';
+import { widgetSessions } from '../db/schema.js';
 
 function sessionKey(agentId: string, userId: string): string {
   return `widget:${agentId}:${userId}`;
 }
 
-export function getOrCreateSession(agentId: string, userId: string): string {
-  const key = `${agentId}::${userId}`;
-  let session = sessionMap.get(key);
-  if (!session) {
-    session = sessionKey(agentId, userId);
-    sessionMap.set(key, session);
-  }
-  return session;
+export async function getOrCreateSession(
+  db: Database,
+  agentId: string,
+  userId: string,
+): Promise<string> {
+  const openclawSessionKey = sessionKey(agentId, userId);
+
+  await db
+    .insert(widgetSessions)
+    .values({
+      agentId,
+      externalUserId: userId,
+      openclawSessionKey,
+      lastActiveAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [widgetSessions.agentId, widgetSessions.externalUserId],
+      set: {
+        openclawSessionKey,
+        lastActiveAt: new Date(),
+      },
+    });
+
+  return openclawSessionKey;
 }
 
-export function getSession(agentId: string, userId: string): string | undefined {
-  return sessionMap.get(`${agentId}::${userId}`);
-}
-
-export function removeSession(agentId: string, userId: string): boolean {
-  return sessionMap.delete(`${agentId}::${userId}`);
+export async function touchSessionLastActiveAt(
+  db: Database,
+  agentId: string,
+  userId: string,
+): Promise<void> {
+  await db
+    .update(widgetSessions)
+    .set({ lastActiveAt: new Date() })
+    .where(and(eq(widgetSessions.agentId, agentId), eq(widgetSessions.externalUserId, userId)));
 }
