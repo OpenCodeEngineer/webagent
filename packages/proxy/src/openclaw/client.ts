@@ -32,6 +32,7 @@ export class OpenClawClient {
       body: JSON.stringify({
         message: opts.message,
         agentId: opts.agentId,
+        sessionKey: opts.sessionKey,
         name: opts.name || 'widget-chat',
         wakeMode: 'now',
       }),
