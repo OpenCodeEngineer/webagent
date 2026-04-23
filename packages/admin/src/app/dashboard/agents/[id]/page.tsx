@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { getAgent } from "@/lib/api";
+import { normalizeCustomerIdToUuid } from "@/lib/customer-id";
 import { redirect } from "next/navigation";
 import { AgentDetailActions } from "@/components/agent-detail-actions";
 
@@ -18,7 +19,8 @@ export default async function AgentDetailPage({ params }: Props) {
   if (!session?.user) redirect("/login");
 
   const { id } = await params;
-  const agent = await getAgent(id);
+  const customerId = normalizeCustomerIdToUuid(session.user.id, session.user.email);
+  const agent = await getAgent(id, customerId);
 
   if (!agent) {
     return (
@@ -71,7 +73,7 @@ export default async function AgentDetailPage({ params }: Props) {
       <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-gray-900">Embed Code</h2>
         <p className="mt-1 text-sm text-gray-500">Add this snippet to your website.</p>
-        <AgentDetailActions agentId={agent.id} embedCode={embedCode} />
+        <AgentDetailActions agentId={agent.id} embedCode={embedCode} customerId={customerId} />
       </div>
 
       {/* Widget preview */}

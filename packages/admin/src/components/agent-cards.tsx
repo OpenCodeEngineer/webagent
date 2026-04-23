@@ -8,6 +8,7 @@ import { useToast } from "@/components/toast";
 
 interface AgentCardsProps {
   agents: Agent[];
+  customerId?: string;
 }
 
 const statusColors: Record<string, string> = {
@@ -16,7 +17,7 @@ const statusColors: Record<string, string> = {
   deleted: "bg-red-100 text-red-800",
 };
 
-export function AgentCards({ agents: initialAgents }: AgentCardsProps) {
+export function AgentCards({ agents: initialAgents, customerId }: AgentCardsProps) {
   const [agents, setAgents] = useState<Agent[]>(initialAgents);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const { toast } = useToast();
@@ -33,7 +34,7 @@ export function AgentCards({ agents: initialAgents }: AgentCardsProps) {
     const newStatus = agent.status === "paused" ? "active" : "paused";
     setLoadingId(`pause-${agent.id}`);
     try {
-      const updated = await updateAgent(agent.id, { status: newStatus });
+      const updated = await updateAgent(agent.id, { status: newStatus }, customerId);
       if (updated) {
         setAgents((prev) => prev.map((a) => (a.id === agent.id ? updated : a)));
         toast({ message: `Agent ${newStatus === "active" ? "resumed" : "paused"}.`, type: "success" });
@@ -49,7 +50,7 @@ export function AgentCards({ agents: initialAgents }: AgentCardsProps) {
     if (!window.confirm(`Delete agent "${agent.name ?? agent.id}"? This cannot be undone.`)) return;
     setLoadingId(`delete-${agent.id}`);
     try {
-      await deleteAgent(agent.id);
+      await deleteAgent(agent.id, customerId);
       setAgents((prev) => prev.filter((a) => a.id !== agent.id));
       toast({ message: "Agent deleted.", type: "success" });
     } catch (err) {

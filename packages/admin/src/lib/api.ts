@@ -265,9 +265,12 @@ export async function getAgents(customerId?: string): Promise<Agent[]> {
   return list.map(parseAgent).filter((agent): agent is Agent => !!agent);
 }
 
-export async function getAgent(id: string): Promise<Agent | undefined> {
+const withCustomerId = (path: string, customerId?: string): string =>
+  customerId ? `${path}?customerId=${encodeURIComponent(customerId)}` : path;
+
+export async function getAgent(id: string, customerId?: string): Promise<Agent | undefined> {
   const payload = await request<ApiEnvelope<unknown> | unknown>(
-    `/api/agents/${encodeURIComponent(id)}`,
+    withCustomerId(`/api/agents/${encodeURIComponent(id)}`, customerId),
   );
 
   return parseAgent(unwrapOne(payload));
@@ -291,9 +294,10 @@ export async function createAgentViaMetaAgent(
 export async function updateAgent(
   id: string,
   data: Partial<Agent>,
+  customerId?: string,
 ): Promise<Agent | undefined> {
   const payload = await request<ApiEnvelope<unknown> | unknown>(
-    `/api/agents/${encodeURIComponent(id)}`,
+    withCustomerId(`/api/agents/${encodeURIComponent(id)}`, customerId),
     {
       method: "PATCH",
       body: JSON.stringify(data),
@@ -303,17 +307,17 @@ export async function updateAgent(
   return parseAgent(unwrapOne(payload));
 }
 
-export async function deleteAgent(id: string): Promise<boolean> {
-  await request(`/api/agents/${encodeURIComponent(id)}`, {
+export async function deleteAgent(id: string, customerId?: string): Promise<boolean> {
+  await request(withCustomerId(`/api/agents/${encodeURIComponent(id)}`, customerId), {
     method: "DELETE",
   });
 
   return true;
 }
 
-export async function regenerateToken(id: string): Promise<Agent | undefined> {
+export async function regenerateToken(id: string, customerId?: string): Promise<Agent | undefined> {
   const payload = await request<ApiEnvelope<unknown> | unknown>(
-    `/api/agents/${encodeURIComponent(id)}/embed-token`,
+    withCustomerId(`/api/agents/${encodeURIComponent(id)}/embed-token`, customerId),
     {
       method: "POST",
     },

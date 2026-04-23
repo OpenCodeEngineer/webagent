@@ -7,9 +7,10 @@ import { useToast } from "@/components/toast";
 interface AgentDetailActionsProps {
   agentId: string;
   embedCode: string;
+  customerId?: string;
 }
 
-export function AgentDetailActions({ agentId, embedCode: initialEmbedCode }: AgentDetailActionsProps) {
+export function AgentDetailActions({ agentId, embedCode: initialEmbedCode, customerId }: AgentDetailActionsProps) {
   const [embedCode, setEmbedCode] = useState(initialEmbedCode);
   const [copied, setCopied] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
@@ -30,7 +31,7 @@ export function AgentDetailActions({ agentId, embedCode: initialEmbedCode }: Age
     if (!window.confirm("Regenerate embed token? The old token will stop working.")) return;
     setRegenerating(true);
     try {
-      const updated = await regenerateToken(agentId);
+      const updated = await regenerateToken(agentId, customerId);
       if (updated?.embedCode) {
         setEmbedCode(updated.embedCode);
         toast({ message: "Token regenerated.", type: "success" });
