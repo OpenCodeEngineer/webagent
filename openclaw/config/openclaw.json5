@@ -31,7 +31,18 @@
   hooks: {
     enabled: true,
     token: "${OPENCLAW_HOOKS_TOKEN}",
-    path: "/hooks"
+    path: "/hooks",
+    allowRequestSessionKey: true,
+    allowedSessionKeyPrefixes: ["widget:", "admin:"],
+    defaultSessionKey: "hook:ingress",
+    mappings: [
+      {
+        match: { path: "widget" },
+        action: "agent",
+        wakeMode: "now",
+        deliver: false,  // proxy handles delivery via WebSocket
+      },
+    ],
   },
   cron: {
     enabled: true,
