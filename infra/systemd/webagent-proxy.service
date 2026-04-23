@@ -1,21 +1,36 @@
 [Unit]
 Description=WebAgent Proxy (port 3001)
-After=network.target openclaw-gateway.service
+Documentation=https://github.com/OpenCodeEngineer/webagent
+After=network-online.target openclaw-gateway.service
 Wants=network-online.target
+Requires=openclaw-gateway.service
 
 [Service]
 Type=simple
 User=${APP_USER}
+Group=${APP_USER}
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=-${APP_DIR}/.env
 ExecStart=/usr/bin/pnpm --filter @webagent/proxy start
+
 Restart=on-failure
 RestartSec=5s
+StartLimitInterval=60s
+StartLimitBurst=5
+
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=webagent-proxy
 
 LimitNOFILE=65536
+LimitNPROC=4096
+MemoryMax=1G
+CPUQuota=200%
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=${APP_DIR}
 
 [Install]
 WantedBy=multi-user.target
