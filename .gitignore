@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build outputs
+dist/
+.next/
+.turbo/
+coverage/
+
+# environment
+.env*
+!.env.example
+
+# logs
+*.log
+pnpm-debug.log*
+
+# editor / os
+.DS_Store
+.vscode/
+.idea/
+
+# typescript cache
+*.tsbuildinfo

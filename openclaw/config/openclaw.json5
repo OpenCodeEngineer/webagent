@@ -1,0 +1,49 @@
+{
+  // Multi-agent configuration for Web MCP Agent platform
+  agents: {
+    defaults: {
+      workspace: "~/.openclaw/workspace",
+      model: "anthropic/claude-sonnet-4-6",
+      sandbox: {
+        mode: "all",
+        scope: "session",
+        workspaceAccess: "rw",
+        backend: "docker"
+      },
+      heartbeat: {
+        every: "30m",
+        target: "none",
+        lightContext: true,
+        isolatedSession: true
+      }
+    },
+    list: [
+      {
+        id: "meta",
+        name: "Agent Builder",
+        workspace: "~/openclaw/workspaces/meta",
+        sandbox: { mode: "off" },
+        skills: ["create-agent"],
+        heartbeat: { every: "0m" }
+      }
+    ]
+  },
+  hooks: {
+    enabled: true,
+    token: "${OPENCLAW_HOOKS_TOKEN}",
+    path: "/hooks"
+  },
+  cron: {
+    enabled: true,
+    maxConcurrentRuns: 3
+  },
+  session: {
+    dmScope: "per-account-channel-peer",
+    reset: { idleMinutes: 60 },
+    maintenance: {
+      mode: "enforce",
+      pruneAfter: "7d",
+      maxEntries: 1000
+    }
+  }
+}
