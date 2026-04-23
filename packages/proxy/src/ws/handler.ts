@@ -1,151 +1,135 @@
-import { WS_CLOSE_CODES } from '@webagent/shared/constants';
 import type { ClientMessage, ServerMessage } from '@webagent/shared/protocol';
-
 import { OpenClawClient } from '../openclaw/client.js';
 import { getOrCreateSession } from '../openclaw/sessions.js';
 
-const AUTH_TIMEOUT_MS = 30_000;
+interface WebSocket {
+  readyState: number;
+  OPEN: number;
+  send(data: string): void;
+  close(code?: number, data?: string): void;
+  on(event: 'message', listener: (raw: Buffer | string) => void | Promise<void>): void;
+  on(event: 'close', listener: () => void): void;
+}
+
+interface AuthenticatedSocket {
+  ws: WebSocket;
+  agentToken: string;
+  userId: string;
+  agentId: string;
+  sessionKey: string;
+  authenticated: boolean;
+}
+
+const openclawClient = new OpenClawClient();
+
+// In-memory token→agentId map (will later use DB)
 const tokenAgentMap = new Map<string, string>();
 
-export function registerAgentToken(agentToken: string, agentId: string): void {
-  const token = agentToken.trim();
-  const id = agentId.trim();
-
-  if (!token || !id) {
-    return;
-  }
-
-  tokenAgentMap.set(token, id);
+export function registerAgentToken(token: string, agentId: string) {
+  tokenAgentMap.set(token, agentId);
 }
 
-function serializeIncoming(raw: unknown): string {
-  if (typeof raw === 'string') {
-    return raw;
+function send(ws: WebSocket, msg: ServerMessage) {
+  if (ws.readyState === ws.OPEN) {
+    ws.send(JSON.stringify(msg));
   }
-
-  if (Buffer.isBuffer(raw)) {
-    return raw.toString('utf8');
-  }
-
-  return String(raw);
 }
 
-interface WebSocketLike {
-  OPEN: number;
-  readyState: number;
-  send(data: string): void;
-  close(code?: number, reason?: string): void;
-  on(event: 'message', listener: (raw: unknown) => void): void;
-  on(event: 'close' | 'error', listener: () => void): void;
-}
+export function handleConnection(ws: WebSocket) {
+  const state: AuthenticatedSocket = {
+    ws,
+    agentToken: '',
+    userId: '',
+    agentId: '',
+    sessionKey: '',
+    authenticated: false,
+  };
 
-export function handleConnection(ws: WebSocketLike): void {
-  const openClaw = new OpenClawClient();
-
-  let authenticated = false;
-  let activeAgentId = '';
-  let activeSessionKey = '';
-
-  const send = (payload: ServerMessage): void => {
-    if (ws.readyState === ws.OPEN) {
-      ws.send(JSON.stringify(payload));
+  // 30s auth timeout
+  const authTimeout = setTimeout(() => {
+    if (!state.authenticated) {
+      send(ws, { type: 'auth_error', reason: 'Authentication timeout' });
+      ws.close(4001, 'Auth timeout');
     }
-  };
+  }, 30_000);
 
-  const closeUnauthorized = (reason: string): void => {
-    send({ type: 'auth_error', reason });
-    ws.close(WS_CLOSE_CODES.POLICY_VIOLATION, reason);
-  };
-
-  const authTimer = setTimeout(() => {
-    if (!authenticated) {
-      closeUnauthorized('Authentication timeout');
+  ws.on('message', async (raw: Buffer | string) => {
+    const text = typeof raw === 'string' ? raw : raw.toString('utf8');
+    
+    let msg: ClientMessage;
+    try {
+      msg = JSON.parse(text) as ClientMessage;
+    } catch {
+      send(ws, { type: 'error', message: 'Invalid JSON' });
+      return;
     }
-  }, AUTH_TIMEOUT_MS);
 
-  const cleanup = (): void => {
-    clearTimeout(authTimer);
-  };
+    switch (msg.type) {
+      case 'auth': {
+        if (state.authenticated) {
+          send(ws, { type: 'error', message: 'Already authenticated' });
+          return;
+        }
 
-  ws.on('message', (raw: unknown) => {
-    void (async () => {
-      let incoming: ClientMessage;
+        const agentId = tokenAgentMap.get(msg.agentToken);
+        if (!agentId) {
+          send(ws, { type: 'auth_error', reason: 'Invalid agent token' });
+          ws.close(4003, 'Invalid token');
+          return;
+        }
 
-      try {
-        incoming = JSON.parse(serializeIncoming(raw)) as ClientMessage;
-      } catch {
-        send({ type: 'error', message: 'Invalid JSON payload' });
-        return;
+        state.agentToken = msg.agentToken;
+        state.userId = msg.userId;
+        state.agentId = agentId;
+        state.sessionKey = getOrCreateSession(agentId, msg.userId);
+        state.authenticated = true;
+        clearTimeout(authTimeout);
+
+        send(ws, { type: 'auth_ok', sessionId: state.sessionKey });
+        break;
       }
 
-      switch (incoming.type) {
-        case 'auth': {
-          if (!incoming.agentToken || !incoming.userId) {
-            closeUnauthorized('Missing agentToken or userId');
-            return;
-          }
-
-          const resolvedAgentId = tokenAgentMap.get(incoming.agentToken);
-          if (!resolvedAgentId) {
-            closeUnauthorized('Invalid agent token');
-            return;
-          }
-
-          activeAgentId = resolvedAgentId;
-          activeSessionKey = getOrCreateSession(activeAgentId, incoming.userId);
-
-          try {
-            await openClaw.wake(activeAgentId);
-          } catch (error) {
-            const message = error instanceof Error ? error.message : 'OpenClaw wake failed';
-            send({ type: 'error', message });
-            return;
-          }
-
-          authenticated = true;
-          clearTimeout(authTimer);
-          send({ type: 'auth_ok', sessionId: activeSessionKey });
+      case 'message': {
+        if (!state.authenticated) {
+          send(ws, { type: 'auth_error', reason: 'Not authenticated' });
           return;
         }
 
-        case 'message': {
-          if (!authenticated) {
-            closeUnauthorized('Authenticate before sending messages');
-            return;
-          }
-
-          if (!incoming.content || typeof incoming.content !== 'string') {
-            send({ type: 'error', message: 'Missing message content' });
-            return;
-          }
-
-          try {
-            const response = await openClaw.sendMessage(activeAgentId, activeSessionKey, incoming.content);
-            send({ type: 'message', content: response.content, done: response.done });
-          } catch (error) {
-            const message = error instanceof Error ? error.message : 'Failed to relay message';
-            send({ type: 'error', message });
-          }
+        if (!msg.content?.trim()) {
+          send(ws, { type: 'error', message: 'Empty message' });
           return;
         }
 
-        case 'ping': {
-          send({ type: 'pong' });
-          return;
-        }
+        try {
+          const result = await openclawClient.sendMessage({
+            message: msg.content,
+            agentId: state.agentId,
+            sessionKey: state.sessionKey,
+          });
 
-        default: {
-          send({ type: 'error', message: 'Unsupported message type' });
+          if (result.success) {
+            send(ws, { type: 'message', content: result.response || '', done: true });
+          } else {
+            send(ws, { type: 'error', message: result.error || 'Agent error' });
+          }
+        } catch (err) {
+          send(ws, { type: 'error', message: 'Internal error processing message' });
         }
+        break;
       }
-    })();
+
+      case 'ping': {
+        send(ws, { type: 'pong' });
+        break;
+      }
+
+      default: {
+        send(ws, { type: 'error', message: 'Unknown message type' });
+      }
+    }
   });
 
   ws.on('close', () => {
-    cleanup();
-  });
-
-  ws.on('error', () => {
-    cleanup();
+    clearTimeout(authTimeout);
   });
 }

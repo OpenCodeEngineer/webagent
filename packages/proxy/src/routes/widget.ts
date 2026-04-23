@@ -1,46 +1,31 @@
-import { readFile } from 'node:fs/promises';
-
 import type { FastifyInstance } from 'fastify';
+import { readFileSync, existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 
-const FALLBACK_WIDGET_BUNDLE = `console.warn('[WebAgent] widget bundle unavailable. Build @webagent/widget to enable embed script.');`;
+let widgetJs: string | null = null;
 
-let cachedWidgetBundle: string | null = null;
-let attemptedLoad = false;
-
-async function loadWidgetBundle(): Promise<string> {
-  if (cachedWidgetBundle) {
-    return cachedWidgetBundle;
-  }
-
-  if (attemptedLoad) {
-    return FALLBACK_WIDGET_BUNDLE;
-  }
-
-  attemptedLoad = true;
-
-  const candidates = [
-    new URL('../../../widget/dist/widget.js', import.meta.url),
-    new URL('../../../../widget/dist/widget.js', import.meta.url)
+function loadWidgetJs(): string {
+  if (widgetJs) return widgetJs;
+  
+  // Try built widget first, then fallback
+  const paths = [
+    resolve(import.meta.dirname, '../../../widget/dist/widget.js'),
+    resolve(import.meta.dirname, '../../node_modules/@webagent/widget/dist/widget.js'),
   ];
-
-  for (const candidate of candidates) {
-    try {
-      cachedWidgetBundle = await readFile(candidate, 'utf8');
-      return cachedWidgetBundle;
-    } catch {
-      // Try next candidate path.
+  
+  for (const p of paths) {
+    if (existsSync(p)) {
+      widgetJs = readFileSync(p, 'utf8');
+      return widgetJs;
     }
   }
-
-  return FALLBACK_WIDGET_BUNDLE;
+  
+  return '// WebAgent widget not built yet. Run: pnpm --filter @webagent/widget build';
 }
 
-export function registerWidgetRoutes(app: FastifyInstance): void {
-  app.get('/widget.js', async (_request, reply) => {
-    const bundle = await loadWidgetBundle();
-    return reply
-      .type('application/javascript; charset=utf-8')
-      .header('cache-control', 'public, max-age=300')
-      .send(bundle);
+export function registerWidgetRoutes(app: FastifyInstance) {
+  app.get('/widget.js', async (_req, reply) => {
+    const js = loadWidgetJs();
+    reply.type('application/javascript').send(js);
   });
 }

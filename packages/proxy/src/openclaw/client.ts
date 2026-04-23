@@ -1,140 +1,77 @@
 import { loadConfig } from '../config.js';
 
-export interface AgentResponse {
-  content: string;
-  done: boolean;
-}
-
-interface RequestOptions {
-  expectJson?: boolean;
-}
-
-/**
- * Join a base URL with an endpoint path, deduplicating any overlapping
- * path suffix/prefix so that both of these produce the same result:
- *   base "http://host:port/hooks" + endpoint "/hooks/agent" → "http://host:port/hooks/agent"
- *   base "http://host:port"       + endpoint "/hooks/agent" → "http://host:port/hooks/agent"
- */
-function joinUrl(base: string, endpoint: string): string {
-  const cleanBase = base.replace(/\/+$/, '');
-  const cleanEndpoint = endpoint.replace(/^\/+/, '');
-
-  const baseParts = cleanBase.split('/');
-  const endpointParts = cleanEndpoint.split('/');
-
-  // Find the longest overlapping suffix of baseParts that matches a prefix of endpointParts.
-  let overlap = 0;
-  for (let len = 1; len <= Math.min(baseParts.length, endpointParts.length); len++) {
-    const baseSuffix = baseParts.slice(-len).join('/');
-    const endpointPrefix = endpointParts.slice(0, len).join('/');
-    if (baseSuffix === endpointPrefix) {
-      overlap = len;
-    }
-  }
-
-  return `${cleanBase}/${endpointParts.slice(overlap).join('/')}`.replace(/\/+$/, '');
+interface AgentResponse {
+  success: boolean;
+  response?: string;
+  error?: string;
 }
 
 export class OpenClawClient {
-  private readonly baseUrl: string;
-  private readonly token: string;
+  private baseUrl: string;
+  private token: string;
 
-  constructor(config = loadConfig()) {
-    this.baseUrl = config.openClawHooksUrl.replace(/\/$/, '');
-    this.token = config.openClawHooksToken;
+  constructor(baseUrl?: string, token?: string) {
+    const config = loadConfig();
+    this.baseUrl = baseUrl || config.openClawHooksUrl;
+    this.token = token || config.openClawHooksToken;
   }
 
-  async sendMessage(agentId: string, sessionKey: string, content: string): Promise<AgentResponse> {
-    const payload = await this.request<unknown>(
-      '/hooks/agent',
-      {
-        method: 'POST',
-        body: JSON.stringify({ agentId, sessionKey, content })
+  // Send message to an agent via hooks API
+  async sendMessage(opts: {
+    message: string;
+    agentId: string;
+    sessionKey?: string;
+    name?: string;
+  }): Promise<AgentResponse> {
+    const res = await fetch(`${this.baseUrl}/hooks/agent`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.token}`,
+        'Content-Type': 'application/json',
       },
-      { expectJson: true }
-    );
+      body: JSON.stringify({
+        message: opts.message,
+        agentId: opts.agentId,
+        name: opts.name || 'widget-chat',
+        wakeMode: 'now',
+      }),
+    });
 
-    return this.normalizeAgentResponse(payload);
+    if (!res.ok) {
+      return { success: false, error: `OpenClaw API error: ${res.status} ${res.statusText}` };
+    }
+
+    const data = await res.json() as Record<string, unknown>;
+    return { success: true, response: data.response as string || data.text as string || JSON.stringify(data) };
   }
 
-  async wake(agentId: string): Promise<void> {
-    await this.request(
-      '/hooks/wake',
-      {
-        method: 'POST',
-        body: JSON.stringify({ agentId })
+  // Wake the main session (for system events)
+  async wake(text: string, mode: 'now' | 'next-heartbeat' = 'now'): Promise<boolean> {
+    const res = await fetch(`${this.baseUrl}/hooks/wake`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.token}`,
+        'Content-Type': 'application/json',
       },
-      { expectJson: false }
-    );
+      body: JSON.stringify({ text, mode }),
+    });
+    return res.ok;
   }
 
+  // Health check
   async ping(): Promise<boolean> {
     try {
-      await this.request('/hooks/wake', { method: 'POST', body: JSON.stringify({}) }, { expectJson: false });
-      return true;
+      const res = await fetch(`${this.baseUrl}/hooks/wake`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ text: 'health-check', mode: 'next-heartbeat' }),
+      });
+      return res.ok;
     } catch {
       return false;
     }
-  }
-
-  private async request<T>(
-    endpoint: string,
-    init: RequestInit,
-    options: RequestOptions = {}
-  ): Promise<T | undefined> {
-    const url = joinUrl(this.baseUrl, endpoint);
-
-    let response: Response;
-
-    try {
-      response = await fetch(url, {
-        ...init,
-        headers: {
-          authorization: `Bearer ${this.token}`,
-          'content-type': 'application/json',
-          accept: 'application/json',
-          ...(init.headers ?? {})
-        }
-      });
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : 'Unknown network failure';
-      throw new Error(`OpenClaw request failed (${endpoint}): ${reason}`);
-    }
-
-    if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      const detail = body ? ` - ${body.slice(0, 500)}` : '';
-      throw new Error(`OpenClaw request failed (${endpoint}): HTTP ${response.status}${detail}`);
-    }
-
-    if (!options.expectJson) {
-      return undefined;
-    }
-
-    try {
-      return (await response.json()) as T;
-    } catch {
-      throw new Error(`OpenClaw request failed (${endpoint}): invalid JSON response`);
-    }
-  }
-
-  private normalizeAgentResponse(payload: unknown): AgentResponse {
-    if (!payload || typeof payload !== 'object') {
-      return { content: '', done: true };
-    }
-
-    const maybe = payload as { content?: unknown; done?: unknown; message?: unknown; output?: unknown };
-    const content =
-      typeof maybe.content === 'string'
-        ? maybe.content
-        : typeof maybe.message === 'string'
-          ? maybe.message
-          : typeof maybe.output === 'string'
-            ? maybe.output
-            : '';
-
-    const done = typeof maybe.done === 'boolean' ? maybe.done : true;
-
-    return { content, done };
   }
 }
