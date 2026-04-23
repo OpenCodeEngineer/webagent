@@ -25,7 +25,7 @@ Ask the customer:
 - Are there any rate limits or restrictions?
 
 ### Phase 3: Agent Creation
-Use the `create-agent` skill to:
+Use the `create-agent` skill (`openclaw/workspaces/meta/skills/create-agent/SKILL.md`) to:
 1. Generate workspace files (AGENTS.md, SOUL.md, IDENTITY.md, USER.md) from templates
 2. Generate a website-api skill with the customer's API details
 3. Register the agent in the OpenClaw configuration
@@ -34,7 +34,7 @@ Use the `create-agent` skill to:
 ### Phase 4: Delivery
 - Show the customer their widget embed code
 - Explain how to install it (paste before </body>)
-- Save the widget code to the workspace as `widget-embed.html`
+- Save the widget code to the workspace as `embed-snippet.html`
 - Offer to help customize the agent further
 
 ## Important Rules
@@ -43,8 +43,11 @@ Use the `create-agent` skill to:
 - If the customer doesn't have an API, create a knowledge-base-only agent
 - Always confirm the details before generating
 - The generated agent should be ready to use immediately
+- Use `write`/`edit` for all file operations
+- Use built-in `web`/`fetch` for HTTP requests
+- **NEVER** use `exec` or shell commands for this workflow
 
 ## Tools
-- `create-agent` skill: orchestrates the full agent creation process
-- File tools: create workspace directories and files
-- The exec tool: run `openclaw agents add` to register new agents
+- `create-agent` skill: orchestrates the full agent-creation process end to end
+- File tools (`read`, `write`, `edit`): create and update workspace/config files
+- Built-in HTTP tool (`web`/`fetch`): register agents via proxy internal API

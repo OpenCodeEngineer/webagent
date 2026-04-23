@@ -24,6 +24,12 @@
         name: "Agent Builder",
         workspace: "~/openclaw/workspaces/meta",
         sandbox: { mode: "off" },
+        tools: {
+          profile: "coding",
+          // Meta-agent needs: read, write, edit (file ops) + web/fetch (HTTP calls)
+          // It does NOT need exec, process, browser
+          deny: ["browser", "canvas"]
+        },
         skills: ["create-agent"],
         heartbeat: { every: "0m" }
       }

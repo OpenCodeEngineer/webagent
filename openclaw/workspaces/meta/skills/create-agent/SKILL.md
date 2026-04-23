@@ -7,125 +7,83 @@ metadata: {"openclaw": {"always": true}}
 
 # create-agent
 
-This skill creates a fully configured customer agent for the WebAgent platform.
+This skill creates a fully configured customer agent for the WebAgent platform with a strict no-shell workflow.
 
-## Prerequisites
-- Customer must have provided: website name, URL, and description
-- API details are optional (agent can work as knowledge-base only)
+## Hard rules
+- **Never use `exec`, shell commands, or CLI process spawning** during this flow.
+- Use only built-in file tools (`read`, `write`, `edit`) and built-in HTTP tools (`web`/`fetch`).
+- For file creation, prefer `write` directly: **`write` creates missing parent directories automatically**.
 
-## Execution Steps
+## 5-Step Flow
 
-### Step 1: Validate Input
-Ensure we have at minimum:
-- `websiteName` — human-readable name
-- `websiteUrl` — full URL (https://...)
-- `description` — what the product/service does
+### Step 1 — Gather info conversationally and confirm understanding
+Collect and confirm:
+- Website/product: `websiteName`, `websiteUrl`, and product summary.
+- API details: API style (`REST`/`GraphQL`), base URL, authentication method, and key endpoints/actions.
+- Personality/tone: how the assistant should sound and behave.
 
-Optional:
-- `apiBaseUrl` — API base URL
-- `apiEndpoints` — list of endpoints (method, path, description)
-- `apiAuth` — authentication method and details
-- `brandVoice` — desired tone (default: "Professional, helpful, and concise")
-- `agentName` — custom name (default: derived from website name)
-- `agentEmoji` — emoji (default: 🤖)
+Before generating anything, send a compact confirmation summary and get explicit customer confirmation that details are correct.
 
-### Step 2: Generate Agent ID
-Create a URL-safe agent ID: `customer_<slugified-website-name>`
+### Step 2 — Generate workspace files via `write`
+Derive:
+- `agentSlug` = website name lowercased, non-alphanumeric collapsed to hyphens, trim edge hyphens.
+- `workspacePath` = `~/openclaw/workspaces/<agentSlug>/`
 
-### Step 3: Create Workspace Directory
-```bash
-AGENT_ID="customer_<slug>"
-WORKSPACE_DIR="$HOME/.openclaw/workspace-${AGENT_ID}"
-mkdir -p "${WORKSPACE_DIR}/skills/website-api"
-mkdir -p "${WORKSPACE_DIR}/memory"
-```
+Using templates in `openclaw/templates/` as the starting point, render and `write`:
+- `<workspacePath>/AGENTS.md`
+- `<workspacePath>/SOUL.md`
+- `<workspacePath>/IDENTITY.md`
+- `<workspacePath>/USER.md`
+- `<workspacePath>/skills/website-api/SKILL.md`
 
-### Step 4: Generate Workspace Files
-Read templates from `{baseDir}/../../templates/` and render with customer values:
+All files must be filled with customer-provided values (website/product, API details, tone/personality).
 
-**AGENTS.md** — Replace:
-- `{{WEBSITE_NAME}}` → websiteName
-- `{{WEBSITE_URL}}` → websiteUrl
-- `{{API_DESCRIPTION}}` → description
+### Step 3 — Register agent in OpenClaw config via `read` + `edit`
+1. `read` `~/openclaw/config/openclaw.json5`
+2. `edit` `agents.list` to add:
+   - `id`: `<agentSlug>`
+   - `name`: `<agentName>`
+   - `workspace`: `<workspacePath>`
+   - `skills`: `["website-api"]`
+   - `heartbeat`: `{ every: "30m" }`
 
-**SOUL.md** — Replace:
-- `{{WEBSITE_NAME}}` → websiteName
-- `{{BRAND_VOICE}}` → brandVoice or default
+Mention to the customer/operator that OpenClaw uses **hybrid hot-reload**, so `agents.*` config updates are picked up without full restart.
 
-**IDENTITY.md** — Replace:
-- `{{WEBSITE_NAME}}` → websiteName
-- `{{AGENT_NAME}}` → agentName or "<websiteName> Assistant"
-- `{{AGENT_VIBE}}` → "Helpful and knowledgeable"
-- `{{AGENT_EMOJI}}` → agentEmoji or "🤖"
+### Step 4 — Register in proxy DB via HTTP POST (no curl/exec)
+Use built-in `web`/`fetch` tool to call:
+- `POST http://localhost:3001/api/internal/agents`
 
-**USER.md** — Replace:
-- `{{WEBSITE_NAME}}` → websiteName
-
-### Step 5: Generate API Skill (if API provided)
-Create `skills/website-api/SKILL.md`:
-
-```markdown
----
-name: website-api
-description: Call the {{websiteName}} API to perform actions for visitors
-metadata: {"openclaw": {"requires": {"env": ["WEBSITE_API_KEY"]}}}
----
-
-# {{websiteName}} API
-
-Base URL: `{{apiBaseUrl}}`
-Authentication: {{apiAuth}}
-
-## Available Endpoints
-
-{{#each apiEndpoints}}
-### {{method}} {{path}}
-{{description}}
-{{/each}}
-
-## Usage
-Use the `exec` tool with `curl` to call these endpoints. Always include proper authentication headers.
-
-## Error Handling
-- If an API call fails, tell the visitor you're having trouble and suggest they try again or contact support.
-- Never expose raw error messages or stack traces to visitors.
-```
-
-### Step 6: Register Agent in OpenClaw
-Run:
-```bash
-openclaw agents add "${AGENT_ID}" \
-  --workspace "${WORKSPACE_DIR}" \
-  --name "${websiteName} Agent"
-```
-
-Or programmatically update `openclaw.json` to add to `agents.list[]`:
+JSON body:
 ```json
 {
-  "id": "${AGENT_ID}",
-  "name": "${websiteName} Agent",
-  "workspace": "${WORKSPACE_DIR}"
+  "customerId": "<from session context>",
+  "openclawAgentId": "<agentSlug>",
+  "name": "<agentName>",
+  "websiteUrl": "<websiteUrl>",
+  "apiDescription": "<apiDescription>"
 }
 ```
 
-### Step 7: Generate Widget Embed Code
-Create `${WORKSPACE_DIR}/widget-embed.html`:
+Expect response shape:
+```json
+{ "agent": { ... }, "embedToken": "..." }
+```
 
+### Step 5 — Generate embed snippet and deliver usage
+Use returned `embedToken` to create:
+- `<workspacePath>/embed-snippet.html`
+
+Snippet format:
 ```html
-<!-- WebAgent Chat Widget for {{websiteName}} -->
-<!-- Paste this before </body> on your website -->
 <script
-  src="https://{{PLATFORM_DOMAIN}}/widget.js"
-  data-agent-token="{{EMBED_TOKEN}}"
-  data-user-id="REPLACE_WITH_YOUR_USER_ID"
+  src="https://{{DOMAIN}}/widget.js"
+  data-agent-token="{{embedToken}}"
+  data-user-id=""
 ></script>
 ```
 
-The `EMBED_TOKEN` is generated by the proxy and stored in the database.
-
-### Step 8: Confirm to Customer
-Display:
-1. Agent name and ID
-2. The embed code to copy
-3. Instructions on how to replace `data-user-id` with their user identification
-4. A reminder that they can come back to update the agent anytime
+Then present:
+1. Agent ID and name
+2. The embed snippet
+3. Where to paste it (`before </body>`)
+4. Reminder that they can return to update behavior or API actions
