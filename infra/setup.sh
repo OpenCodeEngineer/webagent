@@ -29,43 +29,29 @@ fi
 corepack enable
 corepack prepare pnpm@latest --activate
 
-# ── 4. Docker ─────────────────────────────────────────────────────────────────
-if ! command -v docker &>/dev/null; then
-  install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-    | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-  chmod a+r /etc/apt/keyrings/docker.gpg
-  echo \
-    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-    https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
-    > /etc/apt/sources.list.d/docker.list
-  apt-get update -y
-  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin
-  systemctl enable --now docker
-fi
-
-# ── 5. Application user ───────────────────────────────────────────────────────
+# ── 4. Application user ───────────────────────────────────────────────────────
+# No Docker needed — OpenClaw uses workspace-scoped tool sandboxing (file
+# read/write restricted to agent workspace directory, no shell exec).
 if ! id "${APP_USER}" &>/dev/null; then
   useradd -m -s /bin/bash "${APP_USER}"
 fi
-usermod -aG docker "${APP_USER}"
 
-# ── 6. Clone repository ───────────────────────────────────────────────────────
+# ── 5. Clone repository ───────────────────────────────────────────────────────
 if [[ ! -d "${APP_DIR}/.git" ]]; then
   git clone "${REPO_URL}" "${APP_DIR}"
   chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}"
 fi
 
-# ── 7. Environment file ───────────────────────────────────────────────────────
+# ── 6. Environment file ───────────────────────────────────────────────────────
 if [[ ! -f "${APP_DIR}/.env" && -f "${APP_DIR}/.env.example" ]]; then
   cp "${APP_DIR}/.env.example" "${APP_DIR}/.env"
   chown "${APP_USER}:${APP_USER}" "${APP_DIR}/.env"
 fi
 
-# ── 8. Install dependencies ───────────────────────────────────────────────────
+# ── 7. Install dependencies ───────────────────────────────────────────────────
 sudo -u "${APP_USER}" bash -c "cd ${APP_DIR} && pnpm install --frozen-lockfile"
 
-# ── 9. Nginx configuration ────────────────────────────────────────────────────
+# ── 8. Nginx configuration ────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cp "${SCRIPT_DIR}/nginx/webagent.conf" /etc/nginx/sites-available/webagent.conf
 sed -i "s/\${DOMAIN}/${DOMAIN}/g" /etc/nginx/sites-available/webagent.conf
@@ -74,11 +60,11 @@ rm -f /etc/nginx/sites-enabled/default
 nginx -t
 systemctl reload nginx
 
-# ── 10. SSL certificate (certbot) ─────────────────────────────────────────────
+# ── 9. SSL certificate (certbot) ──────────────────────────────────────────────
 certbot --nginx -d "${DOMAIN}" --non-interactive --agree-tos \
   --register-unsafely-without-email --redirect
 
-# ── 11. Systemd services ─────────────────────────────────────────────────────
+# ── 10. Systemd services ──────────────────────────────────────────────────────
 for svc in openclaw-gateway webagent-proxy webagent-admin; do
   cp "${SCRIPT_DIR}/systemd/${svc}.service" /etc/systemd/system/
   sed -i "s|\${APP_DIR}|${APP_DIR}|g" "/etc/systemd/system/${svc}.service"
@@ -87,7 +73,7 @@ done
 systemctl daemon-reload
 systemctl enable --now openclaw-gateway webagent-proxy webagent-admin
 
-# ── 12. Firewall ─────────────────────────────────────────────────────────────
+# ── 11. Firewall ──────────────────────────────────────────────────────────────
 ufw allow OpenSSH
 ufw allow 'Nginx Full'
 ufw --force enable

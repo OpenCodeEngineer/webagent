@@ -15,7 +15,12 @@
         "name": "next"
       }
     ],
-    "paths": {},
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    },
     "noEmit": true
   },
   "include": [

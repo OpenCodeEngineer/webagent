@@ -4,11 +4,12 @@
     defaults: {
       workspace: "~/.openclaw/workspace",
       model: "anthropic/claude-sonnet-4-6",
-      sandbox: {
-        mode: "all",
-        scope: "session",
-        workspaceAccess: "rw",
-        backend: "docker"
+      // Workspace-scoped sandboxing: no Docker, file tools restricted to workspace only
+      sandbox: { mode: "off" },
+      tools: {
+        profile: "coding",
+        deny: ["exec", "process", "browser", "canvas", "nodes", "gateway"],
+        // read/write/edit are workspace-scoped by default in OpenClaw
       },
       heartbeat: {
         every: "30m",

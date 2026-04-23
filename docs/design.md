@@ -118,11 +118,15 @@ Customer logs in → Dashboard
                         │                   └───────────────┘              │  │
                         │                                                  │  │
                         │  ┌───────────────────────────────────────────┐   │  │
-                        │  │          Docker (sandbox sessions)        │   │  │
-                        │  │  ┌─────────┐ ┌─────────┐ ┌─────────┐    │   │  │
-                        │  │  │Session A│ │Session B│ │Session C│    │   │  │
-                        │  │  │(visitor)│ │(visitor)│ │(visitor)│    │   │  │
-                        │  │  └─────────┘ └─────────┘ └─────────┘    │   │  │
+                        │  │      Agent Workspaces (filesystem)       │   │  │
+                        │  │  ┌─────────────┐ ┌─────────────┐        │   │  │
+                        │  │  │ customer_a/ │ │ customer_b/ │  ...   │   │  │
+                        │  │  │  AGENTS.md  │ │  AGENTS.md  │        │   │  │
+                        │  │  │  skills/    │ │  skills/    │        │   │  │
+                        │  │  └─────────────┘ └─────────────┘        │   │  │
+                        │  │  Sandbox: workspace-scoped tool access   │   │  │
+                        │  │  (read/write/edit restricted to workspace│   │  │
+                        │  │   dir; exec/process/browser denied)      │   │  │
                         │  └───────────────────────────────────────────┘   │  │
                         └──────────────────────────────────────────────────┘  │
                                                                               │
@@ -193,17 +197,25 @@ Customer A                          Customer B
 │  └ memory/           │    │  └ memory/           │
 └──────┬───────────────┘    └──────┬───────────────┘
        │                           │
-       │  sandbox scope=session    │  sandbox scope=session
+       │  sessionKey isolation     │  sessionKey isolation
        ▼                           ▼
 ┌─────────────┐ ┌──────────┐  ┌─────────────┐ ┌──────────┐
 │ Visitor X   │ │Visitor Y │  │ Visitor P   │ │Visitor Q │
-│ (sandboxed) │ │(sandboxed│  │ (sandboxed) │ │(sandboxed│
-│  session)   │ │ session) │  │  session)   │ │ session) │
+│ session:    │ │session:  │  │ session:    │ │session:  │
+│ widget:a:X  │ │widget:a:Y│  │ widget:b:P  │ │widget:b:Q│
 └─────────────┘ └──────────┘  └─────────────┘ └──────────┘
 
-• Each agent = isolated workspace (no cross-customer leakage)
-• Each visitor = isolated sandbox session (no cross-visitor leakage)
+Sandbox approach: WORKSPACE-SCOPED TOOL ACCESS (no Docker)
+─────────────────────────────────────────────────────────
+• sandbox.mode: "off" — no containers, no Docker overhead
+• tools.deny: ["exec", "process", "browser", "canvas", ...] — no shell/system
+• read/write/edit are workspace-scoped by default in OpenClaw
+  → each agent can only access files within its own workspace dir
+• Each visitor = unique sessionKey ("widget:<agentId>:<userId>")
+  → OpenClaw isolates conversation state per sessionKey
 • Cron/heartbeat scoped per agent, never touches other agents' sessions
+• Meta-agent is the only agent with sandbox: "off" + elevated access
+  (it needs to create workspaces and update config for new agents)
 ```
 
 ---
@@ -224,7 +236,7 @@ Customer A                          Customer B
 ARM works because:
 - Node.js 22/24 → native `linux-arm64` builds
 - OpenClaw → pure Node.js, no native binaries
-- Docker → ARM images for Ubuntu/Debian sandbox containers
 - Nginx → native ARM packages
+- No Docker needed → saves ~500MB+ RAM on the 4GB VM
 
 If 4 GB RAM gets tight under load, upgrade to **CAX21** (4 vCPU, 8 GB, ~€7.49/mo).
