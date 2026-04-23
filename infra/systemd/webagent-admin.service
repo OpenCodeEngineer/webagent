@@ -1,21 +1,36 @@
 [Unit]
 Description=WebAgent Admin UI (port 3000)
-After=network.target webagent-proxy.service
+Documentation=https://github.com/OpenCodeEngineer/webagent
+After=network-online.target webagent-proxy.service
 Wants=network-online.target
+Requires=webagent-proxy.service
 
 [Service]
 Type=simple
 User=${APP_USER}
+Group=${APP_USER}
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=-${APP_DIR}/.env
 ExecStart=/usr/bin/pnpm --filter @webagent/admin start
+
 Restart=on-failure
 RestartSec=5s
+StartLimitInterval=60s
+StartLimitBurst=5
+
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=webagent-admin
 
 LimitNOFILE=65536
+LimitNPROC=4096
+MemoryMax=512M
+CPUQuota=100%
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=${APP_DIR}
 
 [Install]
 WantedBy=multi-user.target
