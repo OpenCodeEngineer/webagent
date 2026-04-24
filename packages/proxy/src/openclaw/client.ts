@@ -4,6 +4,39 @@ import { loadConfig } from '../config.js';
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Extract the visible agent text from OpenClaw CLI JSON output.
+ * The CLI wraps the response in a deep structure — the actual text lives at:
+ *   result.payloads[0].text       (primary)
+ *   meta.finalAssistantVisibleText (fallback)
+ *   response / text / reply       (flat fallback)
+ */
+function extractAgentText(data: Record<string, unknown>): string | undefined {
+  // Primary: result.payloads[0].text
+  const result = data.result as Record<string, unknown> | undefined;
+  if (result && Array.isArray(result.payloads)) {
+    const first = result.payloads[0] as Record<string, unknown> | undefined;
+    if (first && typeof first.text === 'string' && first.text.trim()) {
+      return first.text;
+    }
+  }
+
+  // Fallback: meta.finalAssistantVisibleText
+  const meta = data.meta as Record<string, unknown> | undefined;
+  if (meta && typeof meta.finalAssistantVisibleText === 'string') {
+    return meta.finalAssistantVisibleText;
+  }
+
+  // Flat fallback for simpler response shapes
+  for (const key of ['response', 'text', 'reply', 'output'] as const) {
+    if (typeof data[key] === 'string' && (data[key] as string).trim()) {
+      return data[key] as string;
+    }
+  }
+
+  return undefined;
+}
+
 interface AgentResponse {
   success: boolean;
   response?: string;
@@ -57,12 +90,7 @@ export class OpenClawClient {
 
       try {
         const data = JSON.parse(stdout.trim()) as Record<string, unknown>;
-        const text =
-          (typeof data.response === 'string' ? data.response : undefined) ??
-          (typeof data.text === 'string' ? data.text : undefined) ??
-          (typeof data.reply === 'string' ? data.reply : undefined) ??
-          (typeof data.output === 'string' ? data.output : undefined);
-
+        const text = extractAgentText(data);
         return { success: true, response: text ?? stdout.trim() };
       } catch {
         // stdout wasn't JSON — return raw text as the response
