@@ -1,6 +1,5 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
-import Email from "next-auth/providers/nodemailer";
 import GitHub from "next-auth/providers/github";
 import Google from "next-auth/providers/google";
 
@@ -39,10 +38,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           name: "Test User",
         };
       },
-    }),
-    Email({
-      server: process.env.EMAIL_SERVER ?? "smtp://localhost:1025",
-      from: process.env.EMAIL_FROM ?? "no-reply@example.com",
     }),
   ],
   callbacks: {

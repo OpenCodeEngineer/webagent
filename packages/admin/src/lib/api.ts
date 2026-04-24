@@ -1,4 +1,12 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_PROXY_URL ?? "";
+const getApiBaseUrl = (): string => {
+  if (process.env.NEXT_PUBLIC_PROXY_URL) return process.env.NEXT_PUBLIC_PROXY_URL;
+  // Server-side: use localhost proxy
+  if (typeof window === "undefined") {
+    const port = process.env.PROXY_PORT ?? "3001";
+    return `http://127.0.0.1:${port}`;
+  }
+  return "";
+};
 
 type JsonObject = Record<string, unknown>;
 
@@ -80,7 +88,7 @@ const withApiPath = (path: string): string => {
     ? normalizedPath
     : `/api${normalizedPath}`;
 
-  return `${API_BASE_URL}${fullPath}`;
+  return `${getApiBaseUrl()}${fullPath}`;
 };
 
 const parseSessionSummary = (value: unknown): AgentSessionSummary | undefined => {

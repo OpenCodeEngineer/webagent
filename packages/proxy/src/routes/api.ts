@@ -186,19 +186,26 @@ export function registerApiRoutes(app: FastifyInstance) {
         .from(agents)
         .where(and(eq(agents.customerId, query.customerId), ne(agents.status, 'deleted')));
 
-      const sessionCountRows = await app.db
-        .select({
-          agentId: widgetSessions.agentId,
-          sessionCount: count(widgetSessions.id),
-        })
-        .from(widgetSessions)
-        .innerJoin(agents, eq(widgetSessions.agentId, agents.id))
-        .where(and(eq(agents.customerId, query.customerId), ne(agents.status, 'deleted')))
-        .groupBy(widgetSessions.agentId);
+      let sessionCountByAgentId = new Map<string, number>();
+      if (rows.length > 0) {
+        try {
+          const sessionCountRows = await app.db
+            .select({
+              agentId: widgetSessions.agentId,
+              sessionCount: count(widgetSessions.id),
+            })
+            .from(widgetSessions)
+            .innerJoin(agents, eq(widgetSessions.agentId, agents.id))
+            .where(and(eq(agents.customerId, query.customerId), ne(agents.status, 'deleted')))
+            .groupBy(widgetSessions.agentId);
 
-      const sessionCountByAgentId = new Map(
-        sessionCountRows.map((row) => [row.agentId, Number(row.sessionCount) || 0]),
-      );
+          sessionCountByAgentId = new Map(
+            sessionCountRows.map((row) => [row.agentId, Number(row.sessionCount) || 0]),
+          );
+        } catch {
+          // session counts are optional
+        }
+      }
 
       return reply.send({
         data: rows.map((row) => ({
@@ -207,7 +214,7 @@ export function registerApiRoutes(app: FastifyInstance) {
         })),
       });
     } catch (error) {
-      request.log.error({ error }, 'failed to list agents');
+      request.log.error({ err: error instanceof Error ? { message: error.message, stack: error.stack } : error }, 'failed to list agents');
       return sendError(reply, 500, 'internal_error', 'Failed to list agents');
     }
   });
