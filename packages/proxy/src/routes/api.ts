@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { and, count, eq, ne } from 'drizzle-orm';
 import { z } from 'zod';
+import { OpenClawClient } from '../openclaw/client.js';
 import { agents, customers, widgetEmbeds, widgetSessions } from '../db/schema.js';
 import { invalidateEmbedTokenCache } from '../ws/handler.js';
 
@@ -52,14 +53,6 @@ const createViaMetaBodySchema = z.object({
   ),
   sessionId: z.string().min(1).optional(),
 });
-
-const metaCreateStageBySessionId = new Map<string, number>();
-const metaStagePrompts = [
-  'Great — tell me about your website and product.',
-  'Nice. What API endpoints, auth, or data sources should the agent use?',
-  'Got it. What personality and tone should the assistant have?',
-  "Perfect. Reply with any final tweaks, or type 'create' to build your agent.",
-] as const;
 
 function sendError(
   reply: FastifyReply,
@@ -147,50 +140,6 @@ async function ensureCustomer(app: FastifyInstance, customerId: string) {
     .onConflictDoNothing();
 }
 
-function normalizeUrlFromText(input: string): string | undefined {
-  const urlMatch = input.match(/https?:\/\/[^\s)'"`]+/i);
-  if (!urlMatch) return undefined;
-
-  const value = urlMatch[0].replace(/[.,;!?]+$/, '');
-  return value || undefined;
-}
-
-function toTitleCase(input: string): string {
-  return input
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1).toLowerCase())
-    .join(' ');
-}
-
-function deriveNameFromMessages(messages: string[], fallbackUrl?: string): string {
-  const firstMessage = messages[0]?.trim();
-  if (firstMessage) {
-    const base = firstMessage
-      .replace(/\b(create|build|make|an?|assistant|agent|chatbot|please)\b/gi, ' ')
-      .replace(/https?:\/\/[^\s)'"`]+/gi, ' ')
-      .replace(/[^a-zA-Z0-9\s-]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (base) {
-      return toTitleCase(base.split(' ').slice(0, 4).join(' '));
-    }
-  }
-
-  if (fallbackUrl) {
-    const hostMatch = fallbackUrl.match(/^https?:\/\/(?:www\.)?([^/:?#]+)/i);
-    const host = hostMatch?.[1];
-    if (host) {
-      const websiteName = host.split('.')[0];
-      if (websiteName) {
-        return `${toTitleCase(websiteName)} Agent`;
-      }
-    }
-  }
-
-  return 'My Agent';
-}
-
 export function registerApiRoutes(app: FastifyInstance) {
   app.post('/api/internal/agents', async (request, reply) => {
     if (!isLocalhost(request)) {
@@ -263,83 +212,65 @@ export function registerApiRoutes(app: FastifyInstance) {
     if (!body) return;
 
     const sessionId = body.sessionId?.trim() || randomUUID();
-    const userMessages = body.messages
+    const isNewSession = !body.sessionId?.trim();
+    const latestUserMessage = body.messages
       .filter((message) => message.role.toLowerCase() === 'user')
       .map((message) => message.content.trim())
-      .filter((message) => message.length > 0);
-    const latestUserMessage = userMessages.at(-1) ?? '';
-    const shouldCreate = /\bcreate\b/i.test(latestUserMessage);
+      .filter((message) => message.length > 0)
+      .at(-1) ?? '';
 
-    if (!shouldCreate) {
-      const stage = metaCreateStageBySessionId.get(sessionId) ?? 0;
-      metaCreateStageBySessionId.set(sessionId, stage + 1);
-      const response = metaStagePrompts[Math.min(stage, metaStagePrompts.length - 1)];
+    const domain = (process.env.AUTH_URL || 'https://dev.lamoom.com').replace(/\/+$/, '');
+    const messageForAgent = isNewSession
+      ? `[Lamoom Platform — Agent Creation Session]
+Customer ID: ${query.customerId}
+Platform domain: ${domain}
+
+Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'}`
+      : latestUserMessage;
+
+    if (!messageForAgent.trim()) {
+      return sendError(reply, 400, 'empty_message', 'Message content is required');
+    }
+
+    try {
+      const openclawClient = new OpenClawClient();
+      const agentResponse = await openclawClient.sendMessage({
+        message: messageForAgent,
+        agentId: 'meta',
+        sessionKey: `admin:${query.customerId}:${sessionId}`,
+        name: 'agent-builder',
+      });
+
+      if (!agentResponse.success) {
+        request.log.error({ error: agentResponse.error }, 'meta-agent returned error');
+        return sendError(
+          reply,
+          502,
+          'meta_error',
+          agentResponse.error || 'Agent builder returned an error',
+        );
+      }
+
+      const responseText = agentResponse.response ?? '';
+      const embedCode
+        = responseText.match(/<script\s[^>]*data-agent-token="[^"]*"[^>]*><\/script>/i)?.[0] ?? '';
 
       return reply.send({
         data: {
-          response,
+          response: responseText,
           sessionId,
           agent: null,
-          embedCode: '',
-        },
-      });
-    }
-
-    const aggregateMessage = userMessages.join('\n').trim();
-    const websiteUrl = normalizeUrlFromText(aggregateMessage);
-    const name = deriveNameFromMessages(userMessages, websiteUrl);
-    const description = aggregateMessage || 'Agent created from metadata conversation.';
-
-    try {
-      await ensureCustomer(app, query.customerId);
-
-      const createdAgentRows = await app.db
-        .insert(agents)
-        .values({
-          customerId: query.customerId,
-          openclawAgentId: `meta-${randomUUID()}`,
-          name,
-          websiteUrl,
-          description,
-          status: 'active',
-          widgetConfig: {},
-          updatedAt: new Date(),
-        })
-        .returning();
-
-      const createdAgent = createdAgentRows[0];
-      if (!createdAgent) {
-        return sendError(reply, 500, 'agent_create_failed', 'Failed to create agent');
-      }
-
-      const embedToken = randomUUID();
-      await app.db
-        .insert(widgetEmbeds)
-        .values({
-          agentId: createdAgent.id,
-          embedToken,
-        })
-        .returning();
-
-      const host = (process.env.AUTH_URL || 'https://78.47.152.177').replace(/\/+$/, '');
-      const embedCode = `<script src="${host}/widget.js" data-token="${embedToken}"></script>`;
-      metaCreateStageBySessionId.delete(sessionId);
-
-      return reply.status(201).send({
-        data: {
-          response: `Great, your agent "${createdAgent.name}" is ready.`,
-          sessionId,
-          agent: {
-            ...createdAgent,
-            embedToken,
-            embedCode,
-          },
           embedCode,
         },
       });
     } catch (error) {
-      request.log.error({ error }, 'failed to create agent via meta route');
-      return sendError(reply, 500, 'internal_error', 'Failed to create agent via meta route');
+      request.log.error({ error }, 'OpenClaw meta-agent unreachable');
+      return sendError(
+        reply,
+        503,
+        'meta_unavailable',
+        'Agent builder service is temporarily unavailable. Please try again.',
+      );
     }
   });
 

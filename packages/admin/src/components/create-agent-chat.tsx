@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import { Bot, User, SendHorizontal, Copy, Check } from "lucide-react";
 import { createAgentViaMetaAgent, type MetaAgentMessage } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -10,93 +10,99 @@ import { Separator } from "@/components/ui/separator";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-const STAGE_PROMPTS = [
-  "Great — tell me about your website and product.",
-  "Nice. What API endpoints, auth, or data sources should the agent use?",
-  "Got it. What personality and tone should the assistant have?",
-  "Perfect. Reply with any final tweaks, or type 'create' to build your agent.",
-] as const;
-
-const systemPrompt: MetaAgentMessage = {
-  role: "system",
-  content:
-    "You are helping create a website chat agent. Progress through website/product, API context, personality, then confirm/create. Keep responses short and actionable.",
-};
-
 export function CreateAgentChat({ customerId }: { customerId?: string }) {
-  const [messages, setMessages] = useState<MetaAgentMessage[]>([
-    systemPrompt,
-    { role: "assistant", content: STAGE_PROMPTS[0] },
-  ]);
-  const [stage, setStage] = useState(0);
+  const [messages, setMessages] = useState<MetaAgentMessage[]>([]);
   const [input, setInput] = useState("");
   const [sessionId, setSessionId] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
   const [embedCode, setEmbedCode] = useState("");
   const [copied, setCopied] = useState(false);
+  const [initError, setInitError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
-
-  const visibleMessages = useMemo(
-    () => messages.filter((message) => message.role !== "system"),
-    [messages],
-  );
+  const initRef = useRef(false);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [visibleMessages, loading]);
+  }, [messages, loading]);
 
-  const onSend = async () => {
+  // On mount: request meta-agent greeting
+  useEffect(() => {
+    if (initRef.current) return;
+    initRef.current = true;
+
+    const initSession = async () => {
+      setLoading(true);
+      try {
+        const result = await createAgentViaMetaAgent([], undefined, customerId);
+        const greeting = result.response ?? result.message ?? "";
+        const nextSessionId = result.sessionId ?? result.session?.id;
+
+        if (greeting) {
+          setMessages([{ role: "assistant", content: greeting }]);
+        }
+        setSessionId(nextSessionId);
+        setInitError("");
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : "Failed to connect to agent builder";
+        setInitError(msg);
+        setMessages([{ role: "assistant", content: `⚠️ ${msg}. Please refresh to try again.` }]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void initSession();
+  }, [customerId]);
+
+  const onSend = useCallback(async () => {
     const text = input.trim();
-    if (!text || loading) {
-      return;
-    }
+    if (!text || loading) return;
 
     setCopied(false);
 
     const userMessage: MetaAgentMessage = { role: "user", content: text };
-    const nextMessages = [...messages, userMessage];
-
-    setMessages(nextMessages);
+    setMessages((prev) => [...prev, userMessage]);
     setInput("");
     setLoading(true);
 
     try {
-      const result = await createAgentViaMetaAgent(nextMessages, sessionId, customerId);
-      const assistantReply = result.response ?? result.message;
+      // Send only the latest user message — OpenClaw maintains session state
+      const result = await createAgentViaMetaAgent(
+        [userMessage],
+        sessionId,
+        customerId,
+      );
+
+      const assistantReply = result.response ?? result.message ?? "";
       const nextSessionId = result.sessionId ?? result.session?.id ?? sessionId;
       const nextEmbedCode = result.embedCode ?? result.agent?.embedCode ?? "";
 
-      const updatedMessages = [...nextMessages];
+      // Also detect embed snippet in reply text (matches data-agent-token attribute)
+      const embedInReply = assistantReply.match(/<script[^>]*data-agent-token[^>]*><\/script>/)?.[0];
 
       if (assistantReply) {
-        updatedMessages.push({ role: "assistant", content: assistantReply });
+        setMessages((prev) => [...prev, { role: "assistant", content: assistantReply }]);
       }
 
       if (nextEmbedCode) {
         setEmbedCode(nextEmbedCode);
-      } else if (stage < STAGE_PROMPTS.length - 1) {
-        const nextStage = stage + 1;
-        const nextPrompt = STAGE_PROMPTS[nextStage];
-        setStage(nextStage);
-        if (nextPrompt) {
-          updatedMessages.push({ role: "assistant", content: nextPrompt });
-        }
+      } else if (embedInReply) {
+        setEmbedCode(embedInReply);
       }
 
       setSessionId(nextSessionId);
-      setMessages(updatedMessages);
     } catch (error) {
-      setMessages((previous) => [
-        ...previous,
+      setMessages((prev) => [
+        ...prev,
         {
           role: "assistant",
-          content: error instanceof Error ? error.message : "Failed to create agent.",
+          content: error instanceof Error ? error.message : "Something went wrong. Please try again.",
         },
       ]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [input, loading, sessionId, customerId]);
 
   const onCopyEmbedCode = async () => {
     if (!embedCode) {
@@ -116,7 +122,7 @@ export function CreateAgentChat({ customerId }: { customerId?: string }) {
       {/* Message list */}
       <ScrollArea className="flex-1 p-4">
         <div className="space-y-4 pb-2">
-          {visibleMessages.map((message, index) => {
+          {messages.map((message, index) => {
             const isUser = message.role === "user";
             return (
               <div
