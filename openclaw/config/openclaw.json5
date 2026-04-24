@@ -40,7 +40,7 @@
     token: "${OPENCLAW_HOOKS_TOKEN}",
     path: "/hooks",
     allowRequestSessionKey: true,
-    allowedSessionKeyPrefixes: ["widget:", "admin:"],
+    allowedSessionKeyPrefixes: ["widget:", "admin:", "hook:"],
     defaultSessionKey: "hook:ingress",
     mappings: [
       {
