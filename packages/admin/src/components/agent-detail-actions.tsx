@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { Copy, Check, RefreshCw } from "lucide-react";
 import { regenerateToken } from "@/lib/api";
 import { useToast } from "@/components/toast";
+import { Button } from "@/components/ui/button";
 
 interface AgentDetailActionsProps {
   agentId: string;
@@ -48,24 +50,30 @@ export function AgentDetailActions({ agentId, embedCode: initialEmbedCode, custo
   };
 
   return (
-    <div className="mt-4 space-y-3">
-      <pre className="overflow-x-auto rounded-lg bg-gray-900 p-4 text-xs text-green-400">
-        <code>{embedCode || "No embed code available."}</code>
-      </pre>
+    <div className="space-y-3">
+      <div className="overflow-x-auto rounded-lg bg-zinc-900 p-4">
+        <code className="text-emerald-400 font-mono text-sm whitespace-pre">
+          {embedCode || "No embed code available."}
+        </code>
+      </div>
       <div className="flex flex-wrap gap-2">
-        <button
-          onClick={handleCopy}
-          className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-        >
-          {copied ? "Copied!" : "Copy Code"}
-        </button>
-        <button
-          onClick={handleRegenerate}
-          disabled={regenerating}
-          className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-        >
+        <Button variant="default" size="sm" onClick={handleCopy}>
+          {copied ? (
+            <>
+              <Check className="mr-2 h-4 w-4" />
+              Copied!
+            </>
+          ) : (
+            <>
+              <Copy className="mr-2 h-4 w-4" />
+              Copy Code
+            </>
+          )}
+        </Button>
+        <Button variant="outline" size="sm" onClick={handleRegenerate} disabled={regenerating}>
+          <RefreshCw className={`mr-2 h-4 w-4 ${regenerating ? "animate-spin" : ""}`} />
           {regenerating ? "Regenerating…" : "Regenerate Token"}
-        </button>
+        </Button>
       </div>
     </div>
   );

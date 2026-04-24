@@ -3,16 +3,13 @@ import { getAgent } from "@/lib/api";
 import { normalizeCustomerIdToUuid } from "@/lib/customer-id";
 import { redirect } from "next/navigation";
 import { AgentDetailActions } from "@/components/agent-detail-actions";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 interface Props {
   params: Promise<{ id: string }>;
 }
-
-const statusColors: Record<string, string> = {
-  active: "bg-green-100 text-green-800",
-  paused: "bg-yellow-100 text-yellow-800",
-  deleted: "bg-red-100 text-red-800",
-};
 
 export default async function AgentDetailPage({ params }: Props) {
   const session = await auth();
@@ -24,9 +21,11 @@ export default async function AgentDetailPage({ params }: Props) {
 
   if (!agent) {
     return (
-      <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-        <p className="text-gray-500">Agent not found.</p>
-      </div>
+      <Card>
+        <CardContent className="pt-6">
+          <p className="text-muted-foreground">Agent not found.</p>
+        </CardContent>
+      </Card>
     );
   }
 
@@ -39,72 +38,85 @@ export default async function AgentDetailPage({ params }: Props) {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold text-gray-900">{agent.name ?? "Unnamed Agent"}</h1>
-            {agent.websiteUrl && (
-              <a
-                href={agent.websiteUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-1 text-sm text-indigo-600 hover:underline"
-              >
-                {agent.websiteUrl}
-              </a>
-            )}
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <CardTitle className="text-2xl">{agent.name ?? "Unnamed Agent"}</CardTitle>
+              {agent.websiteUrl && (
+                <a
+                  href={agent.websiteUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-1 inline-block text-sm text-primary hover:underline"
+                >
+                  {agent.websiteUrl}
+                </a>
+              )}
+            </div>
+            <Badge
+              variant={agent.status === "active" ? "default" : agent.status === "deleted" ? "destructive" : "secondary"}
+              className={cn("capitalize", agent.status === "active" && "bg-green-600 hover:bg-green-700 text-white")}
+            >
+              {agent.status ?? "unknown"}
+            </Badge>
           </div>
-          <span
-            className={`rounded-full px-3 py-1 text-sm font-medium capitalize ${
-              statusColors[agent.status ?? ""] ?? "bg-gray-100 text-gray-600"
-            }`}
-          >
-            {agent.status ?? "unknown"}
-          </span>
-        </div>
-        {agent.createdAt && (
-          <p className="mt-2 text-xs text-gray-400">
-            Created: {new Date(agent.createdAt).toLocaleString()}
-          </p>
-        )}
-      </div>
+          {agent.createdAt && (
+            <CardDescription>
+              Created: {new Date(agent.createdAt).toLocaleString()}
+            </CardDescription>
+          )}
+        </CardHeader>
+      </Card>
 
       {/* Embed code */}
-      <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-gray-900">Embed Code</h2>
-        <p className="mt-1 text-sm text-gray-500">Add this snippet to your website.</p>
-        <AgentDetailActions agentId={agent.id} embedCode={embedCode} customerId={customerId} />
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Embed Code</CardTitle>
+          <CardDescription>Add this snippet to your website.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <AgentDetailActions agentId={agent.id} embedCode={embedCode} customerId={customerId} />
+        </CardContent>
+      </Card>
 
       {/* Widget preview */}
       {agent.widgetPreviewUrl && (
-        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-gray-900">Widget Preview</h2>
-          <iframe
-            src={agent.widgetPreviewUrl}
-            className="mt-4 h-96 w-full rounded-lg border border-gray-200"
-            title="Widget Preview"
-          />
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Widget Preview</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <iframe
+              src={agent.widgetPreviewUrl}
+              className="h-96 w-full rounded-lg border border-border"
+              title="Widget Preview"
+            />
+          </CardContent>
+        </Card>
       )}
 
       {/* Recent sessions */}
       {agent.recentSessions && agent.recentSessions.length > 0 && (
-        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-gray-900">Recent Sessions</h2>
-          <div className="mt-4 divide-y divide-gray-100">
-            {agent.recentSessions.map((session) => (
-              <div key={session.id} className="flex items-center justify-between py-3">
-                <span className="text-sm text-gray-700">{session.visitorId ?? session.id}</span>
-                {session.lastActive && (
-                  <span className="text-xs text-gray-400">
-                    {new Date(session.lastActive).toLocaleString()}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Recent Sessions</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="divide-y divide-border">
+              {agent.recentSessions.map((s) => (
+                <div key={s.id} className="flex items-center justify-between py-3">
+                  <span className="text-sm text-foreground">{s.visitorId ?? s.id}</span>
+                  {s.lastActive && (
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(s.lastActive).toLocaleString()}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

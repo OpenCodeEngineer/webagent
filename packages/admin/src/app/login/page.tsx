@@ -1,109 +1,109 @@
-'use client';
+"use client";
 
-import { signIn } from 'next-auth/react';
-import { useState } from 'react';
+import { signIn } from "next-auth/react";
+import { useState } from "react";
+import { Bot, GitBranch, Globe } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setError('');
-    
-    const result = await signIn('credentials', {
+    setError("");
+    const result = await signIn("credentials", {
       email,
       password,
       redirect: false,
     });
-    
     if (result?.error) {
-      setError('Invalid email or password');
+      setError("Invalid email or password");
     } else {
-      window.location.href = '/dashboard';
+      window.location.href = "/dashboard";
     }
     setLoading(false);
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="max-w-md w-full space-y-8 p-8 bg-white rounded-xl shadow-lg">
-        <div className="text-center">
-          <h1 className="text-3xl font-bold text-gray-900">Web Agent</h1>
-          <p className="mt-2 text-gray-600">Sign in to manage your AI agents</p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {error && (
-            <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm">
-              {error}
+    <div className="flex min-h-screen items-center justify-center bg-background">
+      <Card className="w-full max-w-md">
+        <CardHeader className="space-y-3 text-center pb-2">
+          <div className="flex items-center justify-center gap-2">
+            <Bot className="h-7 w-7 text-primary" />
+            <span className="text-2xl font-bold">Lamoom</span>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Sign in to manage your AI agents
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                {error}
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                required
+              />
             </div>
-          )}
-          
-          <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              required
-            />
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+              />
+            </div>
+            <Button type="submit" className="w-full" disabled={loading}>
+              {loading ? "Signing in…" : "Sign in"}
+            </Button>
+          </form>
+
+          <div className="flex items-center gap-3">
+            <Separator className="flex-1" />
+            <span className="text-xs text-muted-foreground">or continue with</span>
+            <Separator className="flex-1" />
           </div>
 
-          <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              required
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <Button
+              variant="outline"
+              onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
+              className="w-full"
+            >
+              <Globe className="mr-2 h-4 w-4" />
+              Google
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => signIn("github", { callbackUrl: "/dashboard" })}
+              className="w-full"
+            >
+              <GitBranch className="mr-2 h-4 w-4" />
+              GitHub
+            </Button>
           </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
-          >
-            {loading ? 'Signing in...' : 'Sign in'}
-          </button>
-        </form>
-
-        <div className="relative">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-gray-300" />
-          </div>
-          <div className="relative flex justify-center text-sm">
-            <span className="px-2 bg-white text-gray-500">Or continue with</span>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            onClick={() => signIn('google', { callbackUrl: '/dashboard' })}
-            className="flex items-center justify-center px-4 py-2.5 border border-gray-300 rounded-lg shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-          >
-            Google
-          </button>
-          <button
-            onClick={() => signIn('github', { callbackUrl: '/dashboard' })}
-            className="flex items-center justify-center px-4 py-2.5 border border-gray-300 rounded-lg shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-          >
-            GitHub
-          </button>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
