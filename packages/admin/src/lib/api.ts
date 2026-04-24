@@ -287,9 +287,10 @@ export async function getAgent(id: string, customerId?: string): Promise<Agent |
 export async function createAgentViaMetaAgent(
   messages: MetaAgentMessage[],
   sessionId?: string,
+  customerId?: string,
 ): Promise<CreateViaMetaAgentResponse> {
   const payload = await request<ApiEnvelope<unknown> | unknown>(
-    "/api/agents/create-via-meta",
+    withCustomerId("/api/agents/create-via-meta", customerId),
     {
       method: "POST",
       body: JSON.stringify({ messages, sessionId } satisfies CreateViaMetaAgentRequest),

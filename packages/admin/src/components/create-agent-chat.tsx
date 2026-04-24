@@ -17,7 +17,7 @@ const systemPrompt: MetaAgentMessage = {
     "You are helping create a website chat agent. Progress through website/product, API context, personality, then confirm/create. Keep responses short and actionable.",
 };
 
-export function CreateAgentChat() {
+export function CreateAgentChat({ customerId }: { customerId?: string }) {
   const [messages, setMessages] = useState<MetaAgentMessage[]>([
     systemPrompt,
     { role: "assistant", content: STAGE_PROMPTS[0] },
@@ -50,7 +50,7 @@ export function CreateAgentChat() {
     setLoading(true);
 
     try {
-      const result = await createAgentViaMetaAgent(nextMessages, sessionId);
+      const result = await createAgentViaMetaAgent(nextMessages, sessionId, customerId);
       const assistantReply = result.response ?? result.message;
       const nextSessionId = result.sessionId ?? result.session?.id ?? sessionId;
       const nextEmbedCode = result.embedCode ?? result.agent?.embedCode ?? "";
