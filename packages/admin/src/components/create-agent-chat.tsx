@@ -1,8 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
-
+import { useMemo, useRef, useEffect, useState } from "react";
+import { Bot, User, SendHorizontal, Copy, Check } from "lucide-react";
 import { createAgentViaMetaAgent, type MetaAgentMessage } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 const STAGE_PROMPTS = [
   "Great — tell me about your website and product.",
@@ -28,11 +34,16 @@ export function CreateAgentChat({ customerId }: { customerId?: string }) {
   const [loading, setLoading] = useState(false);
   const [embedCode, setEmbedCode] = useState("");
   const [copied, setCopied] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   const visibleMessages = useMemo(
     () => messages.filter((message) => message.role !== "system"),
     [messages],
   );
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [visibleMessages, loading]);
 
   const onSend = async () => {
     const text = input.trim();
@@ -101,76 +112,115 @@ export function CreateAgentChat({ customerId }: { customerId?: string }) {
   };
 
   return (
-    <div className="mx-auto max-w-3xl rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-      <div className="max-h-[460px] space-y-3 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-4">
-        {visibleMessages.map((message, index) => {
-          const isUser = message.role === "user";
-
-          return (
-            <div key={`${message.role}-${index}`} className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+    <div className="flex flex-1 flex-col rounded-xl border border-border bg-card overflow-hidden">
+      {/* Message list */}
+      <ScrollArea className="flex-1 p-4">
+        <div className="space-y-4 pb-2">
+          {visibleMessages.map((message, index) => {
+            const isUser = message.role === "user";
+            return (
               <div
-                className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm ${
-                  isUser ? "bg-indigo-600 text-white" : "border border-gray-200 bg-white text-gray-800"
-                }`}
+                key={`${message.role}-${index}`}
+                className={cn("flex items-start gap-3", isUser && "flex-row-reverse")}
               >
-                {message.content}
+                {/* Avatar */}
+                <div className={cn(
+                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
+                  isUser ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+                )}>
+                  {isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
+                </div>
+                {/* Bubble */}
+                <div
+                  className={cn(
+                    "max-w-[80%] rounded-lg px-4 py-3 text-sm",
+                    isUser
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted/50 border border-border text-foreground"
+                  )}
+                >
+                  {message.content}
+                </div>
+              </div>
+            );
+          })}
+
+          {loading && (
+            <div className="flex items-start gap-3">
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                <Bot className="h-4 w-4" />
+              </div>
+              <div className="rounded-lg border border-border bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
+                <span className="inline-flex gap-1">
+                  <span className="animate-bounce" style={{ animationDelay: "0ms" }}>·</span>
+                  <span className="animate-bounce" style={{ animationDelay: "150ms" }}>·</span>
+                  <span className="animate-bounce" style={{ animationDelay: "300ms" }}>·</span>
+                </span>
               </div>
             </div>
-          );
-        })}
+          )}
 
-        {loading ? (
-          <div className="flex justify-start">
-            <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-500">
-              Thinking...
-            </div>
-          </div>
-        ) : null}
-      </div>
-
-      {embedCode ? (
-        <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
-          <div className="mb-2 flex items-center justify-between">
-            <p className="text-sm font-medium text-emerald-900">Embed Snippet</p>
-            <button
-              type="button"
-              onClick={onCopyEmbedCode}
-              className="rounded-md border border-emerald-300 bg-white px-3 py-1 text-xs font-medium text-emerald-800 hover:bg-emerald-100"
-            >
-              {copied ? "Copied" : "Copy"}
-            </button>
-          </div>
-          <pre className="overflow-x-auto rounded-md bg-gray-900 p-3 text-xs text-emerald-100">
-            <code>{embedCode}</code>
-          </pre>
+          <div ref={bottomRef} />
         </div>
-      ) : null}
+      </ScrollArea>
 
-      <div className="mt-4 flex gap-2">
-        <input
-          type="text"
+      {/* Embed code result */}
+      {embedCode && (
+        <div className="px-4 pb-2">
+          <Card>
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm">Embed Snippet</CardTitle>
+                <Button variant="outline" size="sm" onClick={onCopyEmbedCode}>
+                  {copied ? (
+                    <>
+                      <Check className="mr-1.5 h-3.5 w-3.5" />
+                      Copied
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="mr-1.5 h-3.5 w-3.5" />
+                      Copy
+                    </>
+                  )}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto rounded-lg bg-zinc-900 p-3">
+                <code className="text-emerald-400 font-mono text-xs whitespace-pre">{embedCode}</code>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Input area */}
+      <Separator />
+      <div className="flex items-end gap-2 p-4">
+        <Textarea
           value={input}
-          onChange={(event) => setInput(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
               void onSend();
             }
           }}
-          placeholder="Type your message..."
-          className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm"
+          placeholder="Type your message…"
+          className="min-h-[44px] max-h-[120px] flex-1 resize-none rounded-lg"
           disabled={loading}
+          rows={1}
         />
-        <button
+        <Button
           type="button"
-          onClick={() => {
-            void onSend();
-          }}
+          onClick={() => void onSend()}
           disabled={loading || input.trim().length === 0}
-          className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+          size="icon"
+          className="h-11 w-11 shrink-0"
         >
-          Send
-        </button>
+          <SendHorizontal className="h-4 w-4" />
+        </Button>
       </div>
     </div>
   );
