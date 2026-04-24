@@ -1,4 +1,8 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { loadConfig } from '../config.js';
+
+const execFileAsync = promisify(execFile);
 
 interface AgentResponse {
   success: boolean;
@@ -16,37 +20,61 @@ export class OpenClawClient {
     this.token = token || config.openClawHooksToken;
   }
 
-  // Send message to an agent via hooks API
+  /**
+   * Send a message to an agent synchronously via the `openclaw agent` CLI.
+   * The CLI routes through the gateway and waits for the agent's full response.
+   */
   async sendMessage(opts: {
     message: string;
     agentId: string;
     sessionKey?: string;
     name?: string;
+    timeoutSeconds?: number;
   }): Promise<AgentResponse> {
-    const res = await fetch(`${this.baseUrl}/hooks/agent`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        message: opts.message,
-        agentId: opts.agentId,
-        sessionKey: opts.sessionKey,
-        name: opts.name || 'widget-chat',
-        wakeMode: 'now',
-      }),
-    });
+    const args = [
+      'agent',
+      '--agent', opts.agentId,
+      '-m', opts.message,
+      '--json',
+      '--timeout', String(opts.timeoutSeconds ?? 120),
+    ];
 
-    if (!res.ok) {
-      return { success: false, error: `OpenClaw API error: ${res.status} ${res.statusText}` };
+    if (opts.sessionKey) {
+      args.push('--session-id', opts.sessionKey);
     }
 
-    const data = await res.json() as Record<string, unknown>;
-    return { success: true, response: data.response as string || data.text as string || JSON.stringify(data) };
+    try {
+      const { stdout, stderr } = await execFileAsync('openclaw', args, {
+        timeout: (opts.timeoutSeconds ?? 120) * 1000 + 5000,
+        env: process.env,
+        maxBuffer: 2 * 1024 * 1024,
+      });
+
+      if (!stdout.trim()) {
+        const errMsg = stderr.trim() || 'Empty response from agent';
+        return { success: false, error: errMsg };
+      }
+
+      try {
+        const data = JSON.parse(stdout.trim()) as Record<string, unknown>;
+        const text =
+          (typeof data.response === 'string' ? data.response : undefined) ??
+          (typeof data.text === 'string' ? data.text : undefined) ??
+          (typeof data.reply === 'string' ? data.reply : undefined) ??
+          (typeof data.output === 'string' ? data.output : undefined);
+
+        return { success: true, response: text ?? stdout.trim() };
+      } catch {
+        // stdout wasn't JSON — return raw text as the response
+        return { success: true, response: stdout.trim() };
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return { success: false, error: `OpenClaw agent error: ${msg}` };
+    }
   }
 
-  // Wake the main session (for system events)
+  /** Fire-and-forget: enqueue a system event via HTTP hooks API */
   async wake(text: string, mode: 'now' | 'next-heartbeat' = 'now'): Promise<boolean> {
     const res = await fetch(`${this.baseUrl}/hooks/wake`, {
       method: 'POST',
@@ -59,7 +87,6 @@ export class OpenClawClient {
     return res.ok;
   }
 
-  // Health check
   async ping(): Promise<boolean> {
     try {
       const res = await fetch(`${this.baseUrl}/hooks/wake`, {
