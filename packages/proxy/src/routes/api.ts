@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'fs/promises';
+import { readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
+import { homedir } from 'node:os';
+import { execFile } from 'node:child_process';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { and, count, eq, ne } from 'drizzle-orm';
 import { z } from 'zod';
@@ -142,6 +144,60 @@ async function ensureCustomer(app: FastifyInstance, customerId: string) {
     .onConflictDoNothing();
 }
 
+/**
+ * Register a newly created agent in the OpenClaw gateway config (~/.openclaw/openclaw.json)
+ * and restart the gateway so it picks up the new agent.
+ */
+async function registerAgentInOpenClaw(
+  slug: string,
+  name: string,
+  app: FastifyInstance,
+): Promise<void> {
+  const configPath = join(homedir(), '.openclaw', 'openclaw.json');
+  try {
+    const raw = await readFile(configPath, 'utf8');
+    const config = JSON.parse(raw) as {
+      agents?: { list?: Array<{ id: string; [k: string]: unknown }> };
+      [k: string]: unknown;
+    };
+
+    if (!config.agents?.list) {
+      app.log.warn('openclaw.json missing agents.list — skipping registration');
+      return;
+    }
+
+    if (config.agents.list.some((a) => a.id === slug)) {
+      app.log.info({ slug }, 'agent already in openclaw.json — skipping');
+      return;
+    }
+
+    config.agents.list.push({
+      id: slug,
+      name,
+      workspace: `~/openclaw/workspaces/${slug}`,
+      skills: ['website-api'],
+      heartbeat: { every: '30m' },
+    });
+
+    await writeFile(configPath, JSON.stringify(config, null, 2), 'utf8');
+    app.log.info({ slug }, 'registered agent in openclaw.json');
+
+    // Restart the gateway so it picks up the new agent
+    await new Promise<void>((resolve) => {
+      execFile('systemctl', ['restart', 'openclaw-gateway'], { timeout: 15_000 }, (err) => {
+        if (err) {
+          app.log.warn({ err }, 'failed to restart openclaw-gateway');
+        } else {
+          app.log.info('openclaw-gateway restarted after agent registration');
+        }
+        resolve();
+      });
+    });
+  } catch (err) {
+    app.log.warn({ err, configPath }, 'failed to register agent in openclaw config');
+  }
+}
+
 async function detectAgentCreation(
   responseText: string,
   customerId: string,
@@ -219,6 +275,9 @@ async function detectAgentCreation(
 
   const createdAgent = createdAgentRows[0];
   if (!createdAgent) return null;
+
+  // Register agent in OpenClaw gateway config and restart gateway
+  await registerAgentInOpenClaw(config.agentSlug, config.agentName, app);
 
   const embedToken = randomUUID();
   await app.db.insert(widgetEmbeds).values({

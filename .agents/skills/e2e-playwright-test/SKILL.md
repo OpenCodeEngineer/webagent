@@ -83,8 +83,24 @@ curl -sk https://dev.lamoom.com/widget.js → 200, non-empty JS
 3. **CHECK**: Agent shows "active" status
 4. **CHECK**: "View" link works → agent detail page shows embed code
 
-### Phase 5: Widget Chat (if embed token available)
+### Phase 5: Widget Preview Chat (on agent detail page)
 
+1. From Phase 4, you should be on an agent detail page
+2. **CHECK**: "Test Your Widget" section visible on the page
+3. **CHECK**: Widget preview shows "Connected" status (green badge)
+4. **Click** the input field in the widget preview
+5. **Type**: "What products do you have?"
+6. **Press Enter** to send
+7. **CHECK**: User message appears in the widget preview chat
+8. **CHECK**: Typing indicator (·) shows while waiting
+9. **Wait** up to 120s for response
+10. **CHECK**: Bot response appears, is non-empty, and mentions relevant products/services
+11. **CHECK**: No "⚠️ Error" message (this means OpenClaw agent isn't registered)
+12. **SCREENSHOT**: Widget preview with message exchange visible
+
+### Phase 5b: Widget WS Protocol (optional, if Phase 5 fails)
+
+If the widget preview shows an error, debug via WebSocket directly:
 1. From the agent detail page, copy the embed token from the embed code
 2. Use `curl` or Node.js to test WebSocket:
    ```
@@ -95,7 +111,7 @@ curl -sk https://dev.lamoom.com/widget.js → 200, non-empty JS
    Expect: {"type":"message","content":"...","done":true}
    ```
 3. **CHECK**: auth_ok received (widget auth chain works)
-4. **CHECK**: Message response is non-empty and contextual (mentions pets)
+4. **CHECK**: Message response is non-empty and contextual
 
 ## UI/UX Quality Checklist (check on EVERY page)
 
@@ -126,7 +142,7 @@ After running all phases, report a summary table:
 | 2. Chat UI Quality | ✅/❌ | ChatGPT-like, no regressions |
 | 3. Agent Creation | ✅/❌ | full conversation, embed code |
 | 4. Agent Verification | ✅/❌ | appears in dashboard |
-| 5. Widget Chat | ✅/❌ | WS auth + message works |
+| 5. Widget Preview | ✅/❌ | live chat on dashboard works |
 
 UI/UX Issues Found:
 - [list any visual/interaction problems]

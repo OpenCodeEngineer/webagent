@@ -1,6 +1,6 @@
 ---
 name: create-agent
-description: Create and configure a new customer AI agent for the WebAgent platform. Generates workspace files, API skill, OpenClaw config, and embeddable widget code.
+description: Create and configure a new customer AI agent for the WebAgent platform. Generates workspace files, API skill, and embeddable widget code.
 user-invocable: true
 metadata: {"openclaw": {"always": true}}
 ---
@@ -14,7 +14,7 @@ This skill creates a fully configured customer agent for the WebAgent platform w
 - Use only built-in file tools (`read`, `write`, `edit`).
 - For file creation, prefer `write` directly: **`write` creates missing parent directories automatically**.
 
-## 5-Step Flow
+## 4-Step Flow
 
 ### Step 1 — Gather info conversationally and confirm understanding
 Collect and confirm:
@@ -38,19 +38,8 @@ Using templates in `~/openclaw/templates/` as the starting point (these are insi
 
 All files must be filled with customer-provided values (website/product, API details, tone/personality).
 
-### Step 3 — Register agent in OpenClaw config via `read` + `edit`
-1. `read` `~/openclaw/config/openclaw.json5`
-2. `edit` `agents.list` to add:
-   - `id`: `<agentSlug>`
-   - `name`: `<agentName>`
-   - `workspace`: `<workspacePath>`
-   - `skills`: `["website-api"]`
-   - `heartbeat`: `{ every: "30m" }`
-
-Mention to the customer/operator that OpenClaw uses **hybrid hot-reload**, so `agents.*` config updates are picked up without full restart.
-
-### Step 4 — Write agent config file
-After generating workspace files and registering in `openclaw.json5`, `write` a structured JSON file:
+### Step 3 — Write agent config file
+After generating workspace files, `write` a structured JSON file:
 - Path: `<workspacePath>/agent-config.json`
 - Content:
 ```json
@@ -65,7 +54,14 @@ After generating workspace files and registering in `openclaw.json5`, `write` a 
 }
 ```
 
-### Step 5 — Signal completion to proxy
-Include the exact marker `[AGENT_CREATED::<agentSlug>]` somewhere in the response message. The proxy will detect this marker, read the `agent-config.json`, create DB records, generate the embed token, and append the widget embed code to the response.
+### Step 4 — Signal completion to proxy
+Include the exact marker `[AGENT_CREATED::<agentSlug>]` somewhere in the response message. The proxy will:
+1. Read `agent-config.json` from the workspace
+2. Create DB records (agent + embed token)
+3. Register the agent in OpenClaw gateway config
+4. Restart the gateway so it picks up the new agent
+5. Append the widget embed code to the response
 
 Tell the customer: "Your agent has been created! The embed code will appear below."
+
+**Do NOT** attempt to edit `openclaw.json` or `openclaw.json5` — the proxy handles agent registration automatically.
