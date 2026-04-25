@@ -25,15 +25,15 @@ registerHealthRoutes(app);
 registerWidgetRoutes(app);
 registerApiRoutes(app);
 
-app.get(DEFAULT_WS_PATH, { websocket: true }, (connection, request) => {
-  const socket = connection.socket as ManagedSocket;
-  activeSockets.add(socket);
-  socket.on('close', () => {
-    activeSockets.delete(socket);
+app.get(DEFAULT_WS_PATH, { websocket: true }, (socket, request) => {
+  const managed = socket as unknown as ManagedSocket;
+  activeSockets.add(managed);
+  managed.on('close', () => {
+    activeSockets.delete(managed);
   });
 
   const origin = typeof request.headers.origin === 'string' ? request.headers.origin : undefined;
-  handleConnection(connection.socket, { db: app.db, origin });
+  handleConnection(socket as any, { db: app.db, origin });
 });
 
 let shuttingDown = false;
