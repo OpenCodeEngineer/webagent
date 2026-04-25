@@ -19,7 +19,6 @@ jobs:
           host: ${{ secrets.VM_HOST }}
           username: root
           key: ${{ secrets.VM_SSH_KEY }}
-          script_stop: true
           script: |
             set -euo pipefail
             APP_DIR="/opt/webagent"
@@ -45,6 +44,10 @@ jobs:
             sudo -u openclaw bash -c "cd ${APP_DIR} && pnpm --filter @webagent/proxy db:migrate" || true
 
             echo "→ Restarting services..."
+            # Kill stale openclaw process if port is held
+            lsof -ti :18789 2>/dev/null | xargs kill -9 2>/dev/null || true
+            sleep 1
+            systemctl restart openclaw-gateway
             systemctl restart webagent-proxy
             systemctl restart webagent-admin
             sleep 5
@@ -52,6 +55,7 @@ jobs:
             echo "→ Health checks..."
             curl -sf http://127.0.0.1:3001/health || (echo "PROXY HEALTH FAILED" && exit 1)
             curl -sf http://127.0.0.1:3000/ -o /dev/null || (echo "ADMIN HEALTH FAILED" && exit 1)
+            curl -sf http://127.0.0.1:3001/health/openclaw | grep -q '"ok"' || echo "WARNING: OpenClaw gateway not healthy (non-blocking)"
 
             echo "→ Static asset check..."
             CSS_PATH=$(curl -s http://127.0.0.1:3000/login | grep -oE '_next/static/css/[^"]+' | head -1)
