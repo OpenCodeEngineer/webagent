@@ -84,12 +84,13 @@ OpenClaw meta-agent (workspace: openclaw/workspaces/meta/)
   │ 1. Ask about website, API, personality
   │ 2. Generate AGENTS.md, SOUL.md, IDENTITY.md, USER.md, skill
   │ 3. Create workspace dir on filesystem (read/write tools)
-  │ 4. Edit openclaw.json5 to register new agent
-  │ 5. Write agent-config.json to workspace (slug, name, url, api details)
-  │ 6. Respond with "agent ready, slug=<slug>"
+  │ 4. Write agent-config.json to workspace (slug, name, url, api details)
+  │ 5. Emit [AGENT_CREATED::<slug>] marker in response
   ▼
-Proxy detects agent creation in response
+Proxy detects [AGENT_CREATED::<slug>] marker in response
   │ Reads <workspace>/agent-config.json
+  │ Registers agent in ~/.openclaw/openclaw.json
+  │ Restarts openclaw-gateway (systemctl restart)
   │ Creates DB records (agent + widget_embed)
   │ Generates embed token
   │ Appends embed snippet to response
@@ -125,8 +126,10 @@ customer agent. What makes it different is how we configure it:
 | Purpose | Creates other agents | Serves website visitors |
 
 The meta-agent has `sandbox: "off"` because it needs filesystem access to create
-new workspace directories and edit `openclaw.json5`. Customer agents are restricted
-to their own workspace via workspace-scoped tool access.
+new workspace directories. It does NOT edit `openclaw.json` directly — the proxy
+handles agent registration automatically when it detects the `[AGENT_CREATED::]`
+marker. Customer agents are restricted to their own workspace via workspace-scoped
+tool access.
 
 ---
 
@@ -197,7 +200,7 @@ webagent/
 │   │   │   ├── config.ts             Env validation
 │   │   │   ├── db/schema.ts          Drizzle ORM schema (all tables)
 │   │   │   ├── db/client.ts          Neon serverless + Drizzle client factory
-│   │   │   ├── openclaw/client.ts    WS client for OpenClaw gateway protocol
+│   │   │   ├── openclaw/client.ts    CLI wrapper (execFile → openclaw agent -m)
 │   │   │   ├── openclaw/sessions.ts  Session key management
 │   │   │   ├── ws/handler.ts         WebSocket auth + message relay
 │   │   │   ├── routes/health.ts      Health check endpoints
@@ -207,7 +210,7 @@ webagent/
 │   │
 │   ├── admin/        Next.js 15 (App Router) + Tailwind — customer dashboard
 │   │   └── src/
-│   │       ├── lib/auth.ts           NextAuth v5 config (Google, GitHub, Credentials, Email)
+│   │       ├── lib/auth.ts           NextAuth v5 config (Google, GitHub, Credentials)
 │   │       ├── middleware.ts         Route protection (/dashboard/*, /create/*)
 │   │       └── app/
 │   │           ├── login/page.tsx    Login UI
@@ -269,9 +272,11 @@ webagent/
 - Proxy appends embed snippet to the response before sending to customer
 - Meta-agent never needs to POST anywhere — it just writes files and talks
 
-### OpenClaw Config Hot-Reload
-- `hybrid` reload mode: changes to `agents.*` hot-apply without restart
-- When meta-agent adds new agent to openclaw.json5, gateway picks it up automatically
+### OpenClaw Config Registration
+- Proxy writes to `~/.openclaw/openclaw.json` (standard JSON, NOT json5)
+- Gateway is restarted via `systemctl restart openclaw-gateway` after registration
+- Note: design originally planned `hybrid` hot-reload, but gateway requires restart
+  for new agent entries — this is acceptable for MVP scale
 
 ---
 
@@ -489,51 +494,69 @@ openclaw agents list                   # List configured agents
 
 ---
 
-## Production Gaps (updated 2026-04-24)
+## Production Gaps (updated 2026-04-25)
 
 ### ✅ Done & Working
 - Monorepo scaffold (pnpm + Turborepo, all packages build)
 - Proxy: Fastify boot, WS handler with auth protocol, health routes, widget serving
 - Proxy: OpenClaw CLI integration works (sync responses, AI liveness confirmed)
-- DB: Complete Drizzle schema + migrations
-- Admin: NextAuth v5 config, login page, /create chat UI, middleware
+- Proxy: Agent creation detection (`[AGENT_CREATED::]` marker → DB + embed token + embed snippet)
+- Proxy: Auto-registers new agents in `~/.openclaw/openclaw.json` + restarts gateway
+- DB: Neon PostgreSQL + complete Drizzle schema + migrations, wired via Fastify plugin
+- DB: Embed token generation, validation, and regeneration endpoint
+- Admin: NextAuth v5 config, login page, /create chat UI (LibreGPT dark theme), middleware
+- Admin: Dashboard with agent list, agent detail page, live widget preview
+- Widget: Vite IIFE bundle + esbuild standalone, served from proxy at `/widget.js`
 - Shared: Types, protocol, constants (complete)
-- OpenClaw: Multi-agent config, meta-agent workspace, create-agent skill doc
+- OpenClaw: Multi-agent config, meta-agent workspace + create-agent skill (4-step flow)
+- OpenClaw: Workspace templates populated (AGENTS, SOUL, IDENTITY, USER, website-api skill)
 - Infra: Full setup.sh, production nginx (rate limiting, SSL), systemd units
-- E2E: AI liveness test (7/7 passing), visual demo recorder
+- CORS: Widget embed origin validation enforced in WS auth handshake
+- Graceful shutdown: SIGTERM/SIGINT handlers with WS drain
+- E2E: Full agent creation flow verified (BookNest: create → register → chat → widget preview)
 
-### 🔴 Must Fix — Architecture (blocking)
+### 🔴 Must Fix — Architecture
 
 1. **Rewrite OpenClaw client: CLI → WS** — Current `openclaw/client.ts` spawns
    child processes via `execFile`. Must rewrite to use OpenClaw gateway WS protocol
    (single persistent connection, multiplexed by session ID, streaming support).
    Same WS connection serves both admin and widget traffic.
+   **Impact:** No response streaming (all-or-nothing), process-per-message overhead,
+   no connection reuse. This is the #1 scalability blocker.
 
-2. **Proxy-side agent creation** — When meta-agent responds with agent config,
-   proxy must detect it, read `agent-config.json` from workspace, create DB records,
-   generate embed token, and append widget snippet to response. Remove Step 4 from
-   create-agent skill (no more callback to internal API).
+2. **Auth is a hardcoded stub** — Credentials provider in `auth.ts` accepts ANY
+   email/password, returns `{ id: "1", name: "Test User" }`. No password hashing,
+   no DB lookup, no real user creation. NextAuth Drizzle adapter is in package.json
+   but never wired. All customers share the same fake user ID.
 
-3. **Build widget.js** — Embeddable chat widget: chat bubble, WS client, auth
-   handshake, message display, streaming. Served from proxy at `/widget.js`.
-   Must work cross-origin on any customer website.
+3. **WS protocol field mismatch** — Design says `{ type: "auth", token }`, shared
+   protocol uses `agentToken`, widget uses `token`. Handler has a band-aid
+   `extractAuthToken()` checking both. Should standardize on one field name.
 
-4. **Create workspace templates** — `~/openclaw/templates/` is empty. Need
-   AGENTS.md, SOUL.md, IDENTITY.md, USER.md, skills/website-api/SKILL.md base files.
+### 🟡 Should Fix — Quality
 
-### 🟡 Must Fix — Integration
+4. **Audit log table is dead code** — Schema defines `audit_log` in `db/schema.ts`
+   but no route or handler ever writes to it. Need to log: agent creation, deletion,
+   status changes, embed token regeneration, login events.
 
-5. **DB not wired to proxy runtime** — `createDb()` exists but handlers use
-   in-memory Maps. Wire Drizzle into Fastify as decorator/plugin.
+5. **No Email/magic-link auth provider** — Design lists 4 providers (Google, GitHub,
+   Credentials, Email). Only 3 are implemented. `EMAIL_SERVER`/`EMAIL_FROM` env vars
+   have no consumer.
 
-6. **Auth has no DB persistence** — Credentials provider returns hardcoded user.
+6. **Create-via-meta uses REST, not WS** — Admin chat sends `POST /api/agents/create-via-meta`
+   (REST) which calls CLI. Design intended WS → proxy WS → OpenClaw gateway WS (streaming).
+   Tied to Gap #1 (CLI→WS rewrite).
 
-7. **No embed token generation/validation** — Schema exists, no code creates tokens.
-
-8. **No CORS/origin validation** — `allowedOrigins` in schema, never enforced.
+7. **Agent registration requires `systemctl restart`** — Proxy calls
+   `systemctl restart openclaw-gateway` which requires root. If proxy ever runs as
+   non-root, this breaks. Should investigate hot-reload or a sudoers entry.
 
 ### 🟢 Nice to Have
 
-9. **Let's Encrypt** — Replace self-signed cert on dev.lamoom.com.
-10. **Graceful shutdown** — SIGTERM handler, WS drain.
-11. **E2E test: full flow** — Drive conversation to widget generation, verify DB + WS.
+8. **Gateway config file divergence** — Repo has `openclaw/config/openclaw.json5` (JSON5),
+   but gateway reads `~/.openclaw/openclaw.json` (JSON). These drift apart as agents
+   are created. Consider removing the json5 or syncing automatically.
+9. **Widget preview React input fragility** — Automated testing must use native value
+   setter hack for React controlled inputs. Consider adding `data-testid` attributes.
+10. **Agent health check** — No endpoint verifies all registered agents are reachable
+    via OpenClaw. Would catch config drift.
