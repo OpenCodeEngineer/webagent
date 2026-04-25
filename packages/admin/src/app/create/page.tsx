@@ -8,7 +8,7 @@ export default async function CreatePage() {
   if (!session?.user) redirect("/login");
   const customerId = normalizeCustomerIdToUuid(session.user.id, session.user.email);
   return (
-    <div className="flex h-screen flex-col bg-background">
+    <div className="h-screen bg-[#171717] overflow-hidden">
       <CreateAgentChat customerId={customerId} />
     </div>
   );

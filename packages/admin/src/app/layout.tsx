@@ -18,7 +18,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={cn("dark font-sans", geist.variable)}>
-      <body className="bg-background text-foreground antialiased">
+      <body className="bg-[#171717] text-foreground antialiased">
         <ToastProvider>{children}</ToastProvider>
       </body>
     </html>

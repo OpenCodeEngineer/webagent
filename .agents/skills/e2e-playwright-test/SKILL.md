@@ -1,159 +1,145 @@
 ---
 name: e2e-test
 description: >
-  Run end-to-end tests against the live Lamoom platform. Triggers on "run tests",
+  Browser-based E2E QA for the Lamoom platform. Triggers on "run tests",
   "run e2e", "test the system", "test end to end", "verify the flow", "smoke test",
-  "does it work", "is the bot real", "record demo", "show me the flow".
-  Tests verify AI liveness (not hardcoded), response variability, contextual
-  relevance, session memory, and API structure. Can record a visual demo GIF.
+  "does it work", "qa check", "test ui", "check the ui".
+  Uses vibebrowser/playwright MCP tools to test the real product in a real browser.
+  Verifies UI/UX quality, full agent creation flow, and widget chat.
 ---
 
-# E2E Test Skill
+# E2E QA Test Skill — Browser-Based
 
-Three tools: **API liveness tests** (fast, headless), **visual demo recorder** (browser + GIF), and **full E2E flow test** (protocol-level, tests the complete product lifecycle).
+Test the Lamoom platform end-to-end using browser tools. NOT scripts — use vibebrowser or playwright MCP to interact with the real UI.
 
 ## When to Run
 
-- After ANY change to proxy routes, OpenClaw client, or meta-agent config
-- After deployments to the VM
-- When asked to "test", "verify", or "check if it works"
-- When asked to "record demo", "show me the flow", or "make a GIF"
-- As a gate before creating PRs
+- After ANY deployment to the VM
+- After UI/UX changes
+- After changes to proxy, OpenClaw client, meta-agent config, or widget
+- When asked to "test", "verify", "qa", or "check if it works"
+- As a gate before marking work complete
 
-## 1. AI Liveness Tests (API-level)
+## Test Protocol
 
-Fast headless tests — 7 checks against the proxy API, no browser needed.
+Run these checks IN ORDER using vibebrowser tools. Take a screenshot after each phase. Report PASS/FAIL for each check.
 
-```bash
-chmod +x .agents/skills/e2e-playwright-test/scripts/test-ai-liveness.sh
-source .env 2>/dev/null || true
-.agents/skills/e2e-playwright-test/scripts/test-ai-liveness.sh \
-  "${PROXY_URL:-https://dev.lamoom.com}" \
-  "${PROXY_API_TOKEN:-${NEXT_PUBLIC_PROXY_API_TOKEN}}"
+### Phase 0: Infrastructure (curl, not browser)
+```
+curl -sk https://dev.lamoom.com/health → 200 {"status":"ok"}
+curl -sk https://dev.lamoom.com/health/openclaw → 200 {"status":"ok"}  
+curl -sk https://dev.lamoom.com/widget.js → 200, non-empty JS
 ```
 
-On the VM:
-```bash
-ssh root@78.47.152.177 'cd /opt/webagent && source .env && \
-  bash .agents/skills/e2e-playwright-test/scripts/test-ai-liveness.sh \
-  http://localhost:3001 "$PROXY_CUSTOMER_API_TOKEN"'
+### Phase 1: Login & Dashboard
+
+1. **Navigate** to `https://dev.lamoom.com`
+2. **CHECK**: Redirects to `/login` or `/dashboard` (if already logged in)
+3. If on `/login`:
+   - **CHECK UI**: Dark theme, centered card, Google OAuth button visible
+   - Click Google sign-in or use test credentials
+   - **CHECK**: Redirects to `/dashboard` after login
+4. On `/dashboard`:
+   - **CHECK UI**: Dark background, no white/light areas
+   - **CHECK**: "Create New Agent" button visible
+   - **CHECK**: Agent list visible (may be empty or have existing agents)
+   - **SCREENSHOT**: Take screenshot, verify professional dark theme
+
+### Phase 2: Create Agent Chat — UI/UX Quality
+
+1. **Navigate** to `https://dev.lamoom.com/create`
+2. **CHECK UI — CRITICAL**: This must look like a ChatGPT-style chat interface:
+   - ✅ Full-screen dark background, no white areas
+   - ✅ Input bar at the bottom, centered, rounded container
+   - ✅ NO heading like "Create Agent" or "Follow each stage" (the page IS the chat)
+   - ✅ Empty state: centered icon/text, subtle, not a form
+   - ❌ FAIL if: light background, form-like layout, headings above chat, bordered card container
+3. **Wait for greeting** (up to 60s):
+   - **CHECK**: Meta-agent greeting appears as a chat message
+   - **CHECK**: Message is conversational AI text, not error or placeholder
+   - **CHECK**: Typing indicator (dots) shows while loading
+4. **SCREENSHOT**: Full page after greeting loads
+
+### Phase 3: Agent Creation Conversation
+
+1. **Type** a test website description in the input:
+   > "It's called PetPal, a pet supplies store at https://petpal.example.com. We have a REST API at https://api.petpal.example.com for products, orders, and customer accounts. Tone should be friendly and helpful."
+2. **Press Enter** to send
+3. **CHECK**: User message appears as a right-aligned chat bubble
+4. **CHECK**: Typing indicator shows
+5. **Wait** for meta-agent response (up to 120s)
+6. **CHECK**: Bot response appears, mentions PetPal or pets
+7. **SCREENSHOT**: Chat with both messages visible
+
+8. If the meta-agent asks for confirmation, **type**: "Yes, that's correct. Please create the agent now."
+9. **Press Enter**, wait up to 180s (agent creation involves file writes)
+10. **CHECK**: Look for embed code card in the chat OR `[AGENT_CREATED::` marker in response
+11. **SCREENSHOT**: After agent creation response
+
+### Phase 4: Verify Created Agent
+
+1. **Navigate** to `https://dev.lamoom.com/dashboard`
+2. **CHECK**: New agent (PetPal or similar) appears in the agent list
+3. **CHECK**: Agent shows "active" status
+4. **CHECK**: "View" link works → agent detail page shows embed code
+
+### Phase 5: Widget Chat (if embed token available)
+
+1. From the agent detail page, copy the embed token from the embed code
+2. Use `curl` or Node.js to test WebSocket:
+   ```
+   Connect to wss://dev.lamoom.com/ws
+   Send: {"type":"auth","agentToken":"<TOKEN>","userId":"e2e-test"}
+   Expect: {"type":"auth_ok",...}
+   Send: {"type":"message","content":"What products do you have?"}
+   Expect: {"type":"message","content":"...","done":true}
+   ```
+3. **CHECK**: auth_ok received (widget auth chain works)
+4. **CHECK**: Message response is non-empty and contextual (mentions pets)
+
+## UI/UX Quality Checklist (check on EVERY page)
+
+Run these checks on every page you visit. Any failure = QA FAIL.
+
+| # | Check | How to verify |
+|---|-------|---------------|
+| 1 | Dark theme everywhere | No white/light backgrounds. bg should be #171717 or similar |
+| 2 | No broken layouts | No overlapping elements, no horizontal scroll |
+| 3 | Chat looks like ChatGPT | Full-screen chat, messages as text blocks, input at bottom |
+| 4 | No "student project" feel | No default shadcn cards/borders around chat, no form-like layout |
+| 5 | Responsive input | Textarea grows with content, send button aligned |
+| 6 | Loading states | Typing indicator shows during API calls |
+| 7 | Error handling | If API fails, error message appears in chat (not silent) |
+| 8 | Professional typography | Consistent font sizes, proper spacing, readable text |
+
+## Reporting
+
+After running all phases, report a summary table:
+
+```
+## QA Results — [DATE]
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| 0. Infrastructure | ✅/❌ | health, openclaw health, widget.js |
+| 1. Login & Dashboard | ✅/❌ | auth works, dark theme |
+| 2. Chat UI Quality | ✅/❌ | ChatGPT-like, no regressions |
+| 3. Agent Creation | ✅/❌ | full conversation, embed code |
+| 4. Agent Verification | ✅/❌ | appears in dashboard |
+| 5. Widget Chat | ✅/❌ | WS auth + message works |
+
+UI/UX Issues Found:
+- [list any visual/interaction problems]
+
+Blockers:
+- [list anything that prevents the product from working]
 ```
 
-## 2. Visual Demo Recorder (Browser + GIF)
+## Deploy Verification Checklist
 
-Records the full UI flow as step-by-step screenshots + video → GIF.
-Requires: `playwright`, `ffmpeg`.
-
-```bash
-npx tsx .agents/skills/e2e-playwright-test/scripts/record-demo.ts [BASE_URL]
-```
-
-Env vars:
-- `BASE_URL` — defaults to `https://dev.lamoom.com`
-- `OUTPUT_DIR` — defaults to `./e2e-demo-output`
-- `TEST_EMAIL` / `TEST_PASSWORD` — login credentials (any work with current auth)
-
-Outputs in `OUTPUT_DIR/`:
-- `step-01-*.png` through `step-N-*.png` — annotated screenshots per step
-- `demo.gif` — screenshots assembled at 3s/frame
-- `demo-video.gif` — browser video recording converted to GIF
-- `*.webm` — raw Playwright video
-
-### Flow Recorded
-
-1. Login page → fill credentials → submit
-2. Dashboard loads → click "Create New Agent"
-3. Create page → wait for meta-agent AI greeting
-4. Type pottery shop description → wait for AI response
-5. Type tone preference → wait for AI response
-6. Check for embed code snippet
-
-## 3. Full E2E Flow Test (Protocol-level)
-
-Tests the **complete product lifecycle** at the protocol level using `curl` + inline Node.js (for WebSocket). No browser needed. Covers: health checks → agent creation via meta-agent → agent verification → widget chat over WebSocket.
-
-```bash
-chmod +x .agents/skills/e2e-playwright-test/scripts/test-e2e-full.sh
-source .env 2>/dev/null || true
-.agents/skills/e2e-playwright-test/scripts/test-e2e-full.sh \
-  "${PROXY_URL:-https://dev.lamoom.com}" \
-  "${PROXY_API_TOKEN:-${NEXT_PUBLIC_PROXY_API_TOKEN}}"
-```
-
-On the VM:
-```bash
-ssh root@78.47.152.177 'cd /opt/webagent && source .env && \
-  OPENCLAW_WORKSPACES_DIR=/opt/webagent/openclaw/workspaces \
-  bash .agents/skills/e2e-playwright-test/scripts/test-e2e-full.sh \
-  http://localhost:3001 "$PROXY_CUSTOMER_API_TOKEN"'
-```
-
-### Test Phases
-
-| Phase | Tests | What it covers |
-|-------|-------|----------------|
-| 1. Infrastructure Health | T1–T3 | `/health`, `/health/openclaw`, `/widget.js` |
-| 2. Agent Creation | T4–T6 | Meta-agent greeting → describe business → confirm & create (full 5-step flow) |
-| 3. Agent Verification | T7–T8 | Agent appears in `GET /api/agents` list; workspace files on disk (if local) |
-| 4. Widget Chat (WS) | T9–T10 | WebSocket auth with embed token; send message and get AI response from created agent |
-
-### Key Features
-
-- **Cascading state**: sessionId, embedToken, and agentSlug flow between phases
-- **Smart skipping**: if Phase 2 fails, Phase 3–4 tests are skipped (not falsely failed)
-- **WebSocket tests**: uses inline Node.js with the `ws` module (transitive dep of `@fastify/websocket`)
-- **Long timeouts**: agent creation (T6) allows up to 180s for the meta-agent's 5-step file creation
-- **SSL flexibility**: all curl calls use `-k` for self-signed certs
-
-### Environment Variables
-
-| Var | Required | Description |
-|-----|----------|-------------|
-| `PROXY_URL` / `BASE_URL` | No | Defaults to `https://dev.lamoom.com` |
-| `PROXY_API_TOKEN` | **Yes** | Bearer token for proxy auth |
-| `TEST_CUSTOMER_ID` | No | UUID, auto-generated if not set |
-| `OPENCLAW_WORKSPACES_DIR` | No | Path to workspaces dir for T8 disk check |
-
----
-
-## What It Tests
-
-| # | Test | What it catches |
-|---|------|-----------------|
-| 1 | Basic connectivity | Proxy down, auth broken, OpenClaw unreachable |
-| 2 | Not hardcoded pattern | Known canned responses |
-| 3 | **Variability** | **HARDCODED BOT** — same input must produce different output |
-| 4 | Contextual relevance | Bot ignores user input, generic canned reply |
-| 5 | Session memory | Sessions broken, no context carry-over |
-| 6 | Off-script handling | Bot can only follow a script, crashes on unexpected input |
-| 7 | Response structure | API envelope shape changed, fields missing |
-
-**Test 3 (variability) is the critical one.** A hardcoded bot returns identical responses
-to identical inputs. A real LLM never does (temperature > 0).
-
-## Interpreting Failures
-
-- **Test 1 fails**: Check proxy is running, API token is correct, OpenClaw gateway is up
-- **Test 3 fails ("HARDCODED BOT DETECTED")**: Someone replaced the real AI integration
-  with static responses. Inspect `packages/proxy/src/openclaw/client.ts` and
-  `packages/proxy/src/routes/api.ts` for hardcoded strings.
-- **Test 4/5 fails**: The AI is real but may not have proper context/session handling.
-  Check the `--session-id` flag in OpenClawClient and session key format.
-- **Test 6 fails**: AI may be too rigidly prompted. Check meta-agent SOUL.md/IDENTITY.md.
-
-## Adding New Tests
-
-Edit `scripts/test-ai-liveness.sh`. Each test follows the pattern:
-1. Call `call_meta` with messages JSON and optional sessionId
-2. Extract response with `extract_response`
-3. Assert with `pass`/`fail`/`skip`
-
-Keep tests independent — each creates its own session unless testing memory.
-
-## Environment Variables
-
-| Var | Required | Description |
-|-----|----------|-------------|
-| `PROXY_URL` | No | Defaults to `https://dev.lamoom.com` |
-| `PROXY_API_TOKEN` | Yes | Bearer token for proxy auth |
-| `TEST_CUSTOMER_ID` | No | UUID, defaults to test customer |
+After any deploy, verify these common failure modes:
+1. `_next/static/` JS chunks return 404 → standalone static files not copied
+2. `NEXT_PUBLIC_*` env vars not baked into build → rebuild with env inline
+3. Proxy not restarted after code change → `systemctl restart webagent-proxy`
+4. OpenClaw gateway not restarted after config change → `systemctl restart openclaw-gateway`
+5. Widget.js stale → clear browser cache, check `/widget.js` returns fresh content

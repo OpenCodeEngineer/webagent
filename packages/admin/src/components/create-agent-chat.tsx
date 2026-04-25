@@ -91,17 +91,17 @@ export function CreateAgentChat({ customerId }: { customerId?: string }) {
   const hasMessages = messages.length > 0 || loading;
 
   return (
-    <div className="flex h-full flex-col">
-      {/* Messages area — scrollable, centered like ChatGPT */}
-      <div className="flex-1 overflow-y-auto">
+    <div className="flex h-full flex-col bg-[#171717]">
+      {/* Messages area */}
+      <div className="relative flex-1 overflow-y-auto">
         {!hasMessages && (
           <div className="flex h-full items-center justify-center">
-            <div className="text-center space-y-3">
-              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-                <Bot className="h-6 w-6 text-primary" />
+            <div className="text-center space-y-4">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-zinc-800">
+                <Bot className="h-7 w-7 text-zinc-400" />
               </div>
-              <h2 className="text-xl font-medium text-foreground">Lamoom Agent Builder</h2>
-              <p className="text-sm text-muted-foreground max-w-md">
+              <h2 className="text-xl font-semibold text-zinc-200">How can I help you build your agent?</h2>
+              <p className="text-sm text-zinc-500 max-w-md">
                 Describe your website and API — I&apos;ll create a custom AI chat agent and give you embed code.
               </p>
             </div>
@@ -109,22 +109,21 @@ export function CreateAgentChat({ customerId }: { customerId?: string }) {
         )}
 
         {hasMessages && (
-          <div className="mx-auto max-w-3xl px-4 py-6 space-y-6">
+          <div className="mx-auto max-w-3xl px-4 py-8 space-y-2">
             {messages.map((message, index) => {
               const isUser = message.role === "user";
-              return (
-                <div key={`${message.role}-${index}`} className={cn("flex gap-4", isUser && "justify-end")}>
-                  {!isUser && (
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 mt-0.5">
-                      <Bot className="h-4 w-4 text-primary" />
-                    </div>
-                  )}
-                  <div className={cn(
-                    "max-w-[75%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap",
-                    isUser
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-foreground"
-                  )}>
+              return isUser ? (
+                <div key={`${message.role}-${index}`} className="flex justify-end py-2">
+                  <div className="max-w-[85%] rounded-2xl bg-zinc-800 px-4 py-3 text-sm text-zinc-100">
+                    {message.content}
+                  </div>
+                </div>
+              ) : (
+                <div key={`${message.role}-${index}`} className="flex gap-3 py-6">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-700 mt-0.5">
+                    <Bot className="h-4 w-4 text-zinc-400" />
+                  </div>
+                  <div className="min-w-0 flex-1 text-base leading-relaxed text-zinc-200 whitespace-pre-wrap">
                     {message.content}
                   </div>
                 </div>
@@ -132,12 +131,12 @@ export function CreateAgentChat({ customerId }: { customerId?: string }) {
             })}
 
             {loading && (
-              <div className="flex gap-4">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 mt-0.5">
-                  <Bot className="h-4 w-4 text-primary" />
+              <div className="flex gap-3 py-6">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-700 mt-0.5">
+                  <Bot className="h-4 w-4 text-zinc-400" />
                 </div>
-                <div className="rounded-2xl bg-muted px-4 py-3">
-                  <span className="inline-flex gap-1 text-muted-foreground">
+                <div className="pt-1">
+                  <span className="inline-flex gap-1 text-zinc-500">
                     <span className="animate-bounce text-lg" style={{ animationDelay: "0ms" }}>·</span>
                     <span className="animate-bounce text-lg" style={{ animationDelay: "150ms" }}>·</span>
                     <span className="animate-bounce text-lg" style={{ animationDelay: "300ms" }}>·</span>
@@ -146,14 +145,13 @@ export function CreateAgentChat({ customerId }: { customerId?: string }) {
               </div>
             )}
 
-            {/* Embed code card */}
             {embedCode && (
-              <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+              <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-foreground">Your embed code</span>
+                  <span className="text-xs font-medium uppercase tracking-wider text-zinc-400">Embed code</span>
                   <button
                     onClick={onCopyEmbedCode}
-                    className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+                    className="inline-flex items-center gap-1.5 text-zinc-400 hover:text-zinc-200 transition-colors text-xs"
                   >
                     {copied ? <><Check className="h-3.5 w-3.5" /> Copied</> : <><Copy className="h-3.5 w-3.5" /> Copy</>}
                   </button>
@@ -167,12 +165,15 @@ export function CreateAgentChat({ customerId }: { customerId?: string }) {
             <div ref={bottomRef} />
           </div>
         )}
+
+        {/* Bottom gradient fade */}
+        <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-[#171717] to-transparent" />
       </div>
 
-      {/* Input area — fixed at bottom, centered */}
-      <div className="border-t border-border bg-background/80 backdrop-blur-sm">
-        <div className="mx-auto max-w-3xl px-4 py-4">
-          <div className="flex items-end gap-3 rounded-xl border border-border bg-card px-4 py-3 shadow-sm focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/20 transition-all">
+      {/* Input area */}
+      <div>
+        <div className="mx-auto max-w-3xl px-4 pb-6 pt-2">
+          <div className="flex items-end gap-3 rounded-2xl border border-zinc-700 bg-zinc-800 px-4 py-3 focus-within:border-zinc-500 transition-colors">
             <textarea
               ref={textareaRef}
               value={input}
@@ -183,8 +184,8 @@ export function CreateAgentChat({ customerId }: { customerId?: string }) {
                   void onSend();
                 }
               }}
-              placeholder="Describe your website and API…"
-              className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none min-h-[24px] max-h-[120px]"
+              placeholder="Describe your website..."
+              className="flex-1 resize-none bg-transparent text-sm text-zinc-200 placeholder:text-zinc-500 outline-none min-h-[24px] max-h-[120px]"
               disabled={loading}
               rows={1}
             />
@@ -192,7 +193,12 @@ export function CreateAgentChat({ customerId }: { customerId?: string }) {
               type="button"
               onClick={() => void onSend()}
               disabled={loading || input.trim().length === 0}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground disabled:opacity-40 hover:bg-primary/90 transition-colors"
+              className={cn(
+                "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-colors",
+                loading || input.trim().length === 0
+                  ? "bg-zinc-600 text-zinc-400"
+                  : "bg-white text-black hover:bg-zinc-200"
+              )}
             >
               <SendHorizontal className="h-4 w-4" />
             </button>
