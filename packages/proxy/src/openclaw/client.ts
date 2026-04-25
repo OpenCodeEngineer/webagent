@@ -1,4 +1,5 @@
 import { loadConfig } from '../config.js';
+import { execFile } from 'node:child_process';
 
 interface AgentResponse {
   success: boolean;
@@ -6,53 +7,28 @@ interface AgentResponse {
   error?: string;
 }
 
-/**
- * Extract text from an OpenAI-compatible /v1/responses payload.
- *
- * The response shape is:
- *   { output: [ { type: "message", content: [ { type: "output_text", text: "…" } ] } ] }
- *
- * We concatenate every output_text block we find, falling back to a flat
- * `output_text` field or stringified `output` if the structure is unexpected.
- */
-function extractResponseText(data: Record<string, unknown>): string | undefined {
-  // Primary: output[].content[].text
-  if (Array.isArray(data.output)) {
-    const texts: string[] = [];
-    for (const item of data.output) {
-      const entry = item as Record<string, unknown> | undefined;
-      if (!entry) continue;
-
-      if (Array.isArray(entry.content)) {
-        for (const block of entry.content) {
-          const b = block as Record<string, unknown> | undefined;
-          if (b && typeof b.text === 'string' && b.text.trim()) {
-            texts.push(b.text);
-          }
-        }
+function execFilePromise(
+  file: string,
+  args: string[],
+  timeoutMs: number,
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024, env: process.env }, (error, stdout, stderr) => {
+      if (error) {
+        reject({
+          error,
+          stdout: String(stdout ?? ''),
+          stderr: String(stderr ?? ''),
+        });
+        return;
       }
 
-      // Single-text shorthand on the item itself
-      if (typeof entry.text === 'string' && entry.text.trim()) {
-        texts.push(entry.text);
-      }
-    }
-
-    if (texts.length > 0) return texts.join('\n\n');
-  }
-
-  // Flat fallback: output_text at the top level
-  if (typeof data.output_text === 'string' && (data.output_text as string).trim()) {
-    return data.output_text as string;
-  }
-
-  // Last resort: stringify output if it exists
-  if (data.output !== undefined) {
-    const raw = typeof data.output === 'string' ? data.output : JSON.stringify(data.output);
-    if (raw.trim()) return raw;
-  }
-
-  return undefined;
+      resolve({
+        stdout: String(stdout ?? ''),
+        stderr: String(stderr ?? ''),
+      });
+    });
+  });
 }
 
 export class OpenClawClient {
@@ -66,7 +42,7 @@ export class OpenClawClient {
   }
 
   /**
-   * Send a message to an agent via the OpenAI-compatible /v1/responses HTTP API.
+   * Send a message to an agent via the OpenClaw CLI.
    */
   async sendMessage(opts: {
     message: string;
@@ -75,46 +51,57 @@ export class OpenClawClient {
     name?: string;
     timeoutSeconds?: number;
   }): Promise<AgentResponse> {
-    const url = `${this.gatewayUrl}/v1/responses`;
-    const body: Record<string, unknown> = {
-      model: `openclaw/${opts.agentId}`,
-      input: opts.message,
-    };
-
-    const headers: Record<string, string> = {
-      'Authorization': `Bearer ${this.token}`,
-      'Content-Type': 'application/json',
-    };
-
+    const timeoutSeconds = opts.timeoutSeconds ?? 120;
+    const args = ['agent', '--agent', opts.agentId, '-m', opts.message];
     if (opts.sessionKey) {
-      headers['x-openclaw-session-key'] = opts.sessionKey;
+      args.push('--session-id', opts.sessionKey);
     }
+    args.push('--json');
 
     try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout((opts.timeoutSeconds ?? 120) * 1000),
-      });
-
-      if (!res.ok) {
-        let detail = '';
-        try {
-          detail = await res.text();
-        } catch { /* ignore */ }
-        return {
-          success: false,
-          error: `Gateway error: ${res.status} ${res.statusText}${detail ? ` — ${detail}` : ''}`,
+      const { stdout } = await execFilePromise('openclaw', args, timeoutSeconds * 1000);
+      const parsed = JSON.parse(stdout) as {
+        status?: unknown;
+        summary?: unknown;
+        result?: {
+          error?: unknown;
+          payloads?: Array<{ text?: unknown }>;
         };
+      };
+
+      if (parsed.status === 'error') {
+        const errorText =
+          (typeof parsed.result?.error === 'string' && parsed.result.error) ||
+          (typeof parsed.summary === 'string' && parsed.summary) ||
+          'OpenClaw CLI returned an error';
+        return { success: false, error: errorText };
       }
 
-      const data = (await res.json()) as Record<string, unknown>;
-      const text = extractResponseText(data);
-      return { success: true, response: text ?? '' };
+      const payloads = Array.isArray(parsed.result?.payloads) ? parsed.result.payloads : [];
+      const response = payloads
+        .map((p) => (typeof p?.text === 'string' ? p.text : ''))
+        .join('');
+      return { success: true, response };
     } catch (error) {
+      if (error && typeof error === 'object' && 'error' in error) {
+        const wrapped = error as {
+          error: NodeJS.ErrnoException & { code?: string | number; signal?: string | null; killed?: boolean };
+          stderr: string;
+        };
+        const execError = wrapped.error;
+        const isTimeout =
+          execError.code === 'ETIMEDOUT'
+          || (execError.killed === true
+            && execError.signal === 'SIGTERM'
+            && (execError.code === null || typeof execError.code === 'undefined'));
+        if (isTimeout) {
+          return { success: false, error: `OpenClaw CLI timed out after ${timeoutSeconds}s` };
+        }
+        return { success: false, error: wrapped.stderr?.trim() || execError.message };
+      }
+
       const msg = error instanceof Error ? error.message : String(error);
-      return { success: false, error: `OpenClaw gateway error: ${msg}` };
+      return { success: false, error: msg };
     }
   }
 
