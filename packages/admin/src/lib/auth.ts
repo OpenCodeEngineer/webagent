@@ -10,25 +10,33 @@ import { getDb } from "./db";
 import { users, accounts } from "./auth-schema";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  adapter: {
-    // Wrap DrizzleAdapter in a lazy getter so the DB connection is only
-    // opened at runtime, not during Next.js static build/collect phase.
-    ...(() => {
-      let _adapter: ReturnType<typeof DrizzleAdapter> | undefined;
-      const get = () => {
-        if (!_adapter) _adapter = DrizzleAdapter(getDb() as any);
-        return _adapter;
-      };
-      // Return an object whose methods lazily initialize the real adapter.
-      return new Proxy({} as ReturnType<typeof DrizzleAdapter>, {
-        get(_target, prop) {
-          const real = get();
-          const val = (real as any)[prop];
-          return typeof val === "function" ? val.bind(real) : val;
-        },
-      });
-    })(),
-  },
+  adapter: (() => {
+    // Lazy-init DrizzleAdapter so the DB connection is only opened at
+    // runtime, not during Next.js static build/collect phase.
+    // We use a plain object with explicit method delegation instead of
+    // Proxy to avoid breaking NextAuth's internal adapter type checks.
+    let _adapter: ReturnType<typeof DrizzleAdapter> | undefined;
+    const get = () => {
+      if (!_adapter) _adapter = DrizzleAdapter(getDb() as any);
+      return _adapter;
+    };
+    return {
+      createUser: (...args: any[]) => (get() as any).createUser(...args),
+      getUser: (...args: any[]) => (get() as any).getUser(...args),
+      getUserByEmail: (...args: any[]) => (get() as any).getUserByEmail(...args),
+      getUserByAccount: (...args: any[]) => (get() as any).getUserByAccount(...args),
+      updateUser: (...args: any[]) => (get() as any).updateUser(...args),
+      deleteUser: (...args: any[]) => (get() as any).deleteUser(...args),
+      linkAccount: (...args: any[]) => (get() as any).linkAccount(...args),
+      unlinkAccount: (...args: any[]) => (get() as any).unlinkAccount(...args),
+      createSession: (...args: any[]) => (get() as any).createSession(...args),
+      getSessionAndUser: (...args: any[]) => (get() as any).getSessionAndUser(...args),
+      updateSession: (...args: any[]) => (get() as any).updateSession(...args),
+      deleteSession: (...args: any[]) => (get() as any).deleteSession(...args),
+      createVerificationToken: (...args: any[]) => (get() as any).createVerificationToken(...args),
+      useVerificationToken: (...args: any[]) => (get() as any).useVerificationToken(...args),
+    } as ReturnType<typeof DrizzleAdapter>;
+  })(),
   secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
   pages: {
     signIn: "/login",
