@@ -54,6 +54,11 @@ sudo -u "${APP_USER}" bash -c "cd ${APP_DIR} && pnpm install --frozen-lockfile"
 # ── 7b. Build all packages ────────────────────────────────────────────────────
 sudo -u "${APP_USER}" bash -c "cd ${APP_DIR} && pnpm build"
 
+# ── 7b2. Copy Next.js static assets into standalone output ───────────────────
+# Next.js standalone mode does NOT include _next/static — must be copied manually
+cp -r "${APP_DIR}/packages/admin/.next/static" \
+      "${APP_DIR}/packages/admin/.next/standalone/packages/admin/.next/static"
+
 # ── 7c. Run database migrations ───────────────────────────────────────────────
 sudo -u "${APP_USER}" bash -c "cd ${APP_DIR} && pnpm --filter @webagent/proxy db:migrate"
 
