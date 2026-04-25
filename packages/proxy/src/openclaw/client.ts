@@ -13,7 +13,12 @@ function execFilePromise(
   timeoutMs: number,
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile(file, args, { timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024, env: process.env }, (error, stdout, stderr) => {
+    // Strip OPENCLAW_GATEWAY_URL/TOKEN so the CLI auto-discovers the local
+    // gateway and authenticates with gateway.remote.token from config.
+    const env = { ...process.env };
+    delete env.OPENCLAW_GATEWAY_URL;
+    delete env.OPENCLAW_GATEWAY_TOKEN;
+    execFile(file, args, { timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024, env }, (error, stdout, stderr) => {
       if (error) {
         reject({
           error,

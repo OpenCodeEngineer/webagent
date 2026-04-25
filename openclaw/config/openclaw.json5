@@ -1,12 +1,15 @@
 {
   // Multi-agent configuration for Web MCP Agent platform
   gateway: {
+    mode: "local",
     auth: {
       mode: "token",
-      token: "${OPENCLAW_GATEWAY_TOKEN}",
+      // Auto-generated on first run; do NOT set same as hooks.token
+      token: "webagent-gateway-auth-prod-v1",
     },
     remote: {
-      token: "${OPENCLAW_GATEWAY_TOKEN}",
+      // Must match gateway.auth.token for CLI to connect
+      token: "webagent-gateway-auth-prod-v1",
     },
   },
   agents: {
@@ -46,7 +49,7 @@
   },
   hooks: {
     enabled: true,
-    token: "${OPENCLAW_GATEWAY_TOKEN}",
+    token: "webagent-hooks-secret-prod-v1",
     path: "/hooks",
     allowRequestSessionKey: true,
     allowedSessionKeyPrefixes: ["widget:", "admin:", "hook:"],
