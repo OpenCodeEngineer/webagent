@@ -10,7 +10,7 @@ description: >
 
 # E2E Test Skill
 
-Two tools: **API liveness tests** (fast, headless) and **visual demo recorder** (browser + GIF).
+Three tools: **API liveness tests** (fast, headless), **visual demo recorder** (browser + GIF), and **full E2E flow test** (protocol-level, tests the complete product lifecycle).
 
 ## When to Run
 
@@ -67,6 +67,54 @@ Outputs in `OUTPUT_DIR/`:
 4. Type pottery shop description → wait for AI response
 5. Type tone preference → wait for AI response
 6. Check for embed code snippet
+
+## 3. Full E2E Flow Test (Protocol-level)
+
+Tests the **complete product lifecycle** at the protocol level using `curl` + inline Node.js (for WebSocket). No browser needed. Covers: health checks → agent creation via meta-agent → agent verification → widget chat over WebSocket.
+
+```bash
+chmod +x .agents/skills/e2e-playwright-test/scripts/test-e2e-full.sh
+source .env 2>/dev/null || true
+.agents/skills/e2e-playwright-test/scripts/test-e2e-full.sh \
+  "${PROXY_URL:-https://dev.lamoom.com}" \
+  "${PROXY_API_TOKEN:-${NEXT_PUBLIC_PROXY_API_TOKEN}}"
+```
+
+On the VM:
+```bash
+ssh root@78.47.152.177 'cd /opt/webagent && source .env && \
+  OPENCLAW_WORKSPACES_DIR=/opt/webagent/openclaw/workspaces \
+  bash .agents/skills/e2e-playwright-test/scripts/test-e2e-full.sh \
+  http://localhost:3001 "$PROXY_CUSTOMER_API_TOKEN"'
+```
+
+### Test Phases
+
+| Phase | Tests | What it covers |
+|-------|-------|----------------|
+| 1. Infrastructure Health | T1–T3 | `/health`, `/health/openclaw`, `/widget.js` |
+| 2. Agent Creation | T4–T6 | Meta-agent greeting → describe business → confirm & create (full 5-step flow) |
+| 3. Agent Verification | T7–T8 | Agent appears in `GET /api/agents` list; workspace files on disk (if local) |
+| 4. Widget Chat (WS) | T9–T10 | WebSocket auth with embed token; send message and get AI response from created agent |
+
+### Key Features
+
+- **Cascading state**: sessionId, embedToken, and agentSlug flow between phases
+- **Smart skipping**: if Phase 2 fails, Phase 3–4 tests are skipped (not falsely failed)
+- **WebSocket tests**: uses inline Node.js with the `ws` module (transitive dep of `@fastify/websocket`)
+- **Long timeouts**: agent creation (T6) allows up to 180s for the meta-agent's 5-step file creation
+- **SSL flexibility**: all curl calls use `-k` for self-signed certs
+
+### Environment Variables
+
+| Var | Required | Description |
+|-----|----------|-------------|
+| `PROXY_URL` / `BASE_URL` | No | Defaults to `https://dev.lamoom.com` |
+| `PROXY_API_TOKEN` | **Yes** | Bearer token for proxy auth |
+| `TEST_CUSTOMER_ID` | No | UUID, auto-generated if not set |
+| `OPENCLAW_WORKSPACES_DIR` | No | Path to workspaces dir for T8 disk check |
+
+---
 
 ## What It Tests
 
