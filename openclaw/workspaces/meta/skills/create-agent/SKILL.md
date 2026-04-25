@@ -29,7 +29,7 @@ Derive:
 - `agentSlug` = website name lowercased, non-alphanumeric collapsed to hyphens, trim edge hyphens.
 - `workspacePath` = `~/openclaw/workspaces/<agentSlug>/`
 
-Using templates in `openclaw/templates/` as the starting point, render and `write`:
+Using templates in `~/openclaw/templates/` as the starting point (these are inside the workspace), render and `write`:
 - `<workspacePath>/AGENTS.md`
 - `<workspacePath>/SOUL.md`
 - `<workspacePath>/IDENTITY.md`

@@ -197,7 +197,6 @@
       let message:
         | {
             type?: string;
-            payload?: { text?: string; message?: string };
             content?: string;
             message?: string;
           }
@@ -209,12 +208,11 @@
       }
       if (!message) return;
       if (message.type === 'message') {
-        const text = message.payload?.text ?? message.payload?.message ?? message.content ?? message.message;
+        const text = message.content ?? message.message;
         if (text) createMessage(text, 'assistant');
       }
       if (message.type === 'error') {
-        const errorText =
-          message.payload?.message ?? message.payload?.text ?? message.message ?? message.content;
+        const errorText = message.content ?? message.message;
         if (errorText) createMessage(errorText, 'assistant', true);
       }
     };
@@ -246,7 +244,7 @@
     textarea.value = '';
     showTyping();
 
-    const payload = JSON.stringify({ type: 'message', payload: { text }, content: text });
+    const payload = JSON.stringify({ type: 'message', content: text });
     if (socket?.readyState === 1) {
       socket.send(payload);
       return;

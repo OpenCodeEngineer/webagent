@@ -34,7 +34,7 @@
       {
         id: "meta",
         name: "Agent Builder",
-        workspace: "~/openclaw/workspaces/meta",
+        workspace: "~/openclaw",
         sandbox: { mode: "off" },
         tools: {
           profile: "coding",
@@ -52,7 +52,7 @@
     token: "webagent-hooks-secret-prod-v1",
     path: "/hooks",
     allowRequestSessionKey: true,
-    allowedSessionKeyPrefixes: ["widget:", "admin:", "hook:"],
+    allowedSessionKeyPrefixes: ["widget-", "admin-", "hook:"],
     defaultSessionKey: "hook:ingress",
     mappings: [
       {
