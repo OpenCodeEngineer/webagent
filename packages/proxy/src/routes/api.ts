@@ -7,7 +7,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { and, count, eq, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import { OpenClawClient } from '../openclaw/client.js';
-import { agents, customers, widgetEmbeds, widgetSessions } from '../db/schema.js';
+import { agents, auditLog, customers, widgetEmbeds, widgetSessions } from '../db/schema.js';
 import { invalidateEmbedTokenCache } from '../ws/handler.js';
 
 const localhostIps = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
@@ -144,6 +144,15 @@ async function ensureCustomer(app: FastifyInstance, customerId: string) {
     .onConflictDoNothing();
 }
 
+async function insertAuditLog(
+  app: FastifyInstance,
+  customerId: string,
+  action: string,
+  details?: Record<string, unknown>,
+): Promise<void> {
+  await app.db.insert(auditLog).values({ customerId, action, details: details ?? null });
+}
+
 /**
  * Register a newly created agent in the OpenClaw gateway config (~/.openclaw/openclaw.json)
  * and restart the gateway so it picks up the new agent.
@@ -182,17 +191,45 @@ async function registerAgentInOpenClaw(
     await writeFile(configPath, JSON.stringify(config, null, 2), 'utf8');
     app.log.info({ slug }, 'registered agent in openclaw.json');
 
-    // Restart the gateway so it picks up the new agent
-    await new Promise<void>((resolve) => {
-      execFile('systemctl', ['restart', 'openclaw-gateway'], { timeout: 15_000 }, (err) => {
-        if (err) {
-          app.log.warn({ err }, 'failed to restart openclaw-gateway');
-        } else {
-          app.log.info('openclaw-gateway restarted after agent registration');
+    // Try SIGHUP first (no root needed for same-user processes), fall back to systemctl
+    const reloaded = await new Promise<boolean>((resolve) => {
+      execFile('pgrep', ['-f', 'openclaw.*gateway'], { timeout: 5_000 }, (err, stdout) => {
+        if (err || !stdout?.trim()) {
+          app.log.warn('could not find openclaw gateway PID via pgrep');
+          resolve(false);
+          return;
         }
-        resolve();
+        const pid = stdout.trim().split('\n')[0] ?? '';
+        if (!pid) {
+          app.log.warn('could not parse openclaw gateway PID from pgrep output');
+          resolve(false);
+          return;
+        }
+        execFile('kill', ['-HUP', pid], { timeout: 5_000 }, (killErr) => {
+          const killError = killErr as NodeJS.ErrnoException | null;
+          if (killError) {
+            app.log.warn({ err: killError, pid }, 'SIGHUP failed');
+            resolve(false);
+          } else {
+            app.log.info({ pid }, 'sent SIGHUP to openclaw gateway');
+            resolve(true);
+          }
+        });
       });
     });
+
+    if (!reloaded) {
+      await new Promise<void>((resolve) => {
+        execFile('sudo', ['systemctl', 'restart', 'openclaw-gateway'], { timeout: 15_000 }, (err) => {
+          if (err) {
+            app.log.warn({ err }, 'systemctl restart fallback also failed');
+          } else {
+            app.log.info('openclaw-gateway restarted via systemctl fallback');
+          }
+          resolve();
+        });
+      });
+    }
   } catch (err) {
     app.log.warn({ err, configPath }, 'failed to register agent in openclaw config');
   }
@@ -286,6 +323,11 @@ export async function detectAgentCreation(
     embedToken,
     createdAt: now,
   });
+  await insertAuditLog(app, customerId, 'agent.create_via_meta', {
+    agentId: createdAgent.id,
+    openclawAgentId: config.agentSlug,
+    slug,
+  });
 
   const normalizedDomain = domain.replace(/^https?:\/\//i, '');
   const embedCode
@@ -334,6 +376,10 @@ export function registerApiRoutes(app: FastifyInstance) {
       if (!createdAgent) {
         return sendError(reply, 500, 'agent_create_failed', 'Failed to create agent');
       }
+      await insertAuditLog(app, body.customerId, 'agent.create', {
+        agentId: createdAgent.id,
+        openclawAgentId: body.openclawAgentId,
+      });
 
       const embedToken = randomUUID();
       const createdEmbedRows = await app.db
@@ -567,6 +613,10 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
       if (!updated) {
         return sendError(reply, 404, 'not_found', 'Agent not found');
       }
+      await insertAuditLog(app, query.customerId, 'agent.update', {
+        agentId: params.id,
+        fields: Object.keys(body),
+      });
 
       if (body.status && body.status !== existingAgent.status) {
         const embedRows = await app.db
@@ -620,6 +670,7 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
       if (!updated) {
         return sendError(reply, 404, 'not_found', 'Agent not found');
       }
+      await insertAuditLog(app, query.customerId, 'agent.delete', { agentId: params.id });
 
       for (const embedRow of embedRows) {
         invalidateEmbedTokenCache(embedRow.embedToken);
@@ -688,6 +739,7 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
       }
 
       invalidateEmbedTokenCache(embedToken);
+      await insertAuditLog(app, query.customerId, 'embed.rotate', { agentId: params.id });
 
       return reply.send({ embedToken });
     } catch (error) {
