@@ -44,10 +44,12 @@ jobs:
             sudo -u openclaw bash -c "cd ${APP_DIR} && pnpm --filter @webagent/proxy db:migrate" || true
 
             echo "→ Restarting services..."
-            # Kill stale openclaw process if port is held
-            lsof -ti :18789 2>/dev/null | xargs kill -9 2>/dev/null || true
+            # Stop gateway cleanly first, then force-kill any stale process on port
+            systemctl stop openclaw-gateway 2>/dev/null || true
             sleep 1
-            systemctl restart openclaw-gateway
+            lsof -ti :18789 2>/dev/null | xargs kill -9 2>/dev/null || true
+            sleep 2
+            systemctl start openclaw-gateway
             systemctl restart webagent-proxy
             systemctl restart webagent-admin
             sleep 5
