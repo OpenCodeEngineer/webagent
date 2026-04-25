@@ -3,39 +3,70 @@ name: e2e-test
 description: >
   Run end-to-end tests against the live Lamoom platform. Triggers on "run tests",
   "run e2e", "test the system", "test end to end", "verify the flow", "smoke test",
-  "does it work", "is the bot real". Tests verify AI liveness (not hardcoded),
-  response variability, contextual relevance, session memory, and API structure.
+  "does it work", "is the bot real", "record demo", "show me the flow".
+  Tests verify AI liveness (not hardcoded), response variability, contextual
+  relevance, session memory, and API structure. Can record a visual demo GIF.
 ---
 
 # E2E Test Skill
 
-Run real integration tests against the live system to verify the AI agent is working
-correctly and is NOT hardcoded.
+Two tools: **API liveness tests** (fast, headless) and **visual demo recorder** (browser + GIF).
 
 ## When to Run
 
 - After ANY change to proxy routes, OpenClaw client, or meta-agent config
 - After deployments to the VM
 - When asked to "test", "verify", or "check if it works"
+- When asked to "record demo", "show me the flow", or "make a GIF"
 - As a gate before creating PRs
 
-## Quick Run
+## 1. AI Liveness Tests (API-level)
+
+Fast headless tests — 7 checks against the proxy API, no browser needed.
 
 ```bash
 chmod +x .agents/skills/e2e-playwright-test/scripts/test-ai-liveness.sh
-# Load env vars (locally or on VM)
 source .env 2>/dev/null || true
 .agents/skills/e2e-playwright-test/scripts/test-ai-liveness.sh \
   "${PROXY_URL:-https://dev.lamoom.com}" \
   "${PROXY_API_TOKEN:-${NEXT_PUBLIC_PROXY_API_TOKEN}}"
 ```
 
-Or on the VM directly:
+On the VM:
 ```bash
 ssh root@78.47.152.177 'cd /opt/webagent && source .env && \
   bash .agents/skills/e2e-playwright-test/scripts/test-ai-liveness.sh \
   http://localhost:3001 "$PROXY_CUSTOMER_API_TOKEN"'
 ```
+
+## 2. Visual Demo Recorder (Browser + GIF)
+
+Records the full UI flow as step-by-step screenshots + video → GIF.
+Requires: `playwright`, `ffmpeg`.
+
+```bash
+npx tsx .agents/skills/e2e-playwright-test/scripts/record-demo.ts [BASE_URL]
+```
+
+Env vars:
+- `BASE_URL` — defaults to `https://dev.lamoom.com`
+- `OUTPUT_DIR` — defaults to `./e2e-demo-output`
+- `TEST_EMAIL` / `TEST_PASSWORD` — login credentials (any work with current auth)
+
+Outputs in `OUTPUT_DIR/`:
+- `step-01-*.png` through `step-N-*.png` — annotated screenshots per step
+- `demo.gif` — screenshots assembled at 3s/frame
+- `demo-video.gif` — browser video recording converted to GIF
+- `*.webm` — raw Playwright video
+
+### Flow Recorded
+
+1. Login page → fill credentials → submit
+2. Dashboard loads → click "Create New Agent"
+3. Create page → wait for meta-agent AI greeting
+4. Type pottery shop description → wait for AI response
+5. Type tone preference → wait for AI response
+6. Check for embed code snippet
 
 ## What It Tests
 

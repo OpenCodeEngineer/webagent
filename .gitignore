@@ -23,3 +23,6 @@ pnpm-debug.log*
 
 # typescript cache
 *.tsbuildinfo
+
+# E2E demo outputs
+e2e-demo-output/
