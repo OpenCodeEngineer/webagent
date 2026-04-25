@@ -208,7 +208,9 @@ const request = async <T>(
 ): Promise<T | undefined> => {
   const token = getApiToken();
   const headers = new Headers(init?.headers);
-  headers.set("Content-Type", "application/json");
+  if (init?.body) {
+    headers.set("Content-Type", "application/json");
+  }
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
