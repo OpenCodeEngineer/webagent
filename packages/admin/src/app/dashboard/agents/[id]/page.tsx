@@ -2,6 +2,7 @@ import { auth } from "@/lib/auth";
 import { serverGetAgent } from "@/lib/actions";
 import { redirect } from "next/navigation";
 import { AgentDetailActions } from "@/components/agent-detail-actions";
+import { AgentEditForm } from "@/components/agent-edit-form";
 import { WidgetPreview } from "@/components/widget-preview";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -45,22 +46,12 @@ export default async function AgentDetailPage({ params }: Props) {
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <CardTitle className="text-2xl">{agent.name ?? "Unnamed Agent"}</CardTitle>
-              {agent.websiteUrl && (
-                <a
-                  href={agent.websiteUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-1 inline-block text-sm text-primary hover:underline"
-                >
-                  {agent.websiteUrl}
-                </a>
-              )}
+            <div className="min-w-0 flex-1">
+              <AgentEditForm agent={agent} />
             </div>
             <Badge
               variant={agent.status === "active" ? "default" : agent.status === "deleted" ? "destructive" : "secondary"}
-              className={cn("capitalize", agent.status === "active" && "bg-green-600 hover:bg-green-700 text-white")}
+              className={cn("capitalize shrink-0", agent.status === "active" && "bg-green-600 hover:bg-green-700 text-white")}
             >
               {agent.status ?? "unknown"}
             </Badge>
