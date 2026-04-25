@@ -48,6 +48,7 @@ function timingSafeBufferEqual(a: string, b: string): boolean {
   const left = Buffer.from(a);
   const right = Buffer.from(b);
   if (left.length !== right.length) {
+    crypto.timingSafeEqual(left, left);
     return false;
   }
   return crypto.timingSafeEqual(left, right);
@@ -167,7 +168,9 @@ export function handleConnection(
 
     try {
       if (state.authenticated && !state.isAdmin && msg.type !== 'auth') {
-        await touchSessionLastActiveAt(ctx.db, state.agentId, state.userId);
+        touchSessionLastActiveAt(ctx.db, state.agentId, state.userId).catch((err) =>
+          console.error('Failed to touch session:', err),
+        );
       }
 
       switch (msg.type) {
@@ -258,6 +261,11 @@ export function handleConnection(
 
           if (!msg.content?.trim()) {
             send(ws, { type: 'error', message: 'Empty message' });
+            return;
+          }
+
+          if (msg.content.length > 10_000) {
+            send(ws, { type: 'error', message: 'Message too long (max 10,000 characters)' });
             return;
           }
 

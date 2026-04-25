@@ -199,6 +199,7 @@
             type?: string;
             content?: string;
             message?: string;
+            reason?: string;
           }
         | null = null;
       try {
@@ -214,6 +215,16 @@
       if (message.type === 'error') {
         const errorText = message.content ?? message.message;
         if (errorText) createMessage(errorText, 'assistant', true);
+      }
+      if (message.type === 'auth_error') {
+        createMessage(
+          `⚠️ Connection failed: ${message.message || message.reason || 'Authentication error'}`,
+          'assistant',
+          true,
+        );
+        manualClose = true;
+        socket?.close();
+        return;
       }
     };
 

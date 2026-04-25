@@ -17,7 +17,7 @@ interface ManagedSocket {
 }
 
 const config = loadConfig();
-const app = Fastify({ logger: true });
+const app = Fastify({ logger: true, bodyLimit: 1048576 });
 const activeSockets = new Set<ManagedSocket>();
 const connectionsPerIp = new Map<string, number>();
 const MAX_WS_PER_IP = 20;
