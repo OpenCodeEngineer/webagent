@@ -3,9 +3,17 @@ import { getAgent } from "@/lib/api";
 import { normalizeCustomerIdToUuid } from "@/lib/customer-id";
 import { redirect } from "next/navigation";
 import { AgentDetailActions } from "@/components/agent-detail-actions";
+import { WidgetPreview } from "@/components/widget-preview";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+
+const WIDGET_BASE_URL = process.env.NEXT_PUBLIC_APP_URL || process.env.AUTH_URL || "https://dev.lamoom.com";
+
+function buildEmbedCode(token: string): string {
+  const domain = WIDGET_BASE_URL.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+  return `<script src="https://${domain}/widget.js" data-agent-token="${token}" async></script>`;
+}
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -31,9 +39,7 @@ export default async function AgentDetailPage({ params }: Props) {
 
   const embedCode =
     agent.embedCode ??
-    (agent.embedToken
-      ? `<script src="https://cdn.webagent.ai/widget.js" data-token="${agent.embedToken}"></script>`
-      : "");
+    (agent.embedToken ? buildEmbedCode(agent.embedToken) : "");
 
   return (
     <div className="space-y-6">
@@ -80,18 +86,15 @@ export default async function AgentDetailPage({ params }: Props) {
         </CardContent>
       </Card>
 
-      {/* Widget preview */}
-      {agent.widgetPreviewUrl && (
+      {/* Live widget preview */}
+      {agent.embedToken && (
         <Card>
           <CardHeader>
-            <CardTitle>Widget Preview</CardTitle>
+            <CardTitle>Test Your Widget</CardTitle>
+            <CardDescription>Try chatting with your agent below. This is exactly what your visitors will see.</CardDescription>
           </CardHeader>
           <CardContent>
-            <iframe
-              src={agent.widgetPreviewUrl}
-              className="h-96 w-full rounded-lg border border-border"
-              title="Widget Preview"
-            />
+            <WidgetPreview agentToken={agent.embedToken} />
           </CardContent>
         </Card>
       )}

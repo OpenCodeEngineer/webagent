@@ -38,7 +38,8 @@ export function AgentDetailActions({ agentId, embedCode: initialEmbedCode, custo
         setEmbedCode(updated.embedCode);
         toast({ message: "Token regenerated.", type: "success" });
       } else if (updated?.embedToken) {
-        const newCode = `<script src="https://cdn.webagent.ai/widget.js" data-token="${updated.embedToken}"></script>`;
+        const domain = (window.location.origin || "https://dev.lamoom.com").replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+        const newCode = `<script src="https://${domain}/widget.js" data-agent-token="${updated.embedToken}" async></script>`;
         setEmbedCode(newCode);
         toast({ message: "Token regenerated.", type: "success" });
       }
