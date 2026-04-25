@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'fs/promises';
+import { join } from 'path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { and, count, eq, ne } from 'drizzle-orm';
 import { z } from 'zod';
@@ -140,6 +142,103 @@ async function ensureCustomer(app: FastifyInstance, customerId: string) {
     .onConflictDoNothing();
 }
 
+async function detectAgentCreation(
+  responseText: string,
+  customerId: string,
+  app: FastifyInstance,
+  domain: string,
+): Promise<{ agent: typeof agents.$inferSelect; embedToken: string; embedCode: string } | null> {
+  const markerMatch = responseText.match(/\[AGENT_CREATED::([a-z0-9-]+)\]/i);
+  if (!markerMatch?.[1]) return null;
+
+  const slug = markerMatch[1];
+  const configuredWorkspacesDir = process.env.OPENCLAW_WORKSPACES_DIR?.trim();
+  const primaryWorkspacesDir = configuredWorkspacesDir || join(process.cwd(), 'openclaw', 'workspaces');
+  const configPaths = [join(primaryWorkspacesDir, slug, 'agent-config.json')];
+  if (!configuredWorkspacesDir) {
+    const fallbackWorkspacesDir = join(process.cwd(), '..', '..', 'openclaw', 'workspaces');
+    const fallbackConfigPath = join(fallbackWorkspacesDir, slug, 'agent-config.json');
+    if (fallbackConfigPath !== configPaths[0]) {
+      configPaths.push(fallbackConfigPath);
+    }
+  }
+
+  type AgentConfig = {
+    agentSlug: string;
+    agentName: string;
+    websiteName: string;
+    websiteUrl: string;
+    apiDescription: string;
+    apiBaseUrl: string;
+    createdAt: string;
+  };
+
+  let config: AgentConfig | null = null;
+  let lastReadError: unknown;
+  for (const configPath of configPaths) {
+    try {
+      const rawConfig = await readFile(configPath, 'utf8');
+      config = JSON.parse(rawConfig) as AgentConfig;
+      break;
+    } catch (error) {
+      lastReadError = error;
+    }
+  }
+
+  if (!config) {
+    app.log.warn(
+      { error: lastReadError, slug, configPaths },
+      'failed to read agent config after creation marker',
+    );
+    return null;
+  }
+
+  const normalizeNullable = (value: string | undefined): string | null => {
+    const normalized = value?.trim();
+    return normalized ? normalized : null;
+  };
+
+  await ensureCustomer(app, customerId);
+
+  const now = new Date();
+  const createdAgentRows = await app.db
+    .insert(agents)
+    .values({
+      id: randomUUID(),
+      customerId,
+      openclawAgentId: config.agentSlug,
+      name: config.agentName,
+      websiteUrl: normalizeNullable(config.websiteUrl),
+      apiDescription: normalizeNullable(config.apiDescription),
+      description: null,
+      status: 'active',
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning();
+
+  const createdAgent = createdAgentRows[0];
+  if (!createdAgent) return null;
+
+  const embedToken = randomUUID();
+  await app.db.insert(widgetEmbeds).values({
+    id: randomUUID(),
+    agentId: createdAgent.id,
+    embedToken,
+    createdAt: now,
+  });
+
+  const normalizedDomain = domain.replace(/^https?:\/\//i, '');
+  const embedCode
+    = `<script src="https://${normalizedDomain}/widget.js" data-agent-token="${embedToken}" async></script>`;
+
+  return {
+    agent: createdAgent,
+    embedToken,
+    embedCode,
+  };
+}
+
 export function registerApiRoutes(app: FastifyInstance) {
   app.post('/api/internal/agents', async (request, reply) => {
     if (!isLocalhost(request)) {
@@ -252,15 +351,17 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
       }
 
       const responseText = agentResponse.response ?? '';
-      const embedCode
+      const existingEmbedCode
         = responseText.match(/<script\s[^>]*data-agent-token="[^"]*"[^>]*><\/script>/i)?.[0] ?? '';
+      const createdAgentData = await detectAgentCreation(responseText, query.customerId, app, domain);
 
       return reply.send({
         data: {
           response: responseText,
           sessionId,
-          agent: null,
-          embedCode,
+          agent: createdAgentData?.agent ?? null,
+          embedToken: createdAgentData?.embedToken ?? null,
+          embedCode: createdAgentData?.embedCode ?? existingEmbedCode,
         },
       });
     } catch (error) {
