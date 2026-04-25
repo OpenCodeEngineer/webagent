@@ -42,7 +42,7 @@
           // It does NOT need exec, process, browser
           deny: ["browser", "canvas"]
         },
-        skills: ["create-agent"],
+        skills: ["create-agent", "manage-agents"],
         heartbeat: { every: "0m" }
       }
     ]

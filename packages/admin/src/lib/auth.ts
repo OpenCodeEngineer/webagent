@@ -7,17 +7,21 @@ import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { eq } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { getDb } from "./db";
-import { users, accounts } from "./auth-schema";
+import { users, accounts, sessions, verificationTokens } from "./auth-schema";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: (() => {
     // Lazy-init DrizzleAdapter so the DB connection is only opened at
     // runtime, not during Next.js static build/collect phase.
-    // We use a plain object with explicit method delegation instead of
-    // Proxy to avoid breaking NextAuth's internal adapter type checks.
     let _adapter: ReturnType<typeof DrizzleAdapter> | undefined;
     const get = () => {
-      if (!_adapter) _adapter = DrizzleAdapter(getDb() as any);
+      if (!_adapter)
+        _adapter = DrizzleAdapter(getDb() as any, {
+          usersTable: users as any,
+          accountsTable: accounts as any,
+          sessionsTable: sessions as any,
+          verificationTokensTable: verificationTokens as any,
+        });
       return _adapter;
     };
     return {
