@@ -54,6 +54,21 @@ Next.js standalone mode does NOT auto-include `_next/static/`. If this fails, AL
 **If any of these fail → STOP. Do not continue to Phase 1. Report BLOCKING failure.**
 The fix is: `cp -r packages/admin/.next/static packages/admin/.next/standalone/packages/admin/.next/static` on the VM, then restart webagent-admin.
 
+### Phase 0c: OAuth Provider Endpoint (curl, not browser)
+
+Verify NextAuth providers are correctly configured and the DrizzleAdapter connects to the right tables.
+
+1. Fetch the providers endpoint:
+   ```
+   curl -sk https://dev.lamoom.com/api/auth/providers
+   ```
+2. **CHECK**: Response is valid JSON (not HTML error page)
+3. **CHECK**: `google` provider exists with `callbackUrl` containing `/api/auth/callback/google`
+4. **CHECK**: `credentials` provider exists
+
+**If providers endpoint returns an error or is missing `google` → STOP. Report BLOCKING failure.**
+Common cause: DrizzleAdapter table name mismatch (adapter expects singular `account`/`user`, DB has plural `accounts`/`users`). Fix: pass custom table schemas to `DrizzleAdapter()` in `packages/admin/src/lib/auth.ts`.
+
 ### Phase 1: Login & Dashboard
 
 1. **Navigate** to `https://dev.lamoom.com`
@@ -162,6 +177,7 @@ After running all phases, report a summary table:
 |-------|--------|-------|
 | 0. Infrastructure | ✅/❌ | health, openclaw health, widget.js |
 | 0b. Static Assets | ✅/❌ | CSS 200+size>1KB, JS chunks 200 — BLOCKING |
+| 0c. OAuth Providers | ✅/❌ | /api/auth/providers returns google+credentials — BLOCKING |
 | 1. Login & Dashboard | ✅/❌ | auth works, dark theme |
 | 2. Chat UI Quality | ✅/❌ | ChatGPT-like, no regressions |
 | 3. Agent Creation | ✅/❌ | full conversation, embed code |
@@ -183,3 +199,4 @@ After any deploy, verify these common failure modes:
 3. Proxy not restarted after code change → `systemctl restart webagent-proxy`
 4. OpenClaw gateway not restarted after config change → `systemctl restart openclaw-gateway`
 5. Widget.js stale → clear browser cache, check `/widget.js` returns fresh content
+6. Google OAuth callback fails → DrizzleAdapter not passed custom table schemas (singular vs plural table names)
