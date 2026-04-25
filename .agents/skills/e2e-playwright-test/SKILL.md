@@ -151,6 +151,49 @@ If the widget preview shows an error, debug via WebSocket directly:
 3. **CHECK**: auth_ok received (widget auth chain works)
 4. **CHECK**: Message response is non-empty and contextual
 
+### Phase 6: Sign Out Flow
+
+1. On the dashboard page, find the sign-out button (top-right, user menu or direct button)
+2. **Click** sign out
+3. **CHECK**: Redirected to `/login`
+4. **CHECK**: Visiting `/dashboard` redirects back to `/login` (session cleared)
+5. Log back in for remaining tests
+
+### Phase 7: Agent Management — Delete
+
+1. **Navigate** to `https://dev.lamoom.com/dashboard`
+2. Find an agent with a "Delete" button (pick one that's not important, or the test agent from Phase 3)
+3. Note the agent name
+4. **Click** Delete
+5. **CHECK**: Confirmation dialog appears (window.confirm or modal)
+6. **Accept** the confirmation
+7. **CHECK**: Agent disappears from the list (or page reloads without it)
+8. **CHECK**: No error messages visible
+9. **SCREENSHOT**: Dashboard after deletion
+
+### Phase 8: Agent Detail — Actions
+
+1. **Navigate** to `https://dev.lamoom.com/dashboard`
+2. **Click** "View" on any active agent
+3. On the agent detail page:
+   - **CHECK**: Embed code section visible with `<script>` tag
+   - **CHECK**: "Copy Embed Code" button exists and is clickable
+   - **CHECK**: "Regenerate Token" button exists
+4. **Click** "Regenerate Token"
+5. **CHECK**: Confirmation dialog appears
+6. **Accept** — **CHECK**: Success message or token changes
+7. **SCREENSHOT**: Agent detail page with all actions visible
+
+### Phase 9: Admin CRM (requires ADMIN_EMAILS match)
+
+1. **Navigate** to `https://dev.lamoom.com/admin`
+2. **CHECK**: Page loads (not 403/redirect — if it does, note and skip)
+3. **CHECK**: Stats cards visible: Total Users, Total Agents, Active Agents, Total Sessions
+4. **CHECK**: Users table visible with at least 1 row
+5. **CHECK**: Agents table visible
+6. **CHECK**: Audit Log table visible with recent entries
+7. **SCREENSHOT**: Admin dashboard
+
 ## UI/UX Quality Checklist (check on EVERY page)
 
 Run these checks on every page you visit. Any failure = QA FAIL.
@@ -183,6 +226,10 @@ After running all phases, report a summary table:
 | 3. Agent Creation | ✅/❌ | full conversation, embed code |
 | 4. Agent Verification | ✅/❌ | appears in dashboard |
 | 5. Widget Preview | ✅/❌ | live chat on dashboard works |
+| 6. Sign Out Flow    | ✅/❌ | logout + session cleared |
+| 7. Agent Delete      | ✅/❌ | delete + confirmation |
+| 8. Agent Detail      | ✅/❌ | embed code, copy, regenerate |
+| 9. Admin CRM        | ✅/❌ | stats, users, agents, audit |
 
 UI/UX Issues Found:
 - [list any visual/interaction problems]
