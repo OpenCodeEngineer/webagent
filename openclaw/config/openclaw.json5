@@ -1,5 +1,11 @@
 {
   // Multi-agent configuration for Web MCP Agent platform
+  gateway: {
+    auth: {
+      mode: "token",
+      token: "${OPENCLAW_GATEWAY_TOKEN}",
+    },
+  },
   agents: {
     defaults: {
       workspace: "~/.openclaw/workspace",
@@ -37,7 +43,7 @@
   },
   hooks: {
     enabled: true,
-    token: "${OPENCLAW_HOOKS_TOKEN}",
+    token: "${OPENCLAW_GATEWAY_TOKEN}",
     path: "/hooks",
     allowRequestSessionKey: true,
     allowedSessionKeyPrefixes: ["widget:", "admin:", "hook:"],
