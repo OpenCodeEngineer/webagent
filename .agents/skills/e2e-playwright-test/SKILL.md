@@ -31,6 +31,29 @@ curl -sk https://dev.lamoom.com/health/openclaw → 200 {"status":"ok"}
 curl -sk https://dev.lamoom.com/widget.js → 200, non-empty JS
 ```
 
+### Phase 0b: Static Assets — BLOCKING (curl, not browser)
+Next.js standalone mode does NOT auto-include `_next/static/`. If this fails, ALL pages render as unstyled black & white.
+
+1. Fetch the login page HTML and extract CSS paths:
+   ```
+   CSS_PATH=$(curl -sk https://dev.lamoom.com/login | grep -oE '_next/static/css/[^"]+' | head -1)
+   ```
+2. **CHECK**: `CSS_PATH` is non-empty (CSS link exists in HTML)
+3. Fetch the CSS file:
+   ```
+   curl -sk -o /dev/null -w "%{http_code} size:%{size_download}" "https://dev.lamoom.com/$CSS_PATH"
+   ```
+4. **CHECK**: HTTP 200 AND size > 1000 bytes (real CSS, not error page)
+5. Extract and check a JS chunk too:
+   ```
+   JS_PATH=$(curl -sk https://dev.lamoom.com/login | grep -oE '_next/static/chunks/[^"]+' | head -1)
+   curl -sk -o /dev/null -w "%{http_code}" "https://dev.lamoom.com/$JS_PATH"
+   ```
+6. **CHECK**: HTTP 200
+
+**If any of these fail → STOP. Do not continue to Phase 1. Report BLOCKING failure.**
+The fix is: `cp -r packages/admin/.next/static packages/admin/.next/standalone/packages/admin/.next/static` on the VM, then restart webagent-admin.
+
 ### Phase 1: Login & Dashboard
 
 1. **Navigate** to `https://dev.lamoom.com`
@@ -138,6 +161,7 @@ After running all phases, report a summary table:
 | Phase | Status | Notes |
 |-------|--------|-------|
 | 0. Infrastructure | ✅/❌ | health, openclaw health, widget.js |
+| 0b. Static Assets | ✅/❌ | CSS 200+size>1KB, JS chunks 200 — BLOCKING |
 | 1. Login & Dashboard | ✅/❌ | auth works, dark theme |
 | 2. Chat UI Quality | ✅/❌ | ChatGPT-like, no regressions |
 | 3. Agent Creation | ✅/❌ | full conversation, embed code |
