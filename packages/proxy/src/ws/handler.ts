@@ -44,6 +44,15 @@ const openclawClient = new OpenClawClient();
 const TOKEN_CACHE_TTL_MS = 60_000;
 const tokenCache = new Map<string, TokenCacheEntry>();
 
+function timingSafeBufferEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  if (left.length !== right.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(left, right);
+}
+
 export function invalidateEmbedTokenCache(token?: string): void {
   if (token) {
     tokenCache.delete(token);
@@ -181,7 +190,7 @@ export function handleConnection(
               || process.env.PROXY_API_TOKEN?.trim()
               || process.env.OPENCLAW_GATEWAY_TOKEN?.trim()
             );
-            if (!expectedToken || authToken !== expectedToken) {
+            if (!expectedToken || !timingSafeBufferEqual(authToken, expectedToken)) {
               send(ws, { type: 'auth_error', reason: 'Invalid admin token' });
               ws.close(4003, 'Invalid admin token');
               return;

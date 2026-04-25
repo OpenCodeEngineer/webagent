@@ -15,4 +15,4 @@ export function middleware(request: NextRequest) {
   return NextResponse.next();
 }
 
-export const config = { matcher: ['/dashboard/:path*', '/create/:path*'] };
+export const config = { matcher: ['/dashboard/:path*', '/create/:path*', '/admin/:path*'] };

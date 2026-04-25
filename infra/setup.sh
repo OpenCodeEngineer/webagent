@@ -51,6 +51,12 @@ fi
 # ── 7. Install dependencies ───────────────────────────────────────────────────
 sudo -u "${APP_USER}" bash -c "cd ${APP_DIR} && pnpm install --frozen-lockfile"
 
+# ── 7b. Build all packages ────────────────────────────────────────────────────
+sudo -u "${APP_USER}" bash -c "cd ${APP_DIR} && pnpm build"
+
+# ── 7c. Run database migrations ───────────────────────────────────────────────
+sudo -u "${APP_USER}" bash -c "cd ${APP_DIR} && pnpm --filter @webagent/proxy db:migrate"
+
 # ── 8. Nginx configuration ────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cp "${SCRIPT_DIR}/nginx/webagent.conf" /etc/nginx/sites-available/webagent.conf

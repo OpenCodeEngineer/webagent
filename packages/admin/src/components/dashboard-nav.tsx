@@ -11,6 +11,7 @@ import {
   Settings,
   LogOut,
   Menu,
+  Shield,
 } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -31,6 +32,7 @@ import { cn } from "@/lib/utils";
 interface DashboardNavProps {
   userEmail: string;
   userName?: string;
+  isAdmin?: boolean;
 }
 
 const navItems = [
@@ -39,21 +41,29 @@ const navItems = [
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 
+const adminEmails = (process.env.ADMIN_EMAILS ?? "")
+  .split(",")
+  .map((email) => email.trim().toLowerCase())
+  .filter(Boolean);
+
 function NavContent({
   userEmail,
   userName,
+  isAdmin: serverIsAdmin = false,
   onNavigate,
 }: {
   userEmail: string;
   userName?: string;
+  isAdmin?: boolean;
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
   const initial = (userName ?? userEmail).charAt(0).toUpperCase();
+  const isAdminFromEnv = adminEmails.includes(userEmail.toLowerCase());
+  const isAdmin = isAdminFromEnv || serverIsAdmin;
 
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
-      {/* Logo */}
       <div className="flex h-14 items-center gap-2 px-4">
         <Bot className="h-5 w-5 text-primary" />
         <span className="text-base font-semibold">Lamoom</span>
@@ -61,7 +71,6 @@ function NavContent({
 
       <Separator className="bg-sidebar-border" />
 
-      {/* Nav items */}
       <nav className="flex-1 space-y-1 px-2 py-4">
         {navItems.map(({ label, href, icon: Icon }) => {
           const isActive =
@@ -87,9 +96,27 @@ function NavContent({
         })}
       </nav>
 
+      {isAdmin ? (
+        <div className="px-2 pb-4">
+          <Link
+            href="/admin"
+            onClick={onNavigate}
+            className={cn(
+              buttonVariants({ variant: "ghost" }),
+              "w-full justify-start gap-2 font-normal",
+              pathname === "/admin" || pathname.startsWith("/admin/")
+                ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            )}
+          >
+            <Shield className="h-4 w-4" />
+            Admin
+          </Link>
+        </div>
+      ) : null}
+
       <Separator className="bg-sidebar-border" />
 
-      {/* User footer */}
       <div className="flex items-center gap-3 px-3 py-3">
         <Avatar className="h-8 w-8 flex-shrink-0">
           <AvatarFallback className="text-xs">{initial}</AvatarFallback>
@@ -116,17 +143,15 @@ function NavContent({
   );
 }
 
-export function DashboardNav({ userEmail, userName }: DashboardNavProps) {
+export function DashboardNav({ userEmail, userName, isAdmin }: DashboardNavProps) {
   const [open, setOpen] = useState(false);
 
   return (
     <>
-      {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 lg:flex lg:flex-col">
-        <NavContent userEmail={userEmail} userName={userName} />
+        <NavContent userEmail={userEmail} userName={userName} isAdmin={isAdmin} />
       </aside>
 
-      {/* Mobile: hamburger + sheet */}
       <div className="fixed inset-x-0 top-0 z-30 flex items-center gap-3 border-b border-border bg-background px-4 py-3 lg:hidden">
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetTrigger className={cn(buttonVariants({ variant: "ghost", size: "icon" }))} aria-label="Open menu">
@@ -136,6 +161,7 @@ export function DashboardNav({ userEmail, userName }: DashboardNavProps) {
             <NavContent
               userEmail={userEmail}
               userName={userName}
+              isAdmin={isAdmin}
               onNavigate={() => setOpen(false)}
             />
           </SheetContent>
@@ -146,7 +172,6 @@ export function DashboardNav({ userEmail, userName }: DashboardNavProps) {
         </div>
       </div>
 
-      {/* Spacer for mobile top bar */}
       <div className="h-12 lg:hidden" />
     </>
   );

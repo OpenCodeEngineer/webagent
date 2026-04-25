@@ -9,7 +9,12 @@ const EMBED_CODE_RE = /<script[^>]*data-agent-token[^>]*><\/script>/;
 const BASE_RECONNECT_MS = 1000;
 const MAX_RECONNECT_MS = 30000;
 
-export function CreateAgentChat({ customerId }: { customerId?: string }) {
+interface CreateAgentChatProps {
+  customerId?: string;
+  wsToken: string;
+}
+
+export function CreateAgentChat({ customerId, wsToken }: CreateAgentChatProps) {
   const [messages, setMessages] = useState<MetaAgentMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -38,13 +43,13 @@ export function CreateAgentChat({ customerId }: { customerId?: string }) {
       if (!mountedRef.current) return;
 
       shouldReconnectRef.current = true;
-      const token = process.env.NEXT_PUBLIC_PROXY_TOKEN ?? process.env.NEXT_PUBLIC_PROXY_API_TOKEN;
+      const token = wsToken;
       if (!token) {
         shouldReconnectRef.current = false;
         authFailureNotifiedRef.current = true;
         setMessages([{
           role: "assistant",
-          content: "⚠️ Missing authentication token (NEXT_PUBLIC_PROXY_TOKEN or NEXT_PUBLIC_PROXY_API_TOKEN). Please check your environment configuration and refresh.",
+          content: "⚠️ Missing authentication token. Please check your environment configuration and refresh.",
         }]);
         return;
       }
@@ -154,7 +159,7 @@ export function CreateAgentChat({ customerId }: { customerId?: string }) {
         socketRef.current = null;
       }
     };
-  }, [customerId]);
+  }, [customerId, wsToken]);
 
   // --- Send handler ---
   const onSend = useCallback(() => {

@@ -7,6 +7,30 @@ interface AgentResponse {
   error?: string;
 }
 
+const MAX_CONCURRENT = 5;
+let activeProcesses = 0;
+const waitQueue: Array<() => void> = [];
+
+async function acquireSlot(): Promise<void> {
+  if (activeProcesses < MAX_CONCURRENT) {
+    activeProcesses += 1;
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    waitQueue.push(resolve);
+  });
+}
+
+function releaseSlot(): void {
+  const next = waitQueue.shift();
+  if (next) {
+    next();
+    return;
+  }
+  activeProcesses = Math.max(0, activeProcesses - 1);
+}
+
 function execFilePromise(
   file: string,
   args: string[],
@@ -63,6 +87,7 @@ export class OpenClawClient {
     }
     args.push('--json');
 
+    await acquireSlot();
     try {
       const { stdout } = await execFilePromise('openclaw', args, timeoutSeconds * 1000);
       const parsed = JSON.parse(stdout) as {
@@ -107,6 +132,8 @@ export class OpenClawClient {
 
       const msg = error instanceof Error ? error.message : String(error);
       return { success: false, error: msg };
+    } finally {
+      releaseSlot();
     }
   }
 

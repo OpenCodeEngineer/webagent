@@ -183,13 +183,10 @@ const safeJson = async (response: Response): Promise<unknown> => {
   }
 };
 
-const getApiToken = (): string | undefined => {
-  if (typeof window !== "undefined") {
-    return process.env.NEXT_PUBLIC_PROXY_API_TOKEN;
-  }
-
-  return process.env.PROXY_CUSTOMER_API_TOKEN ?? process.env.PROXY_API_TOKEN;
-};
+const getApiToken = (): string | undefined =>
+  process.env.PROXY_CUSTOMER_API_TOKEN ??
+  process.env.PROXY_API_TOKEN ??
+  process.env.OPENCLAW_GATEWAY_TOKEN;
 
 const extractErrorMessage = (payload: unknown, statusText: string): string => {
   if (isRecord(payload)) {

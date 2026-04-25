@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Globe, Users, Bot } from "lucide-react";
 import type { Agent } from "@/lib/api";
-import { updateAgent, deleteAgent } from "@/lib/api";
+import { serverDeleteAgent, serverUpdateAgent } from "@/lib/actions";
 import { useToast } from "@/components/toast";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -13,10 +13,9 @@ import { cn } from "@/lib/utils";
 
 interface AgentCardsProps {
   agents: Agent[];
-  customerId?: string;
 }
 
-export function AgentCards({ agents: initialAgents, customerId }: AgentCardsProps) {
+export function AgentCards({ agents: initialAgents }: AgentCardsProps) {
   const [agents, setAgents] = useState<Agent[]>(initialAgents);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const { toast } = useToast();
@@ -35,7 +34,7 @@ export function AgentCards({ agents: initialAgents, customerId }: AgentCardsProp
     const newStatus = agent.status === "paused" ? "active" : "paused";
     setLoadingId(`pause-${agent.id}`);
     try {
-      const updated = await updateAgent(agent.id, { status: newStatus }, customerId);
+      const updated = await serverUpdateAgent(agent.id, { status: newStatus });
       if (updated) {
         setAgents((prev) => prev.map((a) => (a.id === agent.id ? updated : a)));
         toast({ message: `Agent ${newStatus === "active" ? "resumed" : "paused"}.`, type: "success" });
@@ -51,7 +50,7 @@ export function AgentCards({ agents: initialAgents, customerId }: AgentCardsProp
     if (!window.confirm(`Delete agent "${agent.name ?? agent.id}"? This cannot be undone.`)) return;
     setLoadingId(`delete-${agent.id}`);
     try {
-      await deleteAgent(agent.id, customerId);
+      await serverDeleteAgent(agent.id);
       setAgents((prev) => prev.filter((a) => a.id !== agent.id));
       toast({ message: "Agent deleted.", type: "success" });
     } catch (err) {

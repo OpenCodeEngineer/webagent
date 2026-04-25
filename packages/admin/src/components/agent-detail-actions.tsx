@@ -2,17 +2,16 @@
 
 import { useState } from "react";
 import { Copy, Check, RefreshCw } from "lucide-react";
-import { regenerateToken } from "@/lib/api";
+import { serverRegenerateToken } from "@/lib/actions";
 import { useToast } from "@/components/toast";
 import { Button } from "@/components/ui/button";
 
 interface AgentDetailActionsProps {
   agentId: string;
   embedCode: string;
-  customerId?: string;
 }
 
-export function AgentDetailActions({ agentId, embedCode: initialEmbedCode, customerId }: AgentDetailActionsProps) {
+export function AgentDetailActions({ agentId, embedCode: initialEmbedCode }: AgentDetailActionsProps) {
   const [embedCode, setEmbedCode] = useState(initialEmbedCode);
   const [copied, setCopied] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
@@ -33,7 +32,7 @@ export function AgentDetailActions({ agentId, embedCode: initialEmbedCode, custo
     if (!window.confirm("Regenerate embed token? The old token will stop working.")) return;
     setRegenerating(true);
     try {
-      const updated = await regenerateToken(agentId, customerId);
+      const updated = await serverRegenerateToken(agentId);
       if (updated?.embedCode) {
         setEmbedCode(updated.embedCode);
         toast({ message: "Token regenerated.", type: "success" });

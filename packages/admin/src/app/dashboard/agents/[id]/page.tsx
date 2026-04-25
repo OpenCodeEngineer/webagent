@@ -1,6 +1,5 @@
 import { auth } from "@/lib/auth";
-import { getAgent } from "@/lib/api";
-import { normalizeCustomerIdToUuid } from "@/lib/customer-id";
+import { serverGetAgent } from "@/lib/actions";
 import { redirect } from "next/navigation";
 import { AgentDetailActions } from "@/components/agent-detail-actions";
 import { WidgetPreview } from "@/components/widget-preview";
@@ -24,8 +23,7 @@ export default async function AgentDetailPage({ params }: Props) {
   if (!session?.user) redirect("/login");
 
   const { id } = await params;
-  const customerId = normalizeCustomerIdToUuid(session.user.id, session.user.email);
-  const agent = await getAgent(id, customerId);
+  const agent = await serverGetAgent(id);
 
   if (!agent) {
     return (
@@ -82,7 +80,7 @@ export default async function AgentDetailPage({ params }: Props) {
           <CardDescription>Add this snippet to your website.</CardDescription>
         </CardHeader>
         <CardContent>
-          <AgentDetailActions agentId={agent.id} embedCode={embedCode} customerId={customerId} />
+          <AgentDetailActions agentId={agent.id} embedCode={embedCode} />
         </CardContent>
       </Card>
 

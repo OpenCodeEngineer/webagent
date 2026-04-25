@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto';
-import { readFile, writeFile } from 'fs/promises';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { mkdir, readFile, rmdir, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'node:os';
 import { execFile } from 'node:child_process';
@@ -118,6 +118,15 @@ function getCustomerApiToken(): string | null {
   );
 }
 
+function timingSafeBufferEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  if (left.length !== right.length) {
+    return false;
+  }
+  return timingSafeEqual(left, right);
+}
+
 function requireCustomerAuth(request: FastifyRequest, reply: FastifyReply): boolean {
   const expected = getCustomerApiToken();
   if (!expected) {
@@ -126,7 +135,7 @@ function requireCustomerAuth(request: FastifyRequest, reply: FastifyReply): bool
   }
 
   const token = readBearerToken(request);
-  if (!token || token !== expected) {
+  if (!token || !timingSafeBufferEqual(token, expected)) {
     sendError(reply, 401, 'unauthorized', 'Invalid or missing bearer token');
     return false;
   }
@@ -163,75 +172,89 @@ async function registerAgentInOpenClaw(
   app: FastifyInstance,
 ): Promise<void> {
   const configPath = join(homedir(), '.openclaw', 'openclaw.json');
+  const lockPath = `${configPath}.lock`;
   try {
-    const raw = await readFile(configPath, 'utf8');
-    const config = JSON.parse(raw) as {
-      agents?: { list?: Array<{ id: string; [k: string]: unknown }> };
-      [k: string]: unknown;
-    };
-
-    if (!config.agents?.list) {
-      app.log.warn('openclaw.json missing agents.list — skipping registration');
-      return;
-    }
-
-    if (config.agents.list.some((a) => a.id === slug)) {
-      app.log.info({ slug }, 'agent already in openclaw.json — skipping');
-      return;
-    }
-
-    config.agents.list.push({
-      id: slug,
-      name,
-      workspace: `~/openclaw/workspaces/${slug}`,
-      skills: ['website-api'],
-      heartbeat: { every: '30m' },
-    });
-
-    await writeFile(configPath, JSON.stringify(config, null, 2), 'utf8');
-    app.log.info({ slug }, 'registered agent in openclaw.json');
-
-    // Try SIGHUP first (no root needed for same-user processes), fall back to systemctl
-    const reloaded = await new Promise<boolean>((resolve) => {
-      execFile('pgrep', ['-f', 'openclaw.*gateway'], { timeout: 5_000 }, (err, stdout) => {
-        if (err || !stdout?.trim()) {
-          app.log.warn('could not find openclaw gateway PID via pgrep');
-          resolve(false);
-          return;
-        }
-        const pid = stdout.trim().split('\n')[0] ?? '';
-        if (!pid) {
-          app.log.warn('could not parse openclaw gateway PID from pgrep output');
-          resolve(false);
-          return;
-        }
-        execFile('kill', ['-HUP', pid], { timeout: 5_000 }, (killErr) => {
-          const killError = killErr as NodeJS.ErrnoException | null;
-          if (killError) {
-            app.log.warn({ err: killError, pid }, 'SIGHUP failed');
-            resolve(false);
-          } else {
-            app.log.info({ pid }, 'sent SIGHUP to openclaw gateway');
-            resolve(true);
-          }
-        });
-      });
-    });
-
-    if (!reloaded) {
-      await new Promise<void>((resolve) => {
-        execFile('sudo', ['systemctl', 'restart', 'openclaw-gateway'], { timeout: 15_000 }, (err) => {
-          if (err) {
-            app.log.warn({ err }, 'systemctl restart fallback also failed');
-          } else {
-            app.log.info('openclaw-gateway restarted via systemctl fallback');
-          }
-          resolve();
-        });
-      });
-    }
+    await mkdir(lockPath, { recursive: false });
   } catch (err) {
-    app.log.warn({ err, configPath }, 'failed to register agent in openclaw config');
+    app.log.warn({ err, lockPath }, 'openclaw config lock acquisition failed');
+    return;
+  }
+
+  try {
+    try {
+      const raw = await readFile(configPath, 'utf8');
+      const config = JSON.parse(raw) as {
+        agents?: { list?: Array<{ id: string; [k: string]: unknown }> };
+        [k: string]: unknown;
+      };
+
+      if (!config.agents?.list) {
+        app.log.warn('openclaw.json missing agents.list — skipping registration');
+        return;
+      }
+
+      if (config.agents.list.some((a) => a.id === slug)) {
+        app.log.info({ slug }, 'agent already in openclaw.json — skipping');
+        return;
+      }
+
+      config.agents.list.push({
+        id: slug,
+        name,
+        workspace: `~/openclaw/workspaces/${slug}`,
+        skills: ['website-api'],
+        heartbeat: { every: '30m' },
+      });
+
+      await writeFile(configPath, JSON.stringify(config, null, 2), 'utf8');
+      app.log.info({ slug }, 'registered agent in openclaw.json');
+
+      // Try SIGHUP first (no root needed for same-user processes), fall back to systemctl
+      const reloaded = await new Promise<boolean>((resolve) => {
+        execFile('pgrep', ['-f', 'openclaw.*gateway'], { timeout: 5_000 }, (err, stdout) => {
+          if (err || !stdout?.trim()) {
+            app.log.warn('could not find openclaw gateway PID via pgrep');
+            resolve(false);
+            return;
+          }
+          const pid = stdout.trim().split('\n')[0] ?? '';
+          if (!pid) {
+            app.log.warn('could not parse openclaw gateway PID from pgrep output');
+            resolve(false);
+            return;
+          }
+          execFile('kill', ['-HUP', pid], { timeout: 5_000 }, (killErr) => {
+            const killError = killErr as NodeJS.ErrnoException | null;
+            if (killError) {
+              app.log.warn({ err: killError, pid }, 'SIGHUP failed');
+              resolve(false);
+            } else {
+              app.log.info({ pid }, 'sent SIGHUP to openclaw gateway');
+              resolve(true);
+            }
+          });
+        });
+      });
+
+      if (!reloaded) {
+        await new Promise<void>((resolve) => {
+          execFile('sudo', ['systemctl', 'restart', 'openclaw-gateway'], { timeout: 15_000 }, (err) => {
+            if (err) {
+              app.log.warn({ err }, 'systemctl restart fallback also failed');
+            } else {
+              app.log.info('openclaw-gateway restarted via systemctl fallback');
+            }
+            resolve();
+          });
+        });
+      }
+    } catch (err) {
+      app.log.warn({ err, configPath }, 'failed to register agent in openclaw config');
+    }
+  } finally {
+    try {
+      await rmdir(lockPath);
+    } catch {}
   }
 }
 
@@ -308,21 +331,48 @@ export async function detectAgentCreation(
       createdAt: now,
       updatedAt: now,
     })
+    .onConflictDoNothing({ target: agents.openclawAgentId })
     .returning();
 
-  const createdAgent = createdAgentRows[0];
+  const createdAgent = createdAgentRows[0]
+    ?? (
+      await app.db
+        .select()
+        .from(agents)
+        .where(
+          and(
+            eq(agents.openclawAgentId, config.agentSlug),
+            eq(agents.customerId, customerId),
+            ne(agents.status, 'deleted'),
+          ),
+        )
+        .limit(1)
+    )[0];
   if (!createdAgent) return null;
 
   // Register agent in OpenClaw gateway config and restart gateway
   await registerAgentInOpenClaw(config.agentSlug, config.agentName, app);
 
+  const existingEmbedRows = await app.db
+    .select()
+    .from(widgetEmbeds)
+    .where(eq(widgetEmbeds.agentId, createdAgent.id))
+    .limit(1);
+  const existingEmbed = existingEmbedRows[0];
   const embedToken = randomUUID();
-  await app.db.insert(widgetEmbeds).values({
-    id: randomUUID(),
-    agentId: createdAgent.id,
-    embedToken,
-    createdAt: now,
-  });
+  if (existingEmbed) {
+    await app.db
+      .update(widgetEmbeds)
+      .set({ embedToken })
+      .where(eq(widgetEmbeds.id, existingEmbed.id));
+  } else {
+    await app.db.insert(widgetEmbeds).values({
+      id: randomUUID(),
+      agentId: createdAgent.id,
+      embedToken,
+      createdAt: now,
+    });
+  }
   await insertAuditLog(app, customerId, 'agent.create_via_meta', {
     agentId: createdAgent.id,
     openclawAgentId: config.agentSlug,
@@ -341,7 +391,9 @@ export async function detectAgentCreation(
 }
 
 export function registerApiRoutes(app: FastifyInstance) {
-  app.post('/api/internal/agents', async (request, reply) => {
+  const mutationRateLimit = { max: 20, timeWindow: '1 minute' };
+
+  app.post('/api/internal/agents', { config: { rateLimit: mutationRateLimit } }, async (request, reply) => {
     if (!isLocalhost(request)) {
       return sendError(reply, 403, 'forbidden', 'Route is restricted to localhost requests');
     }
@@ -401,7 +453,7 @@ export function registerApiRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/agents/create-via-meta', async (request, reply) => {
+  app.post('/api/agents/create-via-meta', { config: { rateLimit: mutationRateLimit } }, async (request, reply) => {
     if (!requireCustomerAuth(request, reply)) return;
 
     const query = parseOrError(agentsQuerySchema, request.query, reply, 'invalid_agents_query');
@@ -571,7 +623,7 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
     }
   });
 
-  app.patch('/api/agents/:id', async (request, reply) => {
+  app.patch('/api/agents/:id', { config: { rateLimit: mutationRateLimit } }, async (request, reply) => {
     if (!requireCustomerAuth(request, reply)) return;
 
     const params = parseOrError(idParamsSchema, request.params, reply, 'invalid_agent_id');
@@ -635,7 +687,7 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
     }
   });
 
-  app.delete('/api/agents/:id', async (request, reply) => {
+  app.delete('/api/agents/:id', { config: { rateLimit: mutationRateLimit } }, async (request, reply) => {
     if (!requireCustomerAuth(request, reply)) return;
 
     const params = parseOrError(idParamsSchema, request.params, reply, 'invalid_agent_id');
@@ -683,7 +735,7 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
     }
   });
 
-  app.post('/api/agents/:id/embed-token', async (request, reply) => {
+  app.post('/api/agents/:id/embed-token', { config: { rateLimit: mutationRateLimit } }, async (request, reply) => {
     if (!requireCustomerAuth(request, reply)) return;
 
     const params = parseOrError(idParamsSchema, request.params, reply, 'invalid_agent_id');

@@ -1,9 +1,11 @@
 import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
+import rateLimit from '@fastify/rate-limit';
 
 import { loadConfig } from './config.js';
 import { dbPlugin } from './db/plugin.js';
 import { registerApiRoutes } from './routes/api.js';
+import { registerAdminApiRoutes } from './routes/admin-api.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerWidgetRoutes } from './routes/widget.js';
 import { handleConnection } from './ws/handler.js';
@@ -17,19 +19,38 @@ interface ManagedSocket {
 const config = loadConfig();
 const app = Fastify({ logger: true });
 const activeSockets = new Set<ManagedSocket>();
+const connectionsPerIp = new Map<string, number>();
+const MAX_WS_PER_IP = 20;
 
-await app.register(websocket);
+await app.register(websocket, { options: { maxPayload: 65536 } });
+await app.register(rateLimit, { max: 100, timeWindow: '1 minute' });
 await app.register(dbPlugin);
 
 registerHealthRoutes(app);
 registerWidgetRoutes(app);
 registerApiRoutes(app);
+registerAdminApiRoutes(app);
 
 app.get(DEFAULT_WS_PATH, { websocket: true }, (socket, request) => {
+  const ip = request.ip;
+  const currentConnections = connectionsPerIp.get(ip) ?? 0;
+  if (currentConnections >= MAX_WS_PER_IP) {
+    socket.close(4029, 'Too many connections');
+    return;
+  }
+
+  connectionsPerIp.set(ip, currentConnections + 1);
+
   const managed = socket as unknown as ManagedSocket;
   activeSockets.add(managed);
   managed.on('close', () => {
     activeSockets.delete(managed);
+    const remaining = (connectionsPerIp.get(ip) ?? 1) - 1;
+    if (remaining <= 0) {
+      connectionsPerIp.delete(ip);
+      return;
+    }
+    connectionsPerIp.set(ip, remaining);
   });
 
   const origin = typeof request.headers.origin === 'string' ? request.headers.origin : undefined;
@@ -77,5 +98,14 @@ const start = async (): Promise<void> => {
     process.exit(1);
   }
 };
+
+process.on('unhandledRejection', (error) => {
+  app.log.error({ error }, 'unhandled promise rejection');
+});
+
+process.on('uncaughtException', (error) => {
+  app.log.fatal({ error }, 'uncaught exception');
+  void shutdown('SIGTERM');
+});
 
 void start();
