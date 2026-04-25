@@ -1,0 +1,71 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: root
+          key: ${{ secrets.VM_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            APP_DIR="/opt/webagent"
+            cd "${APP_DIR}"
+
+            echo "→ Pulling latest code..."
+            git pull origin main
+
+            echo "→ Fixing permissions..."
+            chown -R openclaw:openclaw . 2>/dev/null || true
+
+            echo "→ Installing dependencies..."
+            sudo -u openclaw bash -c "cd ${APP_DIR} && pnpm install --frozen-lockfile"
+
+            echo "→ Building all packages..."
+            sudo -u openclaw bash -c "cd ${APP_DIR} && pnpm build"
+
+            echo "→ Copying Next.js static assets to standalone..."
+            cp -r "${APP_DIR}/packages/admin/.next/static" \
+                  "${APP_DIR}/packages/admin/.next/standalone/packages/admin/.next/static"
+
+            echo "→ Running database migrations..."
+            sudo -u openclaw bash -c "cd ${APP_DIR} && pnpm --filter @webagent/proxy db:migrate" || true
+
+            echo "→ Restarting services..."
+            systemctl restart webagent-proxy
+            systemctl restart webagent-admin
+            sleep 5
+
+            echo "→ Health checks..."
+            curl -sf http://127.0.0.1:3001/health || (echo "PROXY HEALTH FAILED" && exit 1)
+            curl -sf http://127.0.0.1:3000/ -o /dev/null || (echo "ADMIN HEALTH FAILED" && exit 1)
+
+            echo "→ Static asset check..."
+            CSS_PATH=$(curl -s http://127.0.0.1:3000/login | grep -oE '_next/static/css/[^"]+' | head -1)
+            if [ -n "$CSS_PATH" ]; then
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:3000/$CSS_PATH")
+              if [ "$STATUS" != "200" ]; then
+                echo "CSS ASSET FAILED: $CSS_PATH returned $STATUS"
+                exit 1
+              fi
+            fi
+
+            echo "→ OAuth provider check..."
+            PROVIDERS=$(curl -s http://127.0.0.1:3000/api/auth/providers)
+            echo "$PROVIDERS" | python3 -c "import sys,json; d=json.load(sys.stdin); assert 'google' in d and 'credentials' in d" \
+              || (echo "OAUTH PROVIDERS CHECK FAILED" && exit 1)
+
+            echo "✅ Deploy successful"
