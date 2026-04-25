@@ -127,12 +127,17 @@
   let panelOpen = false;
   let manualClose = false;
   let typingNode: { remove: () => void } | null = null;
+  let streamingAssistantNode: { textContent: string | null } | null = null;
 
   const scrollToBottom = (): void => {
     messages.scrollTop = messages.scrollHeight;
   };
 
-  const createMessage = (text: string, role: 'assistant' | 'user', isError = false): void => {
+  const createMessage = (
+    text: string,
+    role: 'assistant' | 'user',
+    isError = false,
+  ): { textContent: string | null } => {
     const node = doc.createElement('div');
     node.className = `lamoom-message ${role === 'user' ? 'lamoom-user' : 'lamoom-assistant'}${
       isError ? ' lamoom-error' : ''
@@ -140,6 +145,37 @@
     node.textContent = text;
     messages.appendChild(node);
     scrollToBottom();
+    return node as { textContent: string | null };
+  };
+
+  const appendAssistantStream = (delta: string): void => {
+    if (!delta) return;
+    if (!streamingAssistantNode) {
+      streamingAssistantNode = createMessage('', 'assistant');
+    }
+    streamingAssistantNode.textContent = `${streamingAssistantNode.textContent ?? ''}${delta}`;
+    scrollToBottom();
+  };
+
+  const finishAssistantStream = (finalText: string): void => {
+    const normalizedFinal = finalText.trim();
+    if (streamingAssistantNode) {
+      if (normalizedFinal) {
+        const existing = (streamingAssistantNode.textContent ?? '').trim();
+        if (!existing || (existing !== normalizedFinal && !normalizedFinal.startsWith(existing))) {
+          streamingAssistantNode.textContent = finalText;
+        }
+      }
+      streamingAssistantNode = null;
+      return;
+    }
+    if (normalizedFinal) {
+      createMessage(finalText, 'assistant');
+    }
+  };
+
+  const resetAssistantStream = (): void => {
+    streamingAssistantNode = null;
   };
 
   const showTyping = (): void => {
@@ -200,6 +236,7 @@
             content?: string;
             message?: string;
             reason?: string;
+            done?: boolean;
           }
         | null = null;
       try {
@@ -209,14 +246,20 @@
       }
       if (!message) return;
       if (message.type === 'message') {
-        const text = message.content ?? message.message;
-        if (text) createMessage(text, 'assistant');
+        const text = message.content ?? message.message ?? '';
+        if (message.done === true) {
+          finishAssistantStream(text);
+        } else if (text) {
+          appendAssistantStream(text);
+        }
       }
       if (message.type === 'error') {
+        resetAssistantStream();
         const errorText = message.content ?? message.message;
         if (errorText) createMessage(errorText, 'assistant', true);
       }
       if (message.type === 'auth_error') {
+        resetAssistantStream();
         createMessage(
           `⚠️ Connection failed: ${message.message || message.reason || 'Authentication error'}`,
           'assistant',
@@ -236,6 +279,7 @@
       if (manualClose || !panelOpen) return;
       if (retryCount >= 3) {
         hideTyping();
+        resetAssistantStream();
         createMessage('Connection lost. Please try again.', 'assistant', true);
         return;
       }
@@ -270,6 +314,7 @@
     panelOpen = false;
     panel.classList.add('lamoom-hidden');
     hideTyping();
+    resetAssistantStream();
     if (retryTimer && win.clearTimeout) {
       win.clearTimeout(retryTimer);
       retryTimer = null;

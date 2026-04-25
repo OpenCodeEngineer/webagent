@@ -200,7 +200,7 @@ webagent/
 │   │   │   ├── config.ts             Env validation
 │   │   │   ├── db/schema.ts          Drizzle ORM schema (all tables)
 │   │   │   ├── db/client.ts          Neon serverless + Drizzle client factory
-│   │   │   ├── openclaw/client.ts    CLI wrapper (execFile → openclaw agent -m)
+│   │   │   ├── openclaw/client.ts    Shared Gateway WS transport (connect/agent protocol)
 │   │   │   ├── openclaw/sessions.ts  Session key management
 │   │   │   ├── ws/handler.ts         WebSocket auth + message relay
 │   │   │   ├── routes/health.ts      Health check endpoints

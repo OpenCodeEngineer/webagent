@@ -274,10 +274,20 @@ export function handleConnection(
             const prefixedAdminMessage
               = `[Lamoom Platform — Agent Creation Session]\nCustomer ID: ${state.userId}\nPlatform domain: ${domain}\n\nCustomer: ${msg.content}`;
             const outboundMessage = state.isAdmin && state.firstMessage ? prefixedAdminMessage : msg.content;
+            let streamed = false;
             const result = await openclawClient.sendMessage({
               message: outboundMessage,
               agentId: state.openclawAgentId,
               sessionKey: state.sessionKey,
+              onDelta: state.isAdmin
+                ? undefined
+                : (delta) => {
+                    if (!delta) {
+                      return;
+                    }
+                    streamed = true;
+                    send(ws, { type: 'message', content: delta, done: false });
+                  },
             });
 
             if (result.success) {
@@ -289,7 +299,11 @@ export function handleConnection(
                 }
               }
 
-              send(ws, { type: 'message', content: responseText, done: true });
+              if (streamed && !state.isAdmin) {
+                send(ws, { type: 'message', content: '', done: true });
+              } else {
+                send(ws, { type: 'message', content: responseText, done: true });
+              }
               if (state.isAdmin) {
                 state.firstMessage = false;
               }
