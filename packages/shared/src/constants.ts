@@ -1,5 +1,5 @@
 export const DEFAULT_PROXY_PORT = 3001;
-export const DEFAULT_OPENCLAW_HOOKS_URL = 'http://127.0.0.1:18789/hooks';
+export const DEFAULT_OPENCLAW_GATEWAY_URL = 'http://127.0.0.1:18789';
 export const DEFAULT_WS_PATH = '/ws';
 
 export const WS_CLOSE_CODES = {

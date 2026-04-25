@@ -69,7 +69,7 @@ const start = async (): Promise<void> => {
   try {
     await app.listen({ host: '0.0.0.0', port: config.port });
     app.log.info(
-      { port: config.port, openClawHooksUrl: config.openClawHooksUrl },
+      { port: config.port, openClawGatewayUrl: config.openClawGatewayUrl },
       'proxy server started',
     );
   } catch (error) {

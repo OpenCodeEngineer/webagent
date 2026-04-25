@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 import {
-  DEFAULT_OPENCLAW_HOOKS_URL,
+  DEFAULT_OPENCLAW_GATEWAY_URL,
   DEFAULT_PROXY_PORT
 } from '@webagent/shared/constants';
 
@@ -9,8 +9,8 @@ dotenv.config();
 export interface ProxyConfig {
   port: number;
   databaseUrl: string;
-  openClawHooksUrl: string;
-  openClawHooksToken: string;
+  openClawGatewayUrl: string;
+  openClawGatewayToken: string;
 }
 
 function getRequiredEnv(name: string): string {
@@ -34,7 +34,7 @@ export function loadConfig(): ProxyConfig {
   return {
     port: parsedPort,
     databaseUrl: getRequiredEnv('DATABASE_URL'),
-    openClawHooksUrl: process.env.OPENCLAW_HOOKS_URL?.trim() || DEFAULT_OPENCLAW_HOOKS_URL,
-    openClawHooksToken: getRequiredEnv('OPENCLAW_HOOKS_TOKEN')
+    openClawGatewayUrl: process.env.OPENCLAW_GATEWAY_URL?.trim() || DEFAULT_OPENCLAW_GATEWAY_URL,
+    openClawGatewayToken: getRequiredEnv('OPENCLAW_GATEWAY_TOKEN')
   };
 }

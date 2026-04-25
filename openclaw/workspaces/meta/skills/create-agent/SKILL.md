@@ -11,7 +11,7 @@ This skill creates a fully configured customer agent for the WebAgent platform w
 
 ## Hard rules
 - **Never use `exec`, shell commands, or CLI process spawning** during this flow.
-- Use only built-in file tools (`read`, `write`, `edit`) and built-in HTTP tools (`web`/`fetch`).
+- Use only built-in file tools (`read`, `write`, `edit`).
 - For file creation, prefer `write` directly: **`write` creates missing parent directories automatically**.
 
 ## 5-Step Flow
@@ -49,41 +49,23 @@ All files must be filled with customer-provided values (website/product, API det
 
 Mention to the customer/operator that OpenClaw uses **hybrid hot-reload**, so `agents.*` config updates are picked up without full restart.
 
-### Step 4 — Register in proxy DB via HTTP POST (no curl/exec)
-Use built-in `web`/`fetch` tool to call:
-- `POST http://localhost:3001/api/internal/agents`
-
-JSON body:
+### Step 4 — Write agent config file
+After generating workspace files and registering in `openclaw.json5`, `write` a structured JSON file:
+- Path: `<workspacePath>/agent-config.json`
+- Content:
 ```json
 {
-  "customerId": "<from session context>",
-  "openclawAgentId": "<agentSlug>",
-  "name": "<agentName>",
+  "agentSlug": "<agentSlug>",
+  "agentName": "<agentName>",
+  "websiteName": "<websiteName>",
   "websiteUrl": "<websiteUrl>",
-  "apiDescription": "<apiDescription>"
+  "apiDescription": "<short description of API capabilities>",
+  "apiBaseUrl": "<API base URL if provided>",
+  "createdAt": "<ISO timestamp>"
 }
 ```
 
-Expect response shape:
-```json
-{ "agent": { ... }, "embedToken": "..." }
-```
+### Step 5 — Signal completion to proxy
+Include the exact marker `[AGENT_CREATED::<agentSlug>]` somewhere in the response message. The proxy will detect this marker, read the `agent-config.json`, create DB records, generate the embed token, and append the widget embed code to the response.
 
-### Step 5 — Generate embed snippet and deliver usage
-Use returned `embedToken` to create:
-- `<workspacePath>/embed-snippet.html`
-
-Snippet format:
-```html
-<script
-  src="https://{{DOMAIN}}/widget.js"
-  data-agent-token="{{embedToken}}"
-  data-user-id=""
-></script>
-```
-
-Then present:
-1. Agent ID and name
-2. The embed snippet
-3. Where to paste it (`before </body>`)
-4. Reminder that they can return to update behavior or API actions
+Tell the customer: "Your agent has been created! The embed code will appear below."

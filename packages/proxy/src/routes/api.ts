@@ -109,7 +109,7 @@ function getCustomerApiToken(): string | null {
   return (
     process.env.PROXY_CUSTOMER_API_TOKEN?.trim()
     || process.env.PROXY_API_TOKEN?.trim()
-    || process.env.OPENCLAW_HOOKS_TOKEN?.trim()
+    || process.env.OPENCLAW_GATEWAY_TOKEN?.trim()
     || null
   );
 }
