@@ -336,7 +336,7 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
       const agentResponse = await openclawClient.sendMessage({
         message: messageForAgent,
         agentId: 'meta',
-        sessionKey: `admin:${query.customerId}:${sessionId}`,
+        sessionKey: `admin-${query.customerId}-${sessionId}`,
         name: 'agent-builder',
       });
 

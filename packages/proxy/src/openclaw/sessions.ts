@@ -3,7 +3,7 @@ import type { Database } from '../db/client.js';
 import { widgetSessions } from '../db/schema.js';
 
 function sessionKey(agentId: string, userId: string): string {
-  return `widget:${agentId}:${userId}`;
+  return `widget-${agentId}-${userId}`;
 }
 
 export async function getOrCreateSession(
