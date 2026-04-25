@@ -33,7 +33,7 @@ app.get(DEFAULT_WS_PATH, { websocket: true }, (socket, request) => {
   });
 
   const origin = typeof request.headers.origin === 'string' ? request.headers.origin : undefined;
-  handleConnection(socket as any, { db: app.db, origin });
+  handleConnection(socket as any, { db: app.db, origin, app });
 });
 
 let shuttingDown = false;

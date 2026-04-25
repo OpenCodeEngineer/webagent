@@ -1,9 +1,12 @@
+import * as crypto from 'node:crypto';
+import type { FastifyInstance } from 'fastify';
 import type { ClientMessage, ServerMessage } from '@webagent/shared/protocol';
 import { and, eq } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
 import { agents, widgetEmbeds } from '../db/schema.js';
 import { OpenClawClient } from '../openclaw/client.js';
 import { getOrCreateSession, touchSessionLastActiveAt } from '../openclaw/sessions.js';
+import { detectAgentCreation } from '../routes/api.js';
 
 interface WebSocket {
   readyState: number;
@@ -22,6 +25,8 @@ interface AuthenticatedSocket {
   openclawAgentId: string;
   sessionKey: string;
   authenticated: boolean;
+  isAdmin: boolean;
+  firstMessage: boolean;
 }
 
 interface TokenLookup {
@@ -84,16 +89,6 @@ function setCachedTokenLookup(embedToken: string, value: TokenLookup): void {
   tokenCache.set(embedToken, { value, expiresAt: Date.now() + TOKEN_CACHE_TTL_MS });
 }
 
-function extractAuthToken(msg: unknown): string {
-  if (!msg || typeof msg !== 'object') {
-    return '';
-  }
-
-  const authMsg = msg as { agentToken?: unknown; token?: unknown };
-  const token = typeof authMsg.agentToken === 'string' ? authMsg.agentToken : authMsg.token;
-  return typeof token === 'string' ? token : '';
-}
-
 async function lookupEmbedToken(db: Database, embedToken: string): Promise<TokenLookup | null> {
   const cached = getCachedTokenLookup(embedToken);
   if (cached) {
@@ -126,7 +121,10 @@ async function lookupEmbedToken(db: Database, embedToken: string): Promise<Token
   return value;
 }
 
-export function handleConnection(ws: WebSocket, ctx: { db: Database; origin?: string }) {
+export function handleConnection(
+  ws: WebSocket,
+  ctx: { db: Database; origin?: string; app: FastifyInstance },
+) {
   const state: AuthenticatedSocket = {
     ws,
     agentToken: '',
@@ -135,6 +133,8 @@ export function handleConnection(ws: WebSocket, ctx: { db: Database; origin?: st
     openclawAgentId: '',
     sessionKey: '',
     authenticated: false,
+    isAdmin: false,
+    firstMessage: false,
   };
 
   // 30s auth timeout
@@ -157,7 +157,7 @@ export function handleConnection(ws: WebSocket, ctx: { db: Database; origin?: st
     }
 
     try {
-      if (state.authenticated && msg.type !== 'auth') {
+      if (state.authenticated && !state.isAdmin && msg.type !== 'auth') {
         await touchSessionLastActiveAt(ctx.db, state.agentId, state.userId);
       }
 
@@ -168,10 +168,35 @@ export function handleConnection(ws: WebSocket, ctx: { db: Database; origin?: st
             return;
           }
 
-          const authToken = extractAuthToken(msg);
+          const authToken = msg.token ?? msg.agentToken;
           if (!authToken) {
             send(ws, { type: 'auth_error', reason: 'Invalid agent token' });
             ws.close(4003, 'Invalid token');
+            return;
+          }
+
+          if (msg.mode === 'admin') {
+            const expectedToken = (
+              process.env.PROXY_CUSTOMER_API_TOKEN?.trim()
+              || process.env.PROXY_API_TOKEN?.trim()
+              || process.env.OPENCLAW_GATEWAY_TOKEN?.trim()
+            );
+            if (!expectedToken || authToken !== expectedToken) {
+              send(ws, { type: 'auth_error', reason: 'Invalid admin token' });
+              ws.close(4003, 'Invalid admin token');
+              return;
+            }
+
+            state.agentToken = authToken;
+            state.userId = msg.userId;
+            state.agentId = 'meta';
+            state.openclawAgentId = 'meta';
+            state.sessionKey = `admin-${msg.userId}-${crypto.randomUUID()}`;
+            state.authenticated = true;
+            state.isAdmin = true;
+            state.firstMessage = true;
+            clearTimeout(authTimeout);
+            send(ws, { type: 'auth_ok', sessionId: state.sessionKey });
             return;
           }
 
@@ -208,6 +233,8 @@ export function handleConnection(ws: WebSocket, ctx: { db: Database; origin?: st
             return;
           }
           state.authenticated = true;
+          state.isAdmin = false;
+          state.firstMessage = false;
           clearTimeout(authTimeout);
 
           send(ws, { type: 'auth_ok', sessionId: state.sessionKey });
@@ -226,14 +253,29 @@ export function handleConnection(ws: WebSocket, ctx: { db: Database; origin?: st
           }
 
           try {
+            const domain = (process.env.AUTH_URL || 'https://dev.lamoom.com').replace(/\/+$/, '');
+            const prefixedAdminMessage
+              = `[Lamoom Platform — Agent Creation Session]\nCustomer ID: ${state.userId}\nPlatform domain: ${domain}\n\nCustomer: ${msg.content}`;
+            const outboundMessage = state.isAdmin && state.firstMessage ? prefixedAdminMessage : msg.content;
             const result = await openclawClient.sendMessage({
-              message: msg.content,
+              message: outboundMessage,
               agentId: state.openclawAgentId,
               sessionKey: state.sessionKey,
             });
 
             if (result.success) {
-              send(ws, { type: 'message', content: result.response || '', done: true });
+              let responseText = result.response || '';
+              if (state.isAdmin && responseText) {
+                const created = await detectAgentCreation(responseText, state.userId, ctx.app, domain);
+                if (created) {
+                  responseText = `${responseText}\n\n${created.embedCode}`;
+                }
+              }
+
+              send(ws, { type: 'message', content: responseText, done: true });
+              if (state.isAdmin) {
+                state.firstMessage = false;
+              }
             } else {
               send(ws, { type: 'error', message: result.error || 'Agent error' });
             }

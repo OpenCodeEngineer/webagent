@@ -78,4 +78,9 @@ ufw allow OpenSSH
 ufw allow 'Nginx Full'
 ufw --force enable
 
+# ── 12. Sudoers — allow webagent user to restart openclaw-gateway without password ──
+# (fallback for when SIGHUP doesn't work)
+echo "${APP_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart openclaw-gateway" > /etc/sudoers.d/webagent-openclaw
+chmod 440 /etc/sudoers.d/webagent-openclaw
+
 echo "✅  Setup complete. Services running on ${DOMAIN}"

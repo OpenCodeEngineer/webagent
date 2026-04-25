@@ -1,6 +1,19 @@
 // Client → Server messages
 export type ClientMessage =
-  | { type: 'auth'; agentToken: string; userId: string }
+  | {
+    type: 'auth';
+    userId: string;
+    mode?: 'widget' | 'admin';
+    token: string;
+    agentToken?: string;
+  }
+  | {
+    type: 'auth';
+    userId: string;
+    mode?: 'widget' | 'admin';
+    agentToken: string;
+    token?: string;
+  }
   | { type: 'message'; content: string }
   | { type: 'ping' };
 

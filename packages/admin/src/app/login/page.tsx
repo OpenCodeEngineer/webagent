@@ -14,6 +14,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [magicEmail, setMagicEmail] = useState("");
+  const [magicSent, setMagicSent] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -102,6 +104,48 @@ export default function LoginPage() {
               GitHub
             </Button>
           </div>
+
+          <div className="flex items-center gap-3">
+            <Separator className="flex-1" />
+            <span className="text-xs text-muted-foreground">or use magic link</span>
+            <Separator className="flex-1" />
+          </div>
+
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setLoading(true);
+              setError("");
+              const result = await signIn("email", { email: magicEmail, redirect: false });
+              if (result?.error) {
+                setError("Failed to send magic link");
+              } else {
+                setError("");
+                setMagicSent(true);
+              }
+              setLoading(false);
+            }}
+            className="space-y-3"
+          >
+            {magicSent && (
+              <div className="rounded-md border border-emerald-500/50 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
+                Check your email for a sign-in link!
+              </div>
+            )}
+            <div className="flex gap-2">
+              <Input
+                type="email"
+                className="flex-1"
+                value={magicEmail}
+                onChange={(e) => setMagicEmail(e.target.value)}
+                placeholder="you@example.com"
+                required
+              />
+              <Button type="submit" variant="outline" disabled={loading || !magicEmail.trim()}>
+                {loading ? "Sending…" : "Send link"}
+              </Button>
+            </div>
+          </form>
         </CardContent>
       </Card>
     </div>

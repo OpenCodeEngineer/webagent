@@ -2,52 +2,164 @@
 
 import { useRef, useEffect, useState, useCallback } from "react";
 import { Bot, SendHorizontal, Copy, Check } from "lucide-react";
-import { createAgentViaMetaAgent, type MetaAgentMessage } from "@/lib/api";
+import { type MetaAgentMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
+
+const EMBED_CODE_RE = /<script[^>]*data-agent-token[^>]*><\/script>/;
+const BASE_RECONNECT_MS = 1000;
+const MAX_RECONNECT_MS = 30000;
 
 export function CreateAgentChat({ customerId }: { customerId?: string }) {
   const [messages, setMessages] = useState<MetaAgentMessage[]>([]);
   const [input, setInput] = useState("");
-  const [sessionId, setSessionId] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
   const [embedCode, setEmbedCode] = useState("");
   const [copied, setCopied] = useState(false);
+  const [isAuthed, setIsAuthed] = useState(false);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const initRef = useRef(false);
+  const socketRef = useRef<WebSocket | null>(null);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttempt = useRef(0);
+  const mountedRef = useRef(true);
+  const shouldReconnectRef = useRef(true);
+  const authFailureNotifiedRef = useRef(false);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
+  // --- WebSocket lifecycle ---
   useEffect(() => {
-    if (initRef.current) return;
-    initRef.current = true;
+    mountedRef.current = true;
 
-    const initSession = async () => {
-      setLoading(true);
-      try {
-        const result = await createAgentViaMetaAgent([], undefined, customerId);
-        const greeting = result.response ?? result.message ?? "";
-        const nextSessionId = result.sessionId ?? result.session?.id;
-        if (greeting) {
-          setMessages([{ role: "assistant", content: greeting }]);
+    function connect() {
+      if (!mountedRef.current) return;
+
+      shouldReconnectRef.current = true;
+      const token = process.env.NEXT_PUBLIC_PROXY_TOKEN ?? process.env.NEXT_PUBLIC_PROXY_API_TOKEN;
+      if (!token) {
+        shouldReconnectRef.current = false;
+        authFailureNotifiedRef.current = true;
+        setMessages([{
+          role: "assistant",
+          content: "⚠️ Missing authentication token (NEXT_PUBLIC_PROXY_TOKEN or NEXT_PUBLIC_PROXY_API_TOKEN). Please check your environment configuration and refresh.",
+        }]);
+        return;
+      }
+
+      const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+
+      const ws = new WebSocket(wsUrl);
+      socketRef.current = ws;
+
+      ws.addEventListener("open", () => {
+        if (!mountedRef.current) { ws.close(); return; }
+        reconnectAttempt.current = 0;
+        ws.send(JSON.stringify({
+          type: "auth",
+          token,
+          userId: customerId || "unknown",
+          mode: "admin",
+        }));
+      });
+
+      ws.addEventListener("message", (event) => {
+        if (!mountedRef.current) return;
+
+        let data: Record<string, unknown>;
+        try {
+          data = JSON.parse(event.data as string) as Record<string, unknown>;
+        } catch {
+          return;
         }
-        setSessionId(nextSessionId);
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : "Failed to connect";
-        setMessages([{ role: "assistant", content: `⚠️ ${msg}. Please refresh to try again.` }]);
-      } finally {
+
+        if (data.type === "auth_ok") {
+          authFailureNotifiedRef.current = false;
+          setIsAuthed(true);
+          return;
+        }
+
+        if (data.type === "auth_error") {
+          const reason = typeof data.reason === "string" && data.reason.trim().length > 0
+            ? data.reason
+            : "Authentication failed";
+          const fatalAuthError = /(invalid|missing)(?:\s+\w+)?\s+token|token\s+(invalid|missing)/i.test(reason);
+          if (fatalAuthError) shouldReconnectRef.current = false;
+          setIsAuthed(false);
+          if (!authFailureNotifiedRef.current) {
+            authFailureNotifiedRef.current = true;
+            setMessages((prev) => [
+              ...prev,
+              { role: "assistant", content: `⚠️ ${reason}. Please check your credentials and refresh.` },
+            ]);
+          }
+          ws.close();
+          return;
+        }
+
+        if (data.type === "error") {
+          const errMsg = typeof data.message === "string" ? data.message : "An error occurred";
+          setMessages((prev) => [...prev, { role: "assistant", content: `⚠️ ${errMsg}` }]);
+          setLoading(false);
+          return;
+        }
+
+        if (data.type === "message" && data.done === true) {
+          const content = typeof data.content === "string" ? data.content : "";
+          if (content) {
+            setMessages((prev) => [...prev, { role: "assistant", content }]);
+            const embedMatch = content.match(EMBED_CODE_RE)?.[0];
+            if (embedMatch) setEmbedCode(embedMatch);
+          }
+          setLoading(false);
+          textareaRef.current?.focus();
+        }
+      });
+
+      ws.addEventListener("close", () => {
+        if (!mountedRef.current) return;
+        socketRef.current = null;
+        setIsAuthed(false);
         setLoading(false);
+        if (shouldReconnectRef.current) {
+          scheduleReconnect();
+        }
+      });
+
+      ws.addEventListener("error", () => {
+        // The close event fires after error; reconnect handled there.
+      });
+    }
+
+    function scheduleReconnect() {
+      if (!mountedRef.current) return;
+      const delay = Math.min(
+        BASE_RECONNECT_MS * Math.pow(2, reconnectAttempt.current),
+        MAX_RECONNECT_MS,
+      );
+      reconnectAttempt.current += 1;
+      reconnectTimer.current = setTimeout(connect, delay);
+    }
+
+    connect();
+
+    return () => {
+      mountedRef.current = false;
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      if (socketRef.current) {
+        socketRef.current.close();
+        socketRef.current = null;
       }
     };
-
-    void initSession();
   }, [customerId]);
 
-  const onSend = useCallback(async () => {
+  // --- Send handler ---
+  const onSend = useCallback(() => {
     const text = input.trim();
-    if (!text || loading) return;
+    if (!text || loading || !isAuthed || !socketRef.current) return;
 
     setCopied(false);
     const userMessage: MetaAgentMessage = { role: "user", content: text };
@@ -55,29 +167,8 @@ export function CreateAgentChat({ customerId }: { customerId?: string }) {
     setInput("");
     setLoading(true);
 
-    try {
-      const result = await createAgentViaMetaAgent([userMessage], sessionId, customerId);
-      const assistantReply = result.response ?? result.message ?? "";
-      const nextSessionId = result.sessionId ?? result.session?.id ?? sessionId;
-      const nextEmbedCode = result.embedCode ?? result.agent?.embedCode ?? "";
-      const embedInReply = assistantReply.match(/<script[^>]*data-agent-token[^>]*><\/script>/)?.[0];
-
-      if (assistantReply) {
-        setMessages((prev) => [...prev, { role: "assistant", content: assistantReply }]);
-      }
-      if (nextEmbedCode) setEmbedCode(nextEmbedCode);
-      else if (embedInReply) setEmbedCode(embedInReply);
-      setSessionId(nextSessionId);
-    } catch (error) {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: error instanceof Error ? error.message : "Something went wrong." },
-      ]);
-    } finally {
-      setLoading(false);
-      textareaRef.current?.focus();
-    }
-  }, [input, loading, sessionId, customerId]);
+    socketRef.current.send(JSON.stringify({ type: "message", content: text }));
+  }, [input, loading, isAuthed]);
 
   const onCopyEmbedCode = async () => {
     if (!embedCode) return;
@@ -186,16 +277,16 @@ export function CreateAgentChat({ customerId }: { customerId?: string }) {
               }}
               placeholder="Describe your website..."
               className="flex-1 resize-none bg-transparent text-sm text-zinc-200 placeholder:text-zinc-500 outline-none min-h-[24px] max-h-[120px]"
-              disabled={loading}
+              disabled={loading || !isAuthed}
               rows={1}
             />
             <button
               type="button"
               onClick={() => void onSend()}
-              disabled={loading || input.trim().length === 0}
+              disabled={loading || !isAuthed || input.trim().length === 0}
               className={cn(
                 "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-colors",
-                loading || input.trim().length === 0
+                loading || !isAuthed || input.trim().length === 0
                   ? "bg-zinc-600 text-zinc-400"
                   : "bg-white text-black hover:bg-zinc-200"
               )}

@@ -6,7 +6,7 @@ interface WidgetConfig {
 }
 
 type ClientMessage =
-  | { type: 'auth'; token: string; userId: string; agentToken?: string }
+  | { type: 'auth'; token: string; userId: string }
   | { type: 'message'; content: string }
   | { type: 'ping' };
 
@@ -310,7 +310,6 @@ class WebAgentWidget {
     const payload: ClientMessage = {
       type: 'auth',
       token: this.config.agentToken,
-      agentToken: this.config.agentToken,
       userId: this.config.userId,
     };
 

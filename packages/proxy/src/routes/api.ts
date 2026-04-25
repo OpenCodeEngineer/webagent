@@ -198,7 +198,7 @@ async function registerAgentInOpenClaw(
   }
 }
 
-async function detectAgentCreation(
+export async function detectAgentCreation(
   responseText: string,
   customerId: string,
   app: FastifyInstance,
