@@ -252,6 +252,27 @@ function coerceGatewayErrorMessage(error: unknown): string {
   return 'Gateway request failed';
 }
 
+function collectUniqueTokens(values: Array<string | undefined | null>): string[] {
+  const seen = new Set<string>();
+  const tokens: string[] = [];
+
+  for (const value of values) {
+    const token = typeof value === 'string' ? value.trim() : '';
+    if (!token || seen.has(token)) {
+      continue;
+    }
+    seen.add(token);
+    tokens.push(token);
+  }
+
+  return tokens;
+}
+
+function isGatewayTokenAuthError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return normalized.includes('gateway token mismatch') || normalized.includes('gateway token missing');
+}
+
 function normalizeGatewayUrl(raw: string): URL {
   const trimmed = raw.trim();
   const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `ws://${trimmed}`;
@@ -662,13 +683,21 @@ export class OpenClawClient {
   private gatewayWsUrl: string;
   private hooksWakeUrl: string;
   private token: string;
+  private tokenCandidates: string[];
 
   constructor(gatewayUrl?: string, token?: string) {
     const config = loadConfig();
     this.gatewayWsUrl = toGatewayWsUrl(gatewayUrl || config.openClawGatewayUrl);
     const gatewayHttpUrl = toGatewayHttpUrl(gatewayUrl || config.openClawGatewayUrl);
     this.hooksWakeUrl = new URL('/hooks/wake', gatewayHttpUrl).toString();
-    this.token = token || config.openClawGatewayToken;
+    this.tokenCandidates = collectUniqueTokens([
+      token,
+      config.openClawGatewayToken,
+      process.env.OPENCLAW_GATEWAY_TOKEN,
+      process.env.PROXY_CUSTOMER_API_TOKEN,
+      process.env.PROXY_API_TOKEN,
+    ]);
+    this.token = this.tokenCandidates[0] ?? config.openClawGatewayToken;
   }
 
   /**
@@ -683,66 +712,94 @@ export class OpenClawClient {
     onDelta?: (delta: string) => void;
   }): Promise<AgentResponse> {
     const timeoutMs = (opts.timeoutSeconds ?? 120) * 1000;
-    const runId = crypto.randomUUID();
-    const transport = getSharedGatewayTransport(this.gatewayWsUrl, this.token);
-    let streamedText = '';
-    const unsubscribe = transport.subscribeToRun(runId, (event) => {
-      if (event.stream !== 'assistant') {
-        return;
-      }
-      const delta = resolveAssistantDelta(event.data, streamedText.length > 0);
-      if (!delta) {
-        return;
-      }
-      streamedText += delta;
-      opts.onDelta?.(delta);
-    });
+    let lastError = '';
 
-    await acquireSlot();
-    try {
-      const payload = await transport.request<{
-        status?: unknown;
-        summary?: unknown;
-        result?: {
-          error?: unknown;
-          payloads?: Array<{ text?: unknown }>;
-        };
-      }>(
-        'agent',
-        {
-          message: opts.message,
-          agentId: opts.agentId,
-          sessionKey: opts.sessionKey,
-          idempotencyKey: runId,
-        },
-        { expectFinal: true, timeoutMs },
-      );
+    for (let index = 0; index < this.tokenCandidates.length; index += 1) {
+      const token = this.tokenCandidates[index] ?? this.token;
+      const runId = crypto.randomUUID();
+      const transport = getSharedGatewayTransport(this.gatewayWsUrl, token);
+      let streamedText = '';
+      const unsubscribe = transport.subscribeToRun(runId, (event) => {
+        if (event.stream !== 'assistant') {
+          return;
+        }
+        const delta = resolveAssistantDelta(event.data, streamedText.length > 0);
+        if (!delta) {
+          return;
+        }
+        streamedText += delta;
+        opts.onDelta?.(delta);
+      });
 
-      if (payload.status === 'error') {
-        const errorText =
-          (typeof payload.result?.error === 'string' && payload.result.error) ||
-          (typeof payload.summary === 'string' && payload.summary) ||
-          'OpenClaw gateway returned an error';
-        return { success: false, error: errorText };
-      }
+      await acquireSlot();
+      try {
+        const payload = await transport.request<{
+          status?: unknown;
+          summary?: unknown;
+          result?: {
+            error?: unknown;
+            payloads?: Array<{ text?: unknown }>;
+          };
+        }>(
+          'agent',
+          {
+            message: opts.message,
+            agentId: opts.agentId,
+            sessionKey: opts.sessionKey,
+            idempotencyKey: runId,
+          },
+          { expectFinal: true, timeoutMs },
+        );
 
-      const payloads = Array.isArray(payload.result?.payloads) ? payload.result.payloads : [];
-      const finalText = payloads
-        .map((p) => (typeof p?.text === 'string' ? p.text : ''))
-        .join('');
-      const response = finalText || streamedText;
-      return { success: true, response };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (message.includes('timeout')) {
-        const timeoutSeconds = Math.max(1, Math.floor(timeoutMs / 1000));
-        return { success: false, error: `OpenClaw gateway timed out after ${timeoutSeconds}s` };
+        if (payload.status === 'error') {
+          const errorText =
+            (typeof payload.result?.error === 'string' && payload.result.error) ||
+            (typeof payload.summary === 'string' && payload.summary) ||
+            'OpenClaw gateway returned an error';
+          if (isGatewayTokenAuthError(errorText) && index + 1 < this.tokenCandidates.length) {
+            lastError = errorText;
+            continue;
+          }
+          return { success: false, error: errorText };
+        }
+
+        const payloads = Array.isArray(payload.result?.payloads) ? payload.result.payloads : [];
+        const finalText = payloads
+          .map((p) => (typeof p?.text === 'string' ? p.text : ''))
+          .join('');
+        const response = finalText || streamedText;
+
+        this.promoteToken(token);
+        return { success: true, response };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes('timeout')) {
+          const timeoutSeconds = Math.max(1, Math.floor(timeoutMs / 1000));
+          return { success: false, error: `OpenClaw gateway timed out after ${timeoutSeconds}s` };
+        }
+        if (isGatewayTokenAuthError(message) && index + 1 < this.tokenCandidates.length) {
+          lastError = message;
+          continue;
+        }
+        return { success: false, error: message };
+      } finally {
+        unsubscribe();
+        releaseSlot();
       }
-      return { success: false, error: message };
-    } finally {
-      unsubscribe();
-      releaseSlot();
     }
+
+    return {
+      success: false,
+      error: lastError || 'unauthorized: gateway token mismatch (provide gateway auth token)',
+    };
+  }
+
+  private promoteToken(token: string): void {
+    if (!token || token === this.token) {
+      return;
+    }
+    this.token = token;
+    this.tokenCandidates = [token, ...this.tokenCandidates.filter((candidate) => candidate !== token)];
   }
 
   /** Fire-and-forget: enqueue a system event via the hooks API */
