@@ -20,9 +20,9 @@ Creates a fully configured customer agent. Assumes discovery is already done (AG
 
 Derive:
 - `agentSlug` = website name lowercased, non-alphanumeric collapsed to hyphens, trim edge hyphens.
-- `workspacePath` = `workspaces/<agentSlug>/` (relative to current workspace root)
+- `workspacePath` = `/opt/webagent/openclaw/workspaces/<agentSlug>`
 
-Read templates from `templates/` as starting point, then `write`:
+Read templates from `templates/` directory (relative to this workspace) as starting point, then `write`:
 - `<workspacePath>/AGENTS.md` — agent personality and instructions
 - `<workspacePath>/SOUL.md` — brand voice and values
 - `<workspacePath>/IDENTITY.md` — name and role

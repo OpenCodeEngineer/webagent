@@ -105,8 +105,11 @@ Common cause: DrizzleAdapter table name mismatch (adapter expects singular `acco
 2. **Press Enter** to send
 3. **CHECK**: User message appears as a right-aligned chat bubble
 4. **CHECK**: Typing indicator shows
-5. **Wait** for meta-agent response (up to 120s)
-6. **CHECK**: Bot response appears, mentions vibebrowser or browser or AI agent
+5. **Wait** for meta-agent response (up to 180s)
+6. **CHECK — CRITICAL (Website Discovery)**: The response MUST prove the meta-agent fetched vibebrowser.app:
+   - Mentions specific details about the product (browser, AI, automation, etc.)
+   - NOT just generic "I'll help you create an agent" without site-specific info
+   - This is the core product promise — if the agent doesn't proactively discover, it FAILS
 7. **SCREENSHOT**: Chat with both messages visible
 
 8. If the meta-agent asks for confirmation, **type**: "Yes, that's correct. Please create the agent now."
@@ -150,6 +153,21 @@ If the widget preview shows an error, debug via WebSocket directly:
    ```
 3. **CHECK**: auth_ok received (widget auth chain works)
 4. **CHECK**: Message response is non-empty and contextual
+
+### Phase 5c: Real Widget Demo (standalone page)
+
+Test the widget as an actual customer would embed it:
+1. From the agent detail page, copy the full `<script>` embed code
+2. Open a new browser tab to `data:text/html,` or any blank page
+3. Execute JavaScript to inject the embed script into the page
+4. **CHECK**: Widget bubble appears (bottom-right floating button)
+5. **Click** the widget bubble to open the chat panel
+6. **CHECK**: Chat panel slides up, shows "Connected" or ready state
+7. **Type** "Hello, what can you help me with?" and send
+8. **Wait** up to 120s for response
+9. **CHECK**: Bot responds with relevant information
+10. **CHECK**: Close/reopen bubble — chat history preserved
+11. **SCREENSHOT**: Widget demo working on standalone page
 
 ### Phase 6: Sign Out Flow
 

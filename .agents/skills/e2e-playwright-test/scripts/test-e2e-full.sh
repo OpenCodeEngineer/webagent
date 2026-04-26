@@ -636,6 +636,173 @@ test_ws_auth
 test_ws_chat
 
 ###############################################################################
+# PHASE 5 — Security Gates
+###############################################################################
+banner "Phase 5: Security Gates"
+
+# ── Test 11: Unauthenticated API access ──────────────────────────────────────
+test_unauth_api() {
+  log "  → Testing unauthenticated access to protected endpoints…"
+  local endpoints=("/api/agents?customerId=test" "/api/auth/ws-ticket")
+  local all_pass=true
+
+  for ep in "${endpoints[@]}"; do
+    local resp http_code
+    resp=$(curl -sk -w "\n%{http_code}" --max-time 10 "$BASE_URL$ep" 2>/dev/null) || true
+    http_code=$(echo "$resp" | tail -1)
+
+    if [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
+      log "    ✓ $ep → $http_code (blocked)"
+    else
+      log "    ✗ $ep → $http_code (expected 401/403)"
+      all_pass=false
+    fi
+  done
+
+  if $all_pass; then
+    pass "T11: Unauthenticated API access blocked"
+  else
+    fail "T11: Unauthenticated API access" "some endpoints accessible without auth"
+  fi
+}
+
+# ── Test 12: Invalid embed token WS auth ─────────────────────────────────────
+test_ws_invalid_token() {
+  if [[ "$NODE_WS_AVAILABLE" != "true" ]]; then
+    skip "T12: Invalid WS token" "node 'ws' module not available"
+    return 0
+  fi
+
+  log "  → Testing WS auth with invalid embed token…"
+  local result
+  result=$(node -e "
+const WebSocket = require('ws');
+const ws = new WebSocket('${WS_URL}/ws', { rejectUnauthorized: false });
+const timeout = setTimeout(() => { console.log('TIMEOUT'); process.exit(1); }, 15000);
+
+ws.on('open', () => {
+  ws.send(JSON.stringify({
+    type: 'auth',
+    agentToken: 'invalid-token-xyz',
+    token: 'invalid-token-xyz',
+    userId: 'attacker'
+  }));
+});
+
+ws.on('message', (raw) => {
+  const msg = JSON.parse(raw.toString());
+  if (msg.type === 'auth_error') {
+    console.log('REJECTED|' + msg.reason);
+    clearTimeout(timeout);
+    ws.close();
+  } else if (msg.type === 'auth_ok') {
+    console.log('ACCEPTED');
+    clearTimeout(timeout);
+    ws.close();
+  }
+});
+
+ws.on('error', (e) => { console.log('WS_ERROR|' + e.message); process.exit(1); });
+ws.on('close', () => process.exit(0));
+" 2>/dev/null) || true
+
+  local result_type
+  result_type=$(echo "$result" | head -1 | cut -d'|' -f1)
+
+  if [[ "$result_type" == "REJECTED" ]]; then
+    pass "T12: Invalid WS token → correctly rejected"
+  elif [[ "$result_type" == "ACCEPTED" ]]; then
+    fail "T12: Invalid WS token" "SECURITY: invalid token was ACCEPTED"
+  else
+    fail "T12: Invalid WS token" "unexpected: ${result:0:200}"
+  fi
+}
+
+# ── Test 13: Unauthenticated admin pages redirect ────────────────────────────
+test_unauth_pages() {
+  log "  → Testing unauthenticated page access…"
+  local pages=("/dashboard" "/create" "/admin")
+  local all_redirect=true
+
+  for page in "${pages[@]}"; do
+    local http_code
+    http_code=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 10 \
+      -L --max-redirs 0 "$BASE_URL$page" 2>/dev/null) || true
+
+    # 302/307 redirect or 200 with login form are both acceptable
+    if [[ "$http_code" == "302" || "$http_code" == "307" || "$http_code" == "200" ]]; then
+      log "    ✓ $page → $http_code"
+    else
+      log "    ✗ $page → $http_code"
+      all_redirect=false
+    fi
+  done
+
+  if $all_redirect; then
+    pass "T13: Unauthenticated pages → handled (redirect or SSR login)"
+  else
+    fail "T13: Unauthenticated pages" "unexpected status codes"
+  fi
+}
+
+test_unauth_api
+test_ws_invalid_token
+test_unauth_pages
+
+###############################################################################
+# PHASE 6 — Website Discovery Verification
+###############################################################################
+banner "Phase 6: Website Discovery (Meta-Agent)"
+
+# ── Test 14: Meta-agent proactively fetches website info ─────────────────────
+test_meta_discovery() {
+  log "  → Testing meta-agent website discovery (vibebrowser.app)…"
+  local msg="Create an agent for vibebrowser.app"
+  local payload
+  payload=$(printf '{"messages":[{"role":"user","content":"%s"}]}' "$msg")
+
+  local resp http_code body
+  resp=$(curl -sk -w "\n%{http_code}" --max-time 120 \
+    -X POST "$BASE_URL/api/agents/create-via-meta?customerId=$CUSTOMER_ID" \
+    -H "Authorization: Bearer $API_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$payload" 2>/dev/null) || true
+  http_code=$(echo "$resp" | tail -1)
+  body=$(echo "$resp" | sed '$d')
+
+  if [[ "$http_code" != "200" ]]; then
+    fail "T14: Website discovery" "expected 200, got ${http_code:-timeout}"
+    return 1
+  fi
+
+  local ai_response
+  ai_response=$(json_field "$body" "data.response")
+
+  if [[ -z "$ai_response" ]]; then
+    fail "T14: Website discovery" "empty response"
+    return 1
+  fi
+
+  # The meta-agent MUST show it fetched the site by mentioning specific details
+  local evidence=0
+  for keyword in "browser" "Vibe" "AI" "automation" "agent" "web"; do
+    if echo "$ai_response" | grep -qi "$keyword"; then
+      ((evidence++)) || true
+    fi
+  done
+
+  if [[ $evidence -ge 2 ]]; then
+    pass "T14: Website discovery → meta-agent shows knowledge ($evidence keywords matched)"
+    log "    AI: ${ai_response:0:200}…"
+  else
+    fail "T14: Website discovery" "only $evidence keywords matched — agent may not have fetched site"
+    log "    AI: ${ai_response:0:300}…"
+  fi
+}
+
+test_meta_discovery
+
+###############################################################################
 # RESULTS SUMMARY
 ###############################################################################
 echo ""

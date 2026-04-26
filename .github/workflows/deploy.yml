@@ -235,6 +235,9 @@ jobs:
             cp -r "${APP_DIR}/packages/admin/.next/static" \
                   "${APP_DIR}/packages/admin/.next/standalone/packages/admin/.next/static"
 
+            echo "→ Syncing templates into meta workspace..."
+            sudo -u openclaw bash -c "cp -r ${APP_DIR}/openclaw/templates ${APP_DIR}/openclaw/workspaces/meta/templates 2>/dev/null || true"
+
             echo "→ Running database migrations..."
             sudo -u openclaw bash -c "cd ${APP_DIR} && pnpm --filter @webagent/proxy db:migrate" || true
 
