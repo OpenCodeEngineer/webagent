@@ -32,6 +32,7 @@ jobs:
 
             echo "→ Aligning gateway auth token..."
             python3 - <<'PY'
+            import hashlib
             import re
             import subprocess
             from pathlib import Path
@@ -50,33 +51,64 @@ jobs:
                 pairs.append((key.strip(), value))
             env_map = {key: value.strip() for key, value in pairs if value.strip()}
 
-            def read_gateway_token_from_process():
+            def fingerprint(value):
+                if not value:
+                    return "none"
+                return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+
+            def read_env_value_from_service(service, key):
                 try:
                     pid = subprocess.check_output(
-                        ["systemctl", "show", "-p", "MainPID", "--value", "openclaw-gateway"],
+                        ["systemctl", "show", "-p", "MainPID", "--value", service],
                         text=True,
                     ).strip()
                     if not pid or pid == "0":
                         return None
                     raw = Path(f"/proc/{pid}/environ").read_bytes()
                     for chunk in raw.split(b"\x00"):
-                        if chunk.startswith(b"OPENCLAW_GATEWAY_TOKEN="):
+                        prefix = f"{key}=".encode("utf-8")
+                        if chunk.startswith(prefix):
                             token = chunk.split(b"=", 1)[1].decode("utf-8", "ignore").strip()
                             return token or None
                 except Exception:
                     return None
                 return None
 
+            def extract_token_in_block(raw, block_name):
+                match = re.search(
+                    rf"{block_name}\s*:\s*\{{[\s\S]*?token\s*:\s*\"([^\"]+)\"",
+                    raw,
+                    re.MULTILINE,
+                )
+                if not match:
+                    return None
+                value = match.group(1).strip()
+                return value or None
+
+            running_gateway_token = read_env_value_from_service("openclaw-gateway", "OPENCLAW_GATEWAY_TOKEN")
+            running_proxy_token = read_env_value_from_service("webagent-proxy", "OPENCLAW_GATEWAY_TOKEN")
+
             token = (
                 env_map.get("PROXY_CUSTOMER_API_TOKEN")
                 or env_map.get("PROXY_API_TOKEN")
                 or env_map.get("OPENCLAW_HOOKS_TOKEN")
                 or env_map.get("OPENCLAW_GATEWAY_TOKEN")
-                or read_gateway_token_from_process()
+                or running_gateway_token
             )
 
             if not token:
                 raise SystemExit(0)
+
+            print(
+                "Token fingerprints before align:",
+                f"selected={fingerprint(token)}",
+                f"proxy_customer={fingerprint(env_map.get('PROXY_CUSTOMER_API_TOKEN'))}",
+                f"proxy_api={fingerprint(env_map.get('PROXY_API_TOKEN'))}",
+                f"hooks_env={fingerprint(env_map.get('OPENCLAW_HOOKS_TOKEN'))}",
+                f"gateway_env={fingerprint(env_map.get('OPENCLAW_GATEWAY_TOKEN'))}",
+                f"running_gateway={fingerprint(running_gateway_token)}",
+                f"running_proxy={fingerprint(running_proxy_token)}",
+            )
 
             updated = [line for line in raw_lines if not line.startswith("OPENCLAW_CONFIG_PATH=")]
             replaced = False
@@ -120,6 +152,14 @@ jobs:
                 )
                 if next_raw != raw:
                     cfg_path.write_text(next_raw, encoding="utf-8")
+
+                print(
+                    "Token fingerprints after align:",
+                    f"env_gateway={fingerprint(token)}",
+                    f"config_auth={fingerprint(extract_token_in_block(next_raw, 'auth'))}",
+                    f"config_remote={fingerprint(extract_token_in_block(next_raw, 'remote'))}",
+                    f"config_hooks={fingerprint(extract_token_in_block(next_raw, 'hooks'))}",
+                )
             PY
 
             echo "→ Installing dependencies..."
@@ -191,6 +231,54 @@ jobs:
               systemctl --no-pager --full status openclaw-gateway || true
               journalctl -u openclaw-gateway --since "-3 min" --no-pager || true
               exit 1
+            fi
+
+            echo "→ Meta-agent WS smoke check..."
+            CUSTOMER_TOKEN=$(grep -E '^PROXY_CUSTOMER_API_TOKEN=' "${APP_DIR}/.env" | head -1 | cut -d= -f2- || true)
+            if [ -z "$CUSTOMER_TOKEN" ]; then
+              CUSTOMER_TOKEN=$(grep -E '^PROXY_API_TOKEN=' "${APP_DIR}/.env" | head -1 | cut -d= -f2- || true)
+            fi
+            if [ -z "$CUSTOMER_TOKEN" ]; then
+              CUSTOMER_TOKEN=$(grep -E '^OPENCLAW_GATEWAY_TOKEN=' "${APP_DIR}/.env" | head -1 | cut -d= -f2- || true)
+            fi
+            if [ -n "$CUSTOMER_TOKEN" ]; then
+              SMOKE_RESP=$(curl -sS -X POST \
+                "http://127.0.0.1:3001/api/agents/create-via-meta?customerId=00000000-0000-4000-8000-000000000001" \
+                -H "Authorization: Bearer ${CUSTOMER_TOKEN}" \
+                -H "Content-Type: application/json" \
+                -d '{"messages":[{"role":"user","content":"Health check: reply READY in one short sentence."}]}' || true)
+              echo "$SMOKE_RESP"
+              if ! printf '%s' "$SMOKE_RESP" | python3 - <<'PY'
+            import json
+            import sys
+
+            raw = sys.stdin.read()
+            try:
+                payload = json.loads(raw)
+            except Exception:
+                raise SystemExit(2)
+
+            if isinstance(payload, dict) and payload.get("error"):
+                raise SystemExit(1)
+
+            data = payload.get("data") if isinstance(payload, dict) else None
+            response = data.get("response") if isinstance(data, dict) else None
+            if not isinstance(response, str) or not response.strip():
+                raise SystemExit(1)
+
+            if "gateway token mismatch" in response.lower():
+                raise SystemExit(1)
+            PY
+              then
+                echo "META AGENT WS SMOKE FAILED"
+                systemctl --no-pager --full status webagent-proxy || true
+                journalctl -u webagent-proxy --since "-3 min" --no-pager || true
+                systemctl --no-pager --full status openclaw-gateway || true
+                journalctl -u openclaw-gateway --since "-3 min" --no-pager || true
+                exit 1
+              fi
+            else
+              echo "META AGENT WS SMOKE SKIPPED (no API token found)"
             fi
 
             echo "→ Static asset check..."
