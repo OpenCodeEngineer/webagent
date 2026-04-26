@@ -18,11 +18,6 @@
       model: "azure-openai/gpt-5.1",
       // Workspace-scoped sandboxing: no Docker, file tools restricted to workspace only
       sandbox: { mode: "off" },
-      tools: {
-        profile: "coding",
-        deny: ["exec", "process", "browser", "canvas", "nodes", "gateway"],
-        // read/write/edit are workspace-scoped by default in OpenClaw
-      },
       heartbeat: {
         every: "30m",
         target: "none",
@@ -36,12 +31,6 @@
         name: "Agent Builder",
         workspace: "~/openclaw",
         sandbox: { mode: "off" },
-        tools: {
-          profile: "coding",
-          // Meta-agent needs: read, write, edit (file ops) + web/fetch (HTTP calls)
-          // It does NOT need exec, process, browser
-          deny: ["browser", "canvas"]
-        },
         skills: ["create-agent", "manage-agents"],
         heartbeat: { every: "0m" }
       }
