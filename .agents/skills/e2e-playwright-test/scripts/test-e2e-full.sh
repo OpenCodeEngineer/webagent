@@ -6,11 +6,12 @@
 #   Health → Agent Creation via Meta-Agent → Agent Verification → Widget Chat (WS)
 #
 # Usage:
-#   ./test-e2e-full.sh [BASE_URL] [API_TOKEN]
+#   ./test-e2e-full.sh [BASE_URL] [AUTH_SECRET]
 #
 # Environment variables:
 #   PROXY_URL / BASE_URL        — defaults to https://dev.lamoom.com
-#   PROXY_API_TOKEN             — Bearer token for proxy auth (required)
+#   PROXY_INTERNAL_SECRET       — preferred secret for customer HMAC auth
+#   PROXY_API_TOKEN             — fallback secret for customer HMAC auth
 #   TEST_CUSTOMER_ID            — UUID for the test customer (auto-generated)
 #   OPENCLAW_WORKSPACES_DIR     — if set, checks workspace files on disk
 # =============================================================================
@@ -18,8 +19,9 @@ set -euo pipefail
 
 # ── Config ───────────────────────────────────────────────────────────────────
 BASE_URL="${1:-${PROXY_URL:-${BASE_URL:-https://dev.lamoom.com}}}"
-API_TOKEN="${2:-${PROXY_API_TOKEN:-}}"
-CUSTOMER_ID="${TEST_CUSTOMER_ID:-$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' || python3 -c 'import uuid;print(uuid.uuid4())' 2>/dev/null || echo '00000000-0000-4000-a000-'$(date +%s))}"
+AUTH_SECRET="${2:-${PROXY_INTERNAL_SECRET:-${PROXY_API_TOKEN:-}}}"
+DEFAULT_TEST_CUSTOMER_ID="00000000-0000-4000-8000-000000000001"
+CUSTOMER_ID="${TEST_CUSTOMER_ID:-$DEFAULT_TEST_CUSTOMER_ID}"
 WORKSPACES_DIR="${OPENCLAW_WORKSPACES_DIR:-}"
 
 # Strip trailing slash
@@ -74,17 +76,54 @@ try {
   fi
 }
 
+hmac_sha256_hex() {
+  local payload="$1"
+  if command -v openssl &>/dev/null; then
+    printf '%s' "$payload" | openssl dgst -sha256 -hmac "$AUTH_SECRET" -r 2>/dev/null | awk '{print $1}'
+  elif command -v python3 &>/dev/null; then
+    python3 -c "
+import hmac, hashlib, sys
+print(hmac.new(sys.argv[1].encode(), sys.argv[2].encode(), hashlib.sha256).hexdigest())
+" "$AUTH_SECRET" "$payload" 2>/dev/null
+  else
+    node -e "
+const crypto = require('crypto');
+console.log(crypto.createHmac('sha256', process.argv[1]).update(process.argv[2]).digest('hex'));
+" "$AUTH_SECRET" "$payload" 2>/dev/null
+  fi
+}
+
+customer_sig_for() {
+  local customer_id="$1"
+  local timestamp sig
+  timestamp=$(date +%s)
+  sig=$(hmac_sha256_hex "${customer_id}:${timestamp}") || return 1
+  if [[ -z "$sig" ]]; then
+    return 1
+  fi
+  printf '%s:%s' "$sig" "$timestamp"
+}
+
+extract_agent_slug_marker() {
+  local response_text="$1"
+  local normalized="${response_text//</}"
+  normalized="${normalized//>/}"
+  if [[ "$normalized" =~ \[AGENT_CREATED::[[:space:]]*([a-zA-Z0-9_-]+)[[:space:]]*\] ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  fi
+}
+
 # ── Pre-flight ───────────────────────────────────────────────────────────────
 echo -e "${BOLD}Lamoom E2E Full Flow Test${NC}"
 echo "──────────────────────────────────────────"
 echo "  Base URL:    $BASE_URL"
 echo "  Customer ID: $CUSTOMER_ID"
-echo "  API Token:   ${API_TOKEN:+${API_TOKEN:0:8}…(set)}${API_TOKEN:-MISSING}"
+echo "  Auth Secret: ${AUTH_SECRET:+${AUTH_SECRET:0:8}…(set)}${AUTH_SECRET:-MISSING}"
 echo "  Workspaces:  ${WORKSPACES_DIR:-not set}"
 echo "──────────────────────────────────────────"
 
-if [[ -z "$API_TOKEN" ]]; then
-  echo -e "${RED}ERROR: PROXY_API_TOKEN is required.${NC}" >&2
+if [[ -z "$AUTH_SECRET" ]]; then
+  echo -e "${RED}ERROR: PROXY_INTERNAL_SECRET or PROXY_API_TOKEN is required.${NC}" >&2
   echo "  Set it via env var or pass as the second argument." >&2
   exit 2
 fi
@@ -92,7 +131,9 @@ fi
 # Shared state (flows between tests)
 SESSION_ID=""
 AGENT_SLUG=""
+REQUESTED_AGENT_SLUG=""
 EMBED_TOKEN=""
+EMBED_CODE=""
 AGENT_ID=""
 PHASE2_OK=false
 PHASE3_OK=false
@@ -177,10 +218,15 @@ banner "Phase 2: Agent Creation via Meta-Agent"
 # ── Test 4: Initial greeting (empty messages) ────────────────────────────────
 test_meta_greeting() {
   log "  → Sending initial greeting to meta-agent…"
-  local resp http_code body
+  local resp http_code body customer_sig
+  customer_sig=$(customer_sig_for "$CUSTOMER_ID") || {
+    fail "T4: Meta-agent greeting" "failed to generate customer HMAC signature"
+    return 1
+  }
   resp=$(curl -sk -w "\n%{http_code}" --max-time 60 \
-    -X POST "$BASE_URL/api/agents/create-via-meta?customerId=$CUSTOMER_ID" \
-    -H "Authorization: Bearer $API_TOKEN" \
+    -X POST "$BASE_URL/api/agents/create-via-meta" \
+    -H "x-customer-id: $CUSTOMER_ID" \
+    -H "x-customer-sig: $customer_sig" \
     -H "Content-Type: application/json" \
     -d '{"messages":[]}' 2>/dev/null) || true
   http_code=$(echo "$resp" | tail -1)
@@ -223,10 +269,15 @@ test_meta_describe() {
   local payload
   payload=$(printf '{"messages":[{"role":"user","content":"%s"}],"sessionId":"%s"}' "$msg" "$SESSION_ID")
 
-  local resp http_code body
+  local resp http_code body customer_sig
+  customer_sig=$(customer_sig_for "$CUSTOMER_ID") || {
+    fail "T5: Meta-agent describe" "failed to generate customer HMAC signature"
+    return 1
+  }
   resp=$(curl -sk -w "\n%{http_code}" --max-time 90 \
-    -X POST "$BASE_URL/api/agents/create-via-meta?customerId=$CUSTOMER_ID" \
-    -H "Authorization: Bearer $API_TOKEN" \
+    -X POST "$BASE_URL/api/agents/create-via-meta" \
+    -H "x-customer-id: $CUSTOMER_ID" \
+    -H "x-customer-sig: $customer_sig" \
     -H "Content-Type: application/json" \
     -d "$payload" 2>/dev/null) || true
   http_code=$(echo "$resp" | tail -1)
@@ -252,13 +303,16 @@ test_meta_describe() {
   if [[ -n "$new_sid" ]]; then SESSION_ID="$new_sid"; fi
 
   # Check if meta-agent eagerly created the agent in this step
-  if [[ "$ai_response" =~ \[AGENT_CREATED::([a-zA-Z0-9_-]+)\] ]]; then
-    AGENT_SLUG="${BASH_REMATCH[1]}"
+  local marker_slug
+  marker_slug=$(extract_agent_slug_marker "$ai_response")
+  if [[ -n "$marker_slug" ]]; then
+    AGENT_SLUG="$marker_slug"
     log "    (agent created eagerly in describe step: $AGENT_SLUG)"
     EMBED_TOKEN=$(json_field "$body" "data.embedToken")
     local embed_code
     embed_code=$(json_field "$body" "data.embedCode")
     if [[ -n "$embed_code" && "$embed_code" != "null" ]]; then
+      EMBED_CODE="$embed_code"
       PHASE2_OK=true
     fi
   fi
@@ -280,15 +334,25 @@ test_meta_create() {
     return 1
   fi
 
+  local slug_suffix
+  slug_suffix="${CUSTOMER_ID%%-*}"
+  REQUESTED_AGENT_SLUG="vibebrowser-app-${slug_suffix}"
   log "  → Confirming agent creation (this may take 1-2 minutes)…"
-  local msg="Yes, that looks correct. Please create the agent now."
+  log "    Requesting unique slug: $REQUESTED_AGENT_SLUG"
+  local msg
+  msg="Yes, that looks correct. Please create the agent now. IMPORTANT: use exact unique slug ${REQUESTED_AGENT_SLUG} for this agent."
   local payload
   payload=$(printf '{"messages":[{"role":"user","content":"%s"}],"sessionId":"%s"}' "$msg" "$SESSION_ID")
 
-  local resp http_code body
+  local resp http_code body customer_sig
+  customer_sig=$(customer_sig_for "$CUSTOMER_ID") || {
+    fail "T6: Meta-agent create" "failed to generate customer HMAC signature"
+    return 1
+  }
   resp=$(curl -sk -w "\n%{http_code}" --max-time 180 \
-    -X POST "$BASE_URL/api/agents/create-via-meta?customerId=$CUSTOMER_ID" \
-    -H "Authorization: Bearer $API_TOKEN" \
+    -X POST "$BASE_URL/api/agents/create-via-meta" \
+    -H "x-customer-id: $CUSTOMER_ID" \
+    -H "x-customer-sig: $customer_sig" \
     -H "Content-Type: application/json" \
     -d "$payload" 2>/dev/null) || true
   http_code=$(echo "$resp" | tail -1)
@@ -300,17 +364,22 @@ test_meta_create() {
     return 1
   fi
 
-  local ai_response embed_code embed_token_raw agent_json
+  local ai_response embed_code agent_json
   ai_response=$(json_field "$body" "data.response")
   embed_code=$(json_field "$body" "data.embedCode")
   EMBED_TOKEN=$(json_field "$body" "data.embedToken")
   agent_json=$(json_field "$body" "data.agent")
+  if [[ -n "$embed_code" && "$embed_code" != "null" && "$embed_code" != '""' ]]; then
+    EMBED_CODE="$embed_code"
+  fi
 
   log "    AI: ${ai_response:0:200}…"
 
   # Check for [AGENT_CREATED::<slug>] marker in AI response
-  if [[ "$ai_response" =~ \[AGENT_CREATED::([a-zA-Z0-9_-]+)\] ]]; then
-    AGENT_SLUG="${BASH_REMATCH[1]}"
+  local marker_slug
+  marker_slug=$(extract_agent_slug_marker "$ai_response")
+  if [[ -n "$marker_slug" ]]; then
+    AGENT_SLUG="$marker_slug"
     log "    Found AGENT_CREATED marker: slug=$AGENT_SLUG"
   else
     log "    ⚠ No [AGENT_CREATED::] marker in response text (may be in agent data)"
@@ -325,6 +394,10 @@ test_meta_create() {
       AGENT_SLUG=$(json_field "$body" "data.agent.openclawAgentId")
     fi
     log "    Agent ID: $AGENT_ID, name: $agent_name, slug: $AGENT_SLUG"
+  fi
+
+  if [[ -z "$AGENT_SLUG" && -n "$REQUESTED_AGENT_SLUG" ]]; then
+    AGENT_SLUG="$REQUESTED_AGENT_SLUG"
   fi
 
   # Extract embed token from embedCode HTML if not already set
@@ -366,6 +439,8 @@ test_meta_create() {
   fi
 
   PHASE2_OK=true
+  # Agent registration may reload the gateway; give transport a moment to settle.
+  sleep 3
   pass "T6: Meta-agent create → agent=$AGENT_SLUG, embedToken=${EMBED_TOKEN:0:12}…"
 }
 
@@ -386,10 +461,15 @@ test_list_agents() {
   fi
 
   log "  → Listing agents for customer ${CUSTOMER_ID}..."
-  local resp http_code body
+  local resp http_code body customer_sig
+  customer_sig=$(customer_sig_for "$CUSTOMER_ID") || {
+    fail "T7: List agents" "failed to generate customer HMAC signature"
+    return 1
+  }
   resp=$(curl -sk -w "\n%{http_code}" --max-time 30 \
-    "$BASE_URL/api/agents?customerId=$CUSTOMER_ID" \
-    -H "Authorization: Bearer $API_TOKEN" 2>/dev/null) || true
+    "$BASE_URL/api/agents" \
+    -H "x-customer-id: $CUSTOMER_ID" \
+    -H "x-customer-sig: $customer_sig" 2>/dev/null) || true
   http_code=$(echo "$resp" | tail -1)
   body=$(echo "$resp" | sed '$d')
 
@@ -572,33 +652,23 @@ ws.onclose = () => process.exit(0);
 }
 
 # ── Test 10: Widget Chat Message ─────────────────────────────────────────────
-test_ws_chat() {
-  if [[ "$PHASE2_OK" != "true" || -z "$EMBED_TOKEN" ]]; then
-    skip "T10: WS chat" "no embed token from Phase 2"
-    return 1
-  fi
-
-  if [[ "$NODE_WS_AVAILABLE" != "true" ]]; then
-    skip "T10: WS chat" "WebSocket not available in node"
-    return 1
-  fi
-
-  log "  → Sending chat message through widget WS…"
-  local user_id="e2e-test-chat-$(date +%s)"
-  local result
-  result=$(NODE_TLS_REJECT_UNAUTHORIZED=0 node -e "
+run_ws_chat_probe() {
+  local user_id="$1"
+  NODE_TLS_REJECT_UNAUTHORIZED=0 WS_BASE_URL="$WS_URL" WS_EMBED_TOKEN="$EMBED_TOKEN" WS_USER_ID="$user_id" node - <<'NODE' 2>/dev/null || true
 const WS = typeof WebSocket !== 'undefined' ? WebSocket : require('ws');
-const ws = new WS('${WS_URL}/ws');
+const baseUrl = process.env.WS_BASE_URL;
+const embedToken = process.env.WS_EMBED_TOKEN;
+const userId = process.env.WS_USER_ID;
+const ws = new WS(`${baseUrl}/ws`);
 const timeout = setTimeout(() => { console.log('TIMEOUT'); process.exit(1); }, 60000);
-let authed = false;
 let fullContent = '';
 
 ws.onopen = () => {
   ws.send(JSON.stringify({
     type: 'auth',
-    agentToken: '${EMBED_TOKEN}',
-    token: '${EMBED_TOKEN}',
-    userId: '${user_id}'
+    agentToken: embedToken,
+    token: embedToken,
+    userId,
   }));
 };
 
@@ -606,7 +676,6 @@ ws.onmessage = (evt) => {
   const raw = typeof evt.data === 'string' ? evt.data : evt.data.toString();
   const msg = JSON.parse(raw);
   if (msg.type === 'auth_ok') {
-    authed = true;
     ws.send(JSON.stringify({ type: 'message', content: 'What products do you have?' }));
   } else if (msg.type === 'auth_error') {
     console.log('AUTH_ERROR|' + (msg.reason || msg.message));
@@ -628,10 +697,38 @@ ws.onmessage = (evt) => {
 
 ws.onerror = (e) => { console.log('WS_ERROR|' + (e.message || 'connection failed')); process.exit(1); };
 ws.onclose = () => process.exit(0);
-" 2>/dev/null) || true
+NODE
+}
+
+test_ws_chat() {
+  if [[ "$PHASE2_OK" != "true" || -z "$EMBED_TOKEN" ]]; then
+    skip "T10: WS chat" "no embed token from Phase 2"
+    return 1
+  fi
+
+  if [[ "$NODE_WS_AVAILABLE" != "true" ]]; then
+    skip "T10: WS chat" "WebSocket not available in node"
+    return 1
+  fi
+
+  log "  → Sending chat message through widget WS…"
+  local user_id="e2e-test-chat-$(date +%s)"
+  local result
+  result=$(run_ws_chat_probe "$user_id")
 
   local result_type
   result_type=$(echo "$result" | head -1 | cut -d'|' -f1)
+  if [[ "$result_type" == "CHAT_ERROR" ]]; then
+    local first_error
+    first_error=$(echo "$result" | head -1 | cut -d'|' -f2-)
+    if echo "$first_error" | grep -Eiq 'ECONNRESET|socket hang up|EPIPE|connection reset'; then
+      log "    transient chat transport error ($first_error), retrying once…"
+      sleep 2
+      user_id="e2e-test-chat-retry-$(date +%s)"
+      result=$(run_ws_chat_probe "$user_id")
+      result_type=$(echo "$result" | head -1 | cut -d'|' -f1)
+    fi
+  fi
 
   if [[ "$result_type" == "CHAT_OK" ]]; then
     local content_len content_preview
@@ -654,8 +751,150 @@ ws.onclose = () => process.exit(0);
   fi
 }
 
+# ── Test 10b: Standalone Widget Embed (real copy-paste flow) ──────────────────
+test_standalone_widget_embed() {
+  if [[ "$PHASE2_OK" != "true" || -z "$EMBED_TOKEN" ]]; then
+    skip "T10b: Standalone widget embed" "no embed token from Phase 2"
+    return 1
+  fi
+
+  if ! command -v node &>/dev/null; then
+    skip "T10b: Standalone widget embed" "node is not available"
+    return 0
+  fi
+
+  local snippet tmp_html result result_type detail
+  if [[ -n "$EMBED_CODE" && "$EMBED_CODE" != "null" && "$EMBED_CODE" != '""' ]]; then
+    snippet="$EMBED_CODE"
+  else
+    snippet="<script src=\"$BASE_URL/widget.js\" data-agent-token=\"$EMBED_TOKEN\" async></script>"
+  fi
+
+  tmp_html="$(mktemp -t lamoom-widget-standalone).html"
+  printf '<!doctype html><html><head><meta charset="utf-8"><title>Lamoom Widget QA</title></head><body><main id="app">%s</main></body></html>\n' "$snippet" > "$tmp_html"
+
+  log "  → Testing real standalone embed via file:// page…"
+  result=$(NODE_TLS_REJECT_UNAUTHORIZED=0 node - "$tmp_html" <<'NODE' 2>/dev/null
+let chromium;
+try {
+  ({ chromium } = require('playwright'));
+} catch {
+  console.log('NO_PLAYWRIGHT');
+  process.exit(0);
+}
+
+const htmlPath = process.argv[2];
+
+(async () => {
+  let browser;
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      args: ['--ignore-certificate-errors'],
+    });
+    const context = await browser.newContext({ ignoreHTTPSErrors: true });
+    const page = await context.newPage();
+    await page.goto(`file://${htmlPath}`);
+    await page.waitForSelector('.lamoom-root-host', {
+      state: 'attached',
+      timeout: 30000,
+    });
+
+    await page.evaluate(() => {
+      const host = document.querySelector('.lamoom-root-host');
+      const root = host?.shadowRoot;
+      const bubble = root?.querySelector('.lamoom-bubble');
+      if (!bubble) throw new Error('widget-bubble-not-found');
+      bubble.click();
+    });
+
+    await page.waitForTimeout(800);
+
+    await page.evaluate(() => {
+      const host = document.querySelector('.lamoom-root-host');
+      const root = host?.shadowRoot;
+      const textarea = root?.querySelector('.lamoom-textarea');
+      const sendButton = root?.querySelector('.lamoom-send');
+      if (!textarea || !sendButton) throw new Error('widget-input-not-found');
+      textarea.value = 'Hello from standalone embed QA';
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      sendButton.click();
+    });
+
+    const outcomeHandle = await page.waitForFunction(
+      () => {
+        const host = document.querySelector('.lamoom-root-host');
+        const root = host?.shadowRoot;
+        if (!root) return null;
+
+        const messages = Array.from(root.querySelectorAll('.lamoom-message'))
+          .map((el) => (el.textContent || '').trim())
+          .filter(Boolean);
+
+        const authError = messages.find((text) =>
+          /invalid agent token|connection failed|authentication error/i.test(text),
+        );
+        if (authError) {
+          return { status: 'auth_error', detail: authError };
+        }
+
+        const assistantMessages = Array.from(root.querySelectorAll('.lamoom-message.lamoom-assistant'))
+          .map((el) => (el.textContent || '').trim())
+          .filter(Boolean);
+        const success = assistantMessages.find((text) =>
+          text
+          && !/^⚠️/.test(text)
+          && !/invalid agent token|connection failed|connection lost|authentication error/i.test(text),
+        );
+
+        if (success) {
+          return { status: 'ok', detail: success.slice(0, 200) };
+        }
+
+        return null;
+      },
+      { timeout: 120000, polling: 500 },
+    );
+
+    const outcome = await outcomeHandle.jsonValue();
+    if (outcome?.status === 'ok') {
+      console.log(`STANDALONE_OK|${String(outcome.detail || '').replace(/\|/g, ' ')}`);
+    } else {
+      console.log(`STANDALONE_FAIL|${String(outcome?.detail || 'unknown-error')}`);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.log(`STANDALONE_FAIL|${message}`);
+  } finally {
+    if (browser) {
+      await browser.close();
+    }
+  }
+})();
+NODE
+) || true
+
+  rm -f "$tmp_html"
+
+  result_type=$(echo "$result" | head -1 | cut -d'|' -f1)
+  detail=$(echo "$result" | head -1 | cut -d'|' -f2-)
+
+  if [[ "$result_type" == "NO_PLAYWRIGHT" ]]; then
+    skip "T10b: Standalone widget embed" "playwright is not available in this environment"
+    return 0
+  fi
+
+  if [[ "$result_type" == "STANDALONE_OK" ]]; then
+    pass "T10b: Standalone widget embed → copy-paste flow works"
+    log "    Widget reply: ${detail:0:160}…"
+  else
+    fail "T10b: Standalone widget embed" "${detail:-standalone embed test failed}"
+  fi
+}
+
 test_ws_auth || true
 test_ws_chat || true
+test_standalone_widget_embed || true
 
 ###############################################################################
 # PHASE 5 — Security Gates
@@ -665,7 +904,7 @@ banner "Phase 5: Security Gates"
 # ── Test 11: Unauthenticated API access ──────────────────────────────────────
 test_unauth_api() {
   log "  → Testing unauthenticated access to protected endpoints…"
-  local endpoints=("/api/agents?customerId=test" "/api/auth/ws-ticket")
+  local endpoints=("/api/agents" "/api/auth/ws-ticket")
   local all_pass=true
 
   for ep in "${endpoints[@]}"; do
@@ -785,10 +1024,15 @@ test_meta_discovery() {
   local payload
   payload=$(printf '{"messages":[{"role":"user","content":"%s"}]}' "$msg")
 
-  local resp http_code body
+  local resp http_code body customer_sig
+  customer_sig=$(customer_sig_for "$CUSTOMER_ID") || {
+    fail "T14: Website discovery" "failed to generate customer HMAC signature"
+    return 1
+  }
   resp=$(curl -sk -w "\n%{http_code}" --max-time 120 \
-    -X POST "$BASE_URL/api/agents/create-via-meta?customerId=$CUSTOMER_ID" \
-    -H "Authorization: Bearer $API_TOKEN" \
+    -X POST "$BASE_URL/api/agents/create-via-meta" \
+    -H "x-customer-id: $CUSTOMER_ID" \
+    -H "x-customer-sig: $customer_sig" \
     -H "Content-Type: application/json" \
     -d "$payload" 2>/dev/null) || true
   http_code=$(echo "$resp" | tail -1)

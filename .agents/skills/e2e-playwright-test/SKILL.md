@@ -169,6 +169,8 @@ Test the widget as an actual customer would embed it:
 10. **CHECK**: Close/reopen bubble — chat history preserved
 11. **SCREENSHOT**: Widget demo working on standalone page
 
+**Automation requirement:** `scripts/test-e2e-full.sh` must execute this as a blocking check (current test ID: `T10b`) by writing a temporary standalone HTML file with the real embed `<script>`, opening it in a browser runtime, sending a message, and failing on auth errors (e.g., `Invalid agent token`).
+
 ### Phase 6: Sign Out Flow
 
 1. On the dashboard page, find the sign-out button (top-right, user menu or direct button)

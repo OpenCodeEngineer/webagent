@@ -25,10 +25,6 @@ const createInternalAgentBodySchema = z.object({
   allowedOrigins: z.array(z.string().min(1)).optional(),
 });
 
-const agentsQuerySchema = z.object({
-  customerId: z.string().uuid().optional(),
-});
-
 const idParamsSchema = z.object({
   id: z.string().uuid(),
 });
@@ -59,6 +55,8 @@ const createViaMetaBodySchema = z.object({
   ),
   sessionId: z.string().min(1).optional(),
 });
+
+const customerIdHeaderSchema = z.string().uuid();
 
 function sendError(
   reply: FastifyReply,
@@ -99,27 +97,6 @@ function isLocalhost(request: FastifyRequest): boolean {
   return localhostIps.has(remoteAddress);
 }
 
-function readBearerToken(request: FastifyRequest): string | null {
-  const value = request.headers.authorization;
-  if (!value) return null;
-
-  const [scheme, token] = value.split(' ');
-  if (scheme?.toLowerCase() !== 'bearer' || !token) {
-    return null;
-  }
-
-  return token;
-}
-
-function getCustomerApiToken(): string | null {
-  return (
-    process.env.PROXY_CUSTOMER_API_TOKEN?.trim()
-    || process.env.PROXY_API_TOKEN?.trim()
-    || process.env.OPENCLAW_GATEWAY_TOKEN?.trim()
-    || null
-  );
-}
-
 function getInternalSecret(): string {
   return (
     process.env.PROXY_INTERNAL_SECRET?.trim()
@@ -149,68 +126,69 @@ function getHeaderValue(value: string | string[] | undefined): string | null {
   return null;
 }
 
-function verifyCustomerHmac(request: FastifyRequest): string | null {
+type CustomerAuthVerification =
+  | { ok: true; customerId: string }
+  | { ok: false; message: string };
+
+function verifyCustomerHmac(request: FastifyRequest): CustomerAuthVerification {
   const customerId = getHeaderValue(request.headers['x-customer-id'])?.trim() ?? null;
   const customerSig = getHeaderValue(request.headers['x-customer-sig'])?.trim() ?? null;
-  if (!customerId || !customerSig) {
-    return null;
+  if (!customerId && !customerSig) {
+    return { ok: false, message: 'Missing required authentication headers: x-customer-id and x-customer-sig' };
   }
+  if (!customerId) {
+    return { ok: false, message: 'Missing required authentication header: x-customer-id' };
+  }
+  if (!customerSig) {
+    return { ok: false, message: 'Missing required authentication header: x-customer-sig' };
+  }
+  const parsedCustomerId = customerIdHeaderSchema.safeParse(customerId);
+  if (!parsedCustomerId.success) {
+    return { ok: false, message: 'Invalid x-customer-id format; expected UUID' };
+  }
+  const normalizedCustomerId = parsedCustomerId.data;
 
   const [signatureRaw, timestampRaw] = customerSig.split(':');
   const signature = signatureRaw?.trim();
   const timestampStr = timestampRaw?.trim();
   if (!signature || !timestampStr) {
-    return null;
+    return { ok: false, message: 'Invalid x-customer-sig format; expected "<hex_hmac>:<unix_ts>"' };
   }
 
   const timestamp = Number.parseInt(timestampStr, 10);
   if (!Number.isFinite(timestamp)) {
-    return null;
+    return { ok: false, message: 'Invalid x-customer-sig timestamp' };
   }
 
   const now = Math.floor(Date.now() / 1000);
   if (Math.abs(now - timestamp) > 300) {
-    return null;
+    return { ok: false, message: 'Expired or invalid x-customer-sig timestamp' };
   }
 
   const secret = getInternalSecret();
   if (!secret) {
-    return null;
+    return { ok: false, message: 'Customer signature verification is not configured' };
   }
 
   const expected = createHmac('sha256', secret)
-    .update(`${customerId}:${timestamp}`)
+    .update(`${normalizedCustomerId}:${timestamp}`)
     .digest('hex');
 
   if (!timingSafeBufferEqual(signature, expected)) {
-    return null;
+    return { ok: false, message: 'Invalid x-customer-sig signature' };
   }
 
-  return customerId;
+  return { ok: true, customerId: normalizedCustomerId };
 }
 
 function requireCustomerAuth(request: FastifyRequest, reply: FastifyReply): string | null {
-  const hmacCustomerId = verifyCustomerHmac(request);
-  if (hmacCustomerId) {
-    return hmacCustomerId;
+  const verification = verifyCustomerHmac(request);
+  if (verification.ok) {
+    return verification.customerId;
   }
 
-  const expected = getCustomerApiToken();
-  const token = readBearerToken(request);
-  if (!expected || !token || !timingSafeBufferEqual(token, expected)) {
-    sendError(reply, 401, 'unauthorized', 'Invalid or missing credentials');
-    return null;
-  }
-
-  const query = agentsQuerySchema.safeParse(request.query);
-  const customerId = query.success ? query.data.customerId : undefined;
-  if (!customerId) {
-    sendError(reply, 401, 'unauthorized', 'Missing customerId query parameter for bearer authentication');
-    return null;
-  }
-
-  request.log.warn('Bearer customer auth is deprecated; use x-customer-id/x-customer-sig headers.');
-  return customerId;
+  sendError(reply, 401, 'unauthorized', verification.message);
+  return null;
 }
 
 async function ensureCustomer(app: FastifyInstance, customerId: string) {
@@ -341,8 +319,12 @@ export async function detectAgentCreation(
   customerId: string,
   app: FastifyInstance,
   domain: string,
-): Promise<{ agent: typeof agents.$inferSelect; embedToken: string; embedCode: string } | null> {
-  const markerMatch = responseText.match(/\[AGENT_CREATED::([a-z0-9-]+)\]/i);
+): Promise<
+  | { status: 'created'; agent: typeof agents.$inferSelect; embedToken: string; embedCode: string }
+  | { status: 'conflict'; slug: string; existingCustomerId: string; message: string }
+  | null
+> {
+  const markerMatch = responseText.match(/\[AGENT_CREATED::\s*<?([a-z0-9_-]+)>?\s*\]/i);
   if (!markerMatch?.[1]) return null;
 
   const slug = markerMatch[1];
@@ -396,31 +378,44 @@ export async function detectAgentCreation(
 
   const now = new Date();
 
-  // Try to reclaim an existing agent with the same slug (update owner + config)
-  // MVP: single-server, slug is globally unique per website — reassign to requesting customer
-  const reclaimedRows = await app.db
-    .update(agents)
-    .set({
-      customerId,
-      name: config.agentName,
-      websiteUrl: normalizeNullable(config.websiteUrl),
-      apiDescription: normalizeNullable(config.apiDescription),
-      status: 'active',
-      updatedAt: now,
-    })
+  const existingBySlugRows = await app.db
+    .select()
+    .from(agents)
     .where(eq(agents.openclawAgentId, config.agentSlug))
-    .returning();
+    .limit(1);
+  const existingBySlug = existingBySlugRows[0];
 
-  let createdAgent = reclaimedRows[0];
+  if (existingBySlug && existingBySlug.customerId !== customerId) {
+    return {
+      status: 'conflict',
+      slug: config.agentSlug,
+      existingCustomerId: existingBySlug.customerId,
+      message: `Agent slug "${config.agentSlug}" is already in use by another customer.`,
+    };
+  }
 
-  if (!createdAgent) {
+  let createdAgent = existingBySlug;
+  if (existingBySlug) {
+    const updatedRows = await app.db
+      .update(agents)
+      .set({
+        name: config.agentName,
+        websiteUrl: normalizeNullable(config.websiteUrl),
+        apiDescription: normalizeNullable(config.apiDescription),
+        status: 'active',
+        updatedAt: now,
+      })
+      .where(and(eq(agents.id, existingBySlug.id), eq(agents.customerId, customerId)))
+      .returning();
+    createdAgent = updatedRows[0] ?? existingBySlug;
+  } else {
     const createdAgentRows = await app.db
       .insert(agents)
       .values({
         id: randomUUID(),
+        name: config.agentName,
         customerId,
         openclawAgentId: config.agentSlug,
-        name: config.agentName,
         websiteUrl: normalizeNullable(config.websiteUrl),
         apiDescription: normalizeNullable(config.apiDescription),
         description: null,
@@ -431,26 +426,46 @@ export async function detectAgentCreation(
       .onConflictDoNothing({ target: agents.openclawAgentId })
       .returning();
 
-    createdAgent = createdAgentRows[0]
-      ?? (
-        await app.db
-          .select()
-          .from(agents)
-          .where(
-            and(
-              eq(agents.openclawAgentId, config.agentSlug),
-              eq(agents.customerId, customerId),
-              ne(agents.status, 'deleted'),
-            ),
-          )
-          .limit(1)
-      )[0];
+    createdAgent = createdAgentRows[0];
+  }
+
+  if (!createdAgent) {
+    const conflictingRows = await app.db
+      .select()
+      .from(agents)
+      .where(eq(agents.openclawAgentId, config.agentSlug))
+      .limit(1);
+    const conflictingAgent = conflictingRows[0];
+
+    if (conflictingAgent?.customerId && conflictingAgent.customerId !== customerId) {
+      return {
+        status: 'conflict',
+        slug: config.agentSlug,
+        existingCustomerId: conflictingAgent.customerId,
+        message: `Agent slug "${config.agentSlug}" is already in use by another customer.`,
+      };
+    }
+
+    if (conflictingAgent?.customerId === customerId) {
+      const updatedRows = await app.db
+        .update(agents)
+        .set({
+          name: config.agentName,
+          websiteUrl: normalizeNullable(config.websiteUrl),
+          apiDescription: normalizeNullable(config.apiDescription),
+          status: 'active',
+          updatedAt: now,
+        })
+        .where(and(eq(agents.id, conflictingAgent.id), eq(agents.customerId, customerId)))
+        .returning();
+      createdAgent = updatedRows[0] ?? conflictingAgent;
+    }
   }
 
   if (!createdAgent) {
     app.log.warn(
       { slug: config.agentSlug, customerId },
-      'failed to create or reclaim agent',
+      'failed to create or resolve agent for customer',
     );
     return null;
   }
@@ -464,13 +479,8 @@ export async function detectAgentCreation(
     .where(eq(widgetEmbeds.agentId, createdAgent.id))
     .limit(1);
   const existingEmbed = existingEmbedRows[0];
-  const embedToken = randomUUID();
-  if (existingEmbed) {
-    await app.db
-      .update(widgetEmbeds)
-      .set({ embedToken })
-      .where(eq(widgetEmbeds.id, existingEmbed.id));
-  } else {
+  const embedToken = existingEmbed?.embedToken ?? randomUUID();
+  if (!existingEmbed) {
     await app.db.insert(widgetEmbeds).values({
       id: randomUUID(),
       agentId: createdAgent.id,
@@ -489,6 +499,7 @@ export async function detectAgentCreation(
     = `<script src="https://${normalizedDomain}/widget.js" data-agent-token="${embedToken}" async></script>`;
 
   return {
+    status: 'created',
     agent: createdAgent,
     embedToken,
     embedCode,
@@ -614,14 +625,24 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
       const existingEmbedCode
         = responseText.match(/<script\s[^>]*data-agent-token="[^"]*"[^>]*><\/script>/i)?.[0] ?? '';
       const createdAgentData = await detectAgentCreation(responseText, customerId, app, domain);
+      if (createdAgentData?.status === 'conflict') {
+        return sendError(
+          reply,
+          409,
+          'agent_slug_conflict',
+          `${createdAgentData.message} Please retry with a more unique website or agent name.`,
+          { slug: createdAgentData.slug },
+        );
+      }
 
       return reply.send({
         data: {
           response: responseText,
           sessionId,
-          agent: createdAgentData?.agent ?? null,
-          embedToken: createdAgentData?.embedToken ?? null,
-          embedCode: createdAgentData?.embedCode ?? existingEmbedCode,
+          agent: createdAgentData?.status === 'created' ? createdAgentData.agent : null,
+          embedToken: createdAgentData?.status === 'created' ? createdAgentData.embedToken : null,
+          embedCode:
+            createdAgentData?.status === 'created' ? createdAgentData.embedCode : existingEmbedCode,
         },
       });
     } catch (error) {

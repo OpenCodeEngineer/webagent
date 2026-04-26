@@ -122,12 +122,14 @@
   }>('.lamoom-send');
 
   let socket: LamoomWebSocket | null = null;
+  let socketAuthenticated = false;
   let retryCount = 0;
   let retryTimer: unknown = null;
   let panelOpen = false;
   let manualClose = false;
   let typingNode: { remove: () => void } | null = null;
   let streamingAssistantNode: { textContent: string | null } | null = null;
+  const pendingMessages: string[] = [];
 
   const scrollToBottom = (): void => {
     messages.scrollTop = messages.scrollHeight;
@@ -178,6 +180,15 @@
     streamingAssistantNode = null;
   };
 
+  const flushPendingMessages = (): void => {
+    if (!socketAuthenticated || !socket || socket.readyState !== 1) return;
+    while (pendingMessages.length > 0) {
+      const nextMessage = pendingMessages.shift();
+      if (!nextMessage) continue;
+      socket.send(JSON.stringify({ type: 'message', content: nextMessage }));
+    }
+  };
+
   const showTyping = (): void => {
     if (typingNode) return;
     const node = doc.createElement('div');
@@ -200,6 +211,7 @@
     if (socket && (socket.readyState === 0 || socket.readyState === 1)) return;
 
     manualClose = false;
+    socketAuthenticated = false;
     const hostName = (() => {
       try {
         return new URL(activeScript?.src ?? '').host;
@@ -245,6 +257,11 @@
         message = null;
       }
       if (!message) return;
+      if (message.type === 'auth_ok') {
+        socketAuthenticated = true;
+        flushPendingMessages();
+        return;
+      }
       if (message.type === 'message') {
         const text = message.content ?? message.message ?? '';
         if (message.done === true) {
@@ -259,6 +276,8 @@
         if (errorText) createMessage(errorText, 'assistant', true);
       }
       if (message.type === 'auth_error') {
+        socketAuthenticated = false;
+        pendingMessages.length = 0;
         resetAssistantStream();
         createMessage(
           `⚠️ Connection failed: ${message.message || message.reason || 'Authentication error'}`,
@@ -275,9 +294,11 @@
 
     socket.onclose = () => {
       socket = null;
+      socketAuthenticated = false;
       sendButton.disabled = false;
       if (manualClose || !panelOpen) return;
       if (retryCount >= 3) {
+        pendingMessages.length = 0;
         hideTyping();
         resetAssistantStream();
         createMessage('Connection lost. Please try again.', 'assistant', true);
@@ -300,13 +321,12 @@
     showTyping();
 
     const payload = JSON.stringify({ type: 'message', content: text });
-    if (socket?.readyState === 1) {
+    if (socket?.readyState === 1 && socketAuthenticated) {
       socket.send(payload);
       return;
     }
 
-    hideTyping();
-    createMessage('Connecting, please try again.', 'assistant', true);
+    pendingMessages.push(text);
     openSocket();
   };
 
@@ -324,6 +344,8 @@
       socket.close();
       socket = null;
     }
+    socketAuthenticated = false;
+    pendingMessages.length = 0;
   };
 
   bubble.addEventListener('click', () => {
