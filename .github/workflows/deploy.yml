@@ -68,10 +68,11 @@ jobs:
                 return None
 
             token = (
-                read_gateway_token_from_process()
-                or env_map.get("OPENCLAW_GATEWAY_TOKEN")
                 or env_map.get("PROXY_CUSTOMER_API_TOKEN")
                 or env_map.get("PROXY_API_TOKEN")
+                or env_map.get("OPENCLAW_HOOKS_TOKEN")
+                or env_map.get("OPENCLAW_GATEWAY_TOKEN")
+                or read_gateway_token_from_process()
             )
 
             if not token:
@@ -93,7 +94,7 @@ jobs:
             updated = next_lines
 
             env_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
-            hooks_token = env_map.get("OPENCLAW_HOOKS_TOKEN") or token
+            hooks_token = token
 
             cfg_path = Path("/opt/webagent/openclaw/config/openclaw.json5")
             if cfg_path.exists():
