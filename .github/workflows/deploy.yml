@@ -133,19 +133,19 @@ jobs:
                 raw = cfg_path.read_text(encoding="utf-8")
                 next_raw = raw
                 next_raw = re.sub(
-                    r'(auth\\s*:\\s*\\{[\\s\\S]*?token\\s*:\\s*)"(?:[^"\\\\]|\\\\.)*"',
+                    r'(auth\s*:\s*\{[\s\S]*?token\s*:\s*)"(?:[^"\\]|\\.)*"',
                     rf'\\1"{token}"',
                     next_raw,
                     count=1,
                 )
                 next_raw = re.sub(
-                    r'(remote\\s*:\\s*\\{[\\s\\S]*?token\\s*:\\s*)"(?:[^"\\\\]|\\\\.)*"',
+                    r'(remote\s*:\s*\{[\s\S]*?token\s*:\s*)"(?:[^"\\]|\\.)*"',
                     rf'\\1"{token}"',
                     next_raw,
                     count=1,
                 )
                 next_raw = re.sub(
-                    r'(hooks\\s*:\\s*\\{[\\s\\S]*?token\\s*:\\s*)"(?:[^"\\\\]|\\\\.)*"',
+                    r'(hooks\s*:\s*\{[\s\S]*?token\s*:\s*)"(?:[^"\\]|\\.)*"',
                     rf'\\1"{hooks_token}"',
                     next_raw,
                     count=1,
