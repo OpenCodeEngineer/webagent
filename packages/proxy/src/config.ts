@@ -25,18 +25,27 @@ function getRequiredEnv(name: string): string {
 
 function getGatewayToken(): string {
   const token = (
-    process.env.PROXY_CUSTOMER_API_TOKEN?.trim()
+    process.env.OPENCLAW_GATEWAY_TOKEN?.trim()
+    || process.env.PROXY_CUSTOMER_API_TOKEN?.trim()
     || process.env.PROXY_API_TOKEN?.trim()
-    || process.env.OPENCLAW_GATEWAY_TOKEN?.trim()
   );
 
   if (!token) {
     throw new Error(
-      'Missing required gateway auth token. Set PROXY_CUSTOMER_API_TOKEN, PROXY_API_TOKEN, or OPENCLAW_GATEWAY_TOKEN.',
+      'Missing required gateway auth token. Set OPENCLAW_GATEWAY_TOKEN, PROXY_CUSTOMER_API_TOKEN, or PROXY_API_TOKEN.',
     );
   }
 
   return token;
+}
+
+function getGatewayUrl(): string {
+  const raw = process.env.OPENCLAW_GATEWAY_URL?.trim();
+  if (!raw) {
+    return DEFAULT_OPENCLAW_GATEWAY_URL;
+  }
+
+  return raw;
 }
 
 export function loadConfig(): ProxyConfig {
@@ -50,7 +59,7 @@ export function loadConfig(): ProxyConfig {
   return {
     port: parsedPort,
     databaseUrl: getRequiredEnv('DATABASE_URL'),
-    openClawGatewayUrl: process.env.OPENCLAW_GATEWAY_URL?.trim() || DEFAULT_OPENCLAW_GATEWAY_URL,
+    openClawGatewayUrl: getGatewayUrl(),
     openClawGatewayToken: getGatewayToken()
   };
 }

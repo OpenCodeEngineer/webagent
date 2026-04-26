@@ -60,19 +60,27 @@ jobs:
             if not token:
                 raise SystemExit(0)
 
-            updated = []
-            replaced = False
-            for line in raw_lines:
-                if line.startswith("OPENCLAW_GATEWAY_TOKEN="):
-                    updated.append(f"OPENCLAW_GATEWAY_TOKEN={token}")
-                    replaced = True
-                else:
-                    updated.append(line)
+            updates = {
+                "OPENCLAW_GATEWAY_TOKEN": token,
+                "OPENCLAW_CONFIG_PATH": "/opt/webagent/openclaw/config/openclaw.json5",
+                "OPENCLAW_GATEWAY_URL": "ws://127.0.0.1:18789",
+            }
 
-            if not replaced:
-                if updated and updated[-1].strip():
-                    updated.append("")
-                updated.append(f"OPENCLAW_GATEWAY_TOKEN={token}")
+            updated = list(raw_lines)
+            for key, value in updates.items():
+                replaced = False
+                next_lines = []
+                for line in updated:
+                    if line.startswith(f"{key}="):
+                        next_lines.append(f"{key}={value}")
+                        replaced = True
+                    else:
+                        next_lines.append(line)
+                if not replaced:
+                    if next_lines and next_lines[-1].strip():
+                        next_lines.append("")
+                    next_lines.append(f"{key}={value}")
+                updated = next_lines
 
             env_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
 
