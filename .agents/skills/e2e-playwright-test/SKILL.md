@@ -130,12 +130,12 @@ Common cause: DrizzleAdapter table name mismatch (adapter expects singular `acco
 2. **CHECK**: "Test Your Widget" section visible on the page
 3. **CHECK**: Widget preview shows "Connected" status (green badge)
 4. **Click** the input field in the widget preview
-5. **Type**: "What products do you have?"
+5. **Type**: "I am evaluating Vibe Browser. How do I install the extension? Please include the direct install link and docs link."
 6. **Press Enter** to send
 7. **CHECK**: User message appears in the widget preview chat
 8. **CHECK**: Typing indicator (·) shows while waiting
 9. **Wait** up to 120s for response
-10. **CHECK**: Bot response appears, is non-empty, and mentions relevant products/services
+10. **CHECK**: Bot response appears, is non-empty, and includes direct URL(s) for install/docs
 11. **CHECK**: No "⚠️ Error" message (this means OpenClaw agent isn't registered)
 12. **SCREENSHOT**: Widget preview with message exchange visible
 
@@ -148,26 +148,28 @@ If the widget preview shows an error, debug via WebSocket directly:
    Connect to wss://dev.lamoom.com/ws
    Send: {"type":"auth","agentToken":"<TOKEN>","userId":"e2e-test"}
    Expect: {"type":"auth_ok",...}
-   Send: {"type":"message","content":"What products do you have?"}
+   Send: {"type":"message","content":"I am evaluating Vibe Browser. How do I install the extension? Please include the direct install link and docs link."}
    Expect: {"type":"message","content":"...","done":true}
    ```
 3. **CHECK**: auth_ok received (widget auth chain works)
-4. **CHECK**: Message response is non-empty and contextual
+4. **CHECK**: Message response is non-empty, contextual, and includes direct URL(s)
 
 ### Phase 5c: Real Widget Demo (standalone page)
 
 Test the widget as an actual customer would embed it:
 1. From the agent detail page, copy the full `<script>` embed code
-2. Open a new browser tab to `data:text/html,` or any blank page
-3. Execute JavaScript to inject the embed script into the page
+2. Open a minimal standalone HTML page (simple `index.html`) served over local `http://127.0.0.1`
+3. Paste or inject the exact embed `<script>` into that page and load it in the browser
 4. **CHECK**: Widget bubble appears (bottom-right floating button)
 5. **Click** the widget bubble to open the chat panel
 6. **CHECK**: Chat panel slides up, shows "Connected" or ready state
-7. **Type** "Hello, what can you help me with?" and send
+7. **Type** "I am evaluating Vibe Browser. How do I install the extension? Please include the direct install link and docs link." and send
 8. **Wait** up to 120s for response
-9. **CHECK**: Bot responds with relevant information
+9. **CHECK**: Bot responds with relevant information and includes direct install/docs URL(s)
 10. **CHECK**: Close/reopen bubble — chat history preserved
 11. **SCREENSHOT**: Widget demo working on standalone page
+
+**Automation requirement:** `scripts/test-e2e-full.sh` must execute this as a blocking check (current test ID: `T10b`) by writing a temporary standalone HTML file with the real embed `<script>`, opening it in a browser runtime, sending a message, and failing on auth errors (e.g., `Invalid agent token`).
 
 ### Phase 6: Sign Out Flow
 

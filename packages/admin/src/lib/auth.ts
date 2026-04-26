@@ -9,6 +9,38 @@ import bcrypt from "bcryptjs";
 import { getDb } from "./db";
 import { users, accounts, sessions, verificationTokens } from "./auth-schema";
 
+const normalizeEmail = (email: string): string => email.trim().toLowerCase();
+
+const getInvitedEmails = (): Set<string> =>
+  new Set(
+    (process.env.AUTH_INVITE_EMAILS ?? "")
+      .split(",")
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean),
+  );
+
+const isInvitedEmail = (email: string): boolean => getInvitedEmails().has(normalizeEmail(email));
+
+async function findUserByEmailVariants(email: string) {
+  const rawEmail = email.trim();
+  const normalizedEmail = normalizeEmail(rawEmail);
+  const candidates = rawEmail === normalizedEmail ? [rawEmail] : [rawEmail, normalizedEmail];
+
+  for (const candidate of candidates) {
+    const existingUsers = await getDb()
+      .select()
+      .from(users)
+      .where(eq(users.email, candidate))
+      .limit(1);
+    const existingUser = existingUsers[0];
+    if (existingUser) {
+      return existingUser;
+    }
+  }
+
+  return null;
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: (() => {
     // Lazy-init DrizzleAdapter so the DB connection is only opened at
@@ -87,14 +119,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (typeof email !== "string" || typeof password !== "string") {
           return null;
         }
-
-        const existingUsers = await getDb()
-          .select()
-          .from(users)
-          .where(eq(users.email, email))
-          .limit(1);
-
-        const existingUser = existingUsers[0];
+        const rawEmail = email.trim();
+        const normalizedEmail = normalizeEmail(rawEmail);
+        const existingUser = await findUserByEmailVariants(rawEmail);
 
         if (existingUser) {
           const credentialAccounts = await getDb()
@@ -124,27 +151,31 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           };
         }
 
+        if (!isInvitedEmail(normalizedEmail)) {
+          return null;
+        }
+
         const hashedPassword = await bcrypt.hash(password, 12);
         const userId = crypto.randomUUID();
 
         await getDb().insert(users).values({
           id: userId,
-          email,
-          name: email.split("@")[0],
+          email: normalizedEmail,
+          name: normalizedEmail.split("@")[0],
         });
 
         await getDb().insert(accounts).values({
           userId,
           type: "credentials",
           provider: "credentials",
-          providerAccountId: email,
+          providerAccountId: normalizedEmail,
           access_token: hashedPassword,
         });
 
         return {
           id: userId,
-          email,
-          name: email.split("@")[0],
+          email: normalizedEmail,
+          name: normalizedEmail.split("@")[0],
         };
       },
     }),
@@ -178,6 +209,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         session.user.isAdmin = Boolean(token.isAdmin);
       }
       return session;
+    },
+    async signIn({ user }) {
+      const rawEmail = typeof user?.email === "string" ? user.email.trim() : "";
+      if (!rawEmail) {
+        return false;
+      }
+
+      const existingUser = await findUserByEmailVariants(rawEmail);
+      if (existingUser) {
+        return true;
+      }
+
+      return isInvitedEmail(rawEmail);
     },
   },
 });

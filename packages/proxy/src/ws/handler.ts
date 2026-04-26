@@ -354,8 +354,13 @@ export function handleConnection(
               let responseText = result.response || '';
               if (state.isAdmin && responseText) {
                 const created = await detectAgentCreation(responseText, state.userId, ctx.app, domain);
-                if (created) {
+                if (created?.status === 'created') {
                   responseText = `${responseText}\n\n${created.embedCode}`;
+                } else if (created?.status === 'conflict') {
+                  const conflictMessage
+                    = `${created.message} Please retry with a more unique website or agent name.`;
+                  send(ws, { type: 'error', message: conflictMessage });
+                  responseText = `${responseText}\n\n⚠️ ${conflictMessage}`;
                 }
               }
 
