@@ -137,6 +137,7 @@ EMBED_CODE=""
 AGENT_ID=""
 PHASE2_OK=false
 PHASE3_OK=false
+WIDGET_REALISTIC_PROMPT="${WIDGET_REALISTIC_PROMPT:-I am evaluating Vibe Browser. How do I install the extension? Please include the direct install link and docs link.}"
 
 ###############################################################################
 # PHASE 1 — Infrastructure Health
@@ -599,11 +600,18 @@ test_ws_auth() {
   log "  → Connecting to $WS_URL/ws and authenticating…"
   local user_id="e2e-test-user-$(date +%s)"
   local result
-  result=$(NODE_TLS_REJECT_UNAUTHORIZED=0 node -e "
+  result=$(NODE_NO_WARNINGS=1 NODE_TLS_REJECT_UNAUTHORIZED=0 node -e "
 // Use native WebSocket (Node 22+) or ws module
 const WS = typeof WebSocket !== 'undefined' ? WebSocket : require('ws');
 const ws = new WS('${WS_URL}/ws');
-const timeout = setTimeout(() => { console.log('TIMEOUT'); process.exit(1); }, 20000);
+let finished = false;
+const finish = (code) => {
+  if (finished) return;
+  finished = true;
+  clearTimeout(timeout);
+  setTimeout(() => process.exit(code), 25);
+};
+const timeout = setTimeout(() => { console.log('TIMEOUT'); finish(1); }, 20000);
 
 ws.onopen = () => {
   ws.send(JSON.stringify({
@@ -616,21 +624,31 @@ ws.onopen = () => {
 
 ws.onmessage = (evt) => {
   const raw = typeof evt.data === 'string' ? evt.data : evt.data.toString();
-  const msg = JSON.parse(raw);
+  let msg;
+  try {
+    msg = JSON.parse(raw);
+  } catch {
+    return;
+  }
   if (msg.type === 'auth_ok') {
     console.log('AUTH_OK|' + msg.sessionId);
-    clearTimeout(timeout);
     ws.close();
+    finish(0);
   } else if (msg.type === 'auth_error') {
     console.log('AUTH_ERROR|' + (msg.reason || msg.message));
-    clearTimeout(timeout);
     ws.close();
+    finish(1);
   }
 };
 
-ws.onerror = (e) => { console.log('WS_ERROR|' + (e.message || 'connection failed')); process.exit(1); };
-ws.onclose = () => process.exit(0);
-" 2>/dev/null) || true
+ws.onerror = (e) => { console.log('WS_ERROR|' + (e.message || 'connection failed')); finish(1); };
+ws.onclose = () => {
+  if (!finished) {
+    console.log('WS_CLOSED|closed-before-auth-result');
+    finish(1);
+  }
+};
+") || true
 
   local result_type
   result_type=$(echo "$result" | head -1 | cut -d'|' -f1)
@@ -654,14 +672,23 @@ ws.onclose = () => process.exit(0);
 # ── Test 10: Widget Chat Message ─────────────────────────────────────────────
 run_ws_chat_probe() {
   local user_id="$1"
-  NODE_TLS_REJECT_UNAUTHORIZED=0 WS_BASE_URL="$WS_URL" WS_EMBED_TOKEN="$EMBED_TOKEN" WS_USER_ID="$user_id" node - <<'NODE' 2>/dev/null || true
+  NODE_NO_WARNINGS=1 NODE_TLS_REJECT_UNAUTHORIZED=0 WS_BASE_URL="$WS_URL" WS_EMBED_TOKEN="$EMBED_TOKEN" WS_USER_ID="$user_id" WS_TEST_PROMPT="$WIDGET_REALISTIC_PROMPT" node - <<'NODE' || true
 const WS = typeof WebSocket !== 'undefined' ? WebSocket : require('ws');
 const baseUrl = process.env.WS_BASE_URL;
 const embedToken = process.env.WS_EMBED_TOKEN;
 const userId = process.env.WS_USER_ID;
+const prompt = process.env.WS_TEST_PROMPT || 'What products do you have?';
 const ws = new WS(`${baseUrl}/ws`);
-const timeout = setTimeout(() => { console.log('TIMEOUT'); process.exit(1); }, 60000);
+let finished = false;
+const finish = (code) => {
+  if (finished) return;
+  finished = true;
+  clearTimeout(timeout);
+  setTimeout(() => process.exit(code), 25);
+};
+const timeout = setTimeout(() => { console.log('TIMEOUT'); finish(1); }, 60000);
 let fullContent = '';
+const hasLink = (value) => /https?:\/\/\S+|www\.\S+/i.test(value || '');
 
 ws.onopen = () => {
   ws.send(JSON.stringify({
@@ -674,29 +701,39 @@ ws.onopen = () => {
 
 ws.onmessage = (evt) => {
   const raw = typeof evt.data === 'string' ? evt.data : evt.data.toString();
-  const msg = JSON.parse(raw);
+  let msg;
+  try {
+    msg = JSON.parse(raw);
+  } catch {
+    return;
+  }
   if (msg.type === 'auth_ok') {
-    ws.send(JSON.stringify({ type: 'message', content: 'What products do you have?' }));
+    ws.send(JSON.stringify({ type: 'message', content: prompt }));
   } else if (msg.type === 'auth_error') {
     console.log('AUTH_ERROR|' + (msg.reason || msg.message));
-    clearTimeout(timeout);
     ws.close();
+    finish(1);
   } else if (msg.type === 'message') {
     if (msg.content) fullContent += msg.content;
     if (msg.done) {
-      console.log('CHAT_OK|' + fullContent.length + '|' + fullContent.substring(0, 200));
-      clearTimeout(timeout);
+      console.log('CHAT_OK|' + fullContent.length + '|' + (hasLink(fullContent) ? 'link' : 'nolink') + '|' + fullContent.substring(0, 260));
       ws.close();
+      finish(0);
     }
   } else if (msg.type === 'error') {
     console.log('CHAT_ERROR|' + msg.message);
-    clearTimeout(timeout);
     ws.close();
+    finish(1);
   }
 };
 
-ws.onerror = (e) => { console.log('WS_ERROR|' + (e.message || 'connection failed')); process.exit(1); };
-ws.onclose = () => process.exit(0);
+ws.onerror = (e) => { console.log('WS_ERROR|' + (e.message || 'connection failed')); finish(1); };
+ws.onclose = () => {
+  if (!finished) {
+    console.log('WS_CLOSED|closed-before-chat-result');
+    finish(1);
+  }
+};
 NODE
 }
 
@@ -715,6 +752,17 @@ test_ws_chat() {
   local user_id="e2e-test-chat-$(date +%s)"
   local result
   result=$(run_ws_chat_probe "$user_id")
+  if [[ -z "$result" ]]; then
+    log "    empty WS probe output, retrying once…"
+    sleep 2
+    user_id="e2e-test-chat-empty-retry-$(date +%s)"
+    result=$(run_ws_chat_probe "$user_id")
+  fi
+
+  if [[ -z "$result" ]]; then
+    fail "T10: WS chat" "probe produced no output"
+    return
+  fi
 
   local result_type
   result_type=$(echo "$result" | head -1 | cut -d'|' -f1)
@@ -731,11 +779,15 @@ test_ws_chat() {
   fi
 
   if [[ "$result_type" == "CHAT_OK" ]]; then
-    local content_len content_preview
+    local content_len link_flag content_preview
     content_len=$(echo "$result" | head -1 | cut -d'|' -f2)
-    content_preview=$(echo "$result" | head -1 | cut -d'|' -f3-)
-    if [[ "$content_len" -gt 0 ]]; then
+    link_flag=$(echo "$result" | head -1 | cut -d'|' -f3)
+    content_preview=$(echo "$result" | head -1 | cut -d'|' -f4-)
+    if [[ "$content_len" -gt 0 && "$link_flag" == "link" ]]; then
       pass "T10: WS chat → ${content_len}-char response from created agent"
+      log "    Agent: ${content_preview}…"
+    elif [[ "$content_len" -gt 0 ]]; then
+      fail "T10: WS chat" "response did not include a direct URL"
       log "    Agent: ${content_preview}…"
     else
       fail "T10: WS chat" "empty response content"
@@ -773,8 +825,8 @@ test_standalone_widget_embed() {
   tmp_html="$(mktemp -t lamoom-widget-standalone).html"
   printf '<!doctype html><html><head><meta charset="utf-8"><title>Lamoom Widget QA</title></head><body><main id="app">%s</main></body></html>\n' "$snippet" > "$tmp_html"
 
-  log "  → Testing real standalone embed via file:// page…"
-  result=$(NODE_TLS_REJECT_UNAUTHORIZED=0 node - "$tmp_html" <<'NODE' 2>/dev/null
+  log "  → Testing real standalone embed via local http:// page…"
+  result=$(STANDALONE_TEST_PROMPT="$WIDGET_REALISTIC_PROMPT" NODE_NO_WARNINGS=1 NODE_TLS_REJECT_UNAUTHORIZED=0 node - "$tmp_html" <<'NODE'
 let chromium;
 try {
   ({ chromium } = require('playwright'));
@@ -783,18 +835,45 @@ try {
   process.exit(0);
 }
 
+const fs = require('node:fs');
+const http = require('node:http');
 const htmlPath = process.argv[2];
+const prompt = process.env.STANDALONE_TEST_PROMPT || 'Hello from standalone embed QA';
+const linkRegex = /https?:\/\/\S+|www\.\S+/i;
 
 (async () => {
   let browser;
+  let page;
+  let server;
   try {
     browser = await chromium.launch({
       headless: true,
       args: ['--ignore-certificate-errors'],
     });
     const context = await browser.newContext({ ignoreHTTPSErrors: true });
-    const page = await context.newPage();
-    await page.goto(`file://${htmlPath}`);
+    page = await context.newPage();
+    const html = fs.readFileSync(htmlPath, 'utf8');
+    server = http.createServer((req, res) => {
+      if (req.url === '/' || req.url === '/index.html') {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        res.end(html);
+        return;
+      }
+      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end('not found');
+    });
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => {
+        server.off('error', reject);
+        resolve();
+      });
+    });
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('standalone-server-start-failed');
+    }
+    await page.goto(`http://127.0.0.1:${address.port}/index.html`);
     await page.waitForSelector('.lamoom-root-host', {
       state: 'attached',
       timeout: 30000,
@@ -810,19 +889,20 @@ const htmlPath = process.argv[2];
 
     await page.waitForTimeout(800);
 
-    await page.evaluate(() => {
+    await page.evaluate((messagePrompt) => {
       const host = document.querySelector('.lamoom-root-host');
       const root = host?.shadowRoot;
       const textarea = root?.querySelector('.lamoom-textarea');
       const sendButton = root?.querySelector('.lamoom-send');
       if (!textarea || !sendButton) throw new Error('widget-input-not-found');
-      textarea.value = 'Hello from standalone embed QA';
+      textarea.value = messagePrompt;
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
       sendButton.click();
-    });
+    }, prompt);
 
     const outcomeHandle = await page.waitForFunction(
-      () => {
+      (linkPatternSource) => {
+        const linkPattern = new RegExp(linkPatternSource, 'i');
         const host = document.querySelector('.lamoom-root-host');
         const root = host?.shadowRoot;
         if (!root) return null;
@@ -848,11 +928,15 @@ const htmlPath = process.argv[2];
         );
 
         if (success) {
-          return { status: 'ok', detail: success.slice(0, 200) };
+          const joined = assistantMessages.join(' ');
+          if (linkPattern.test(joined)) {
+            return { status: 'ok', detail: success.slice(0, 200) };
+          }
         }
 
         return null;
       },
+      linkRegex.source,
       { timeout: 120000, polling: 500 },
     );
 
@@ -863,9 +947,28 @@ const htmlPath = process.argv[2];
       console.log(`STANDALONE_FAIL|${String(outcome?.detail || 'unknown-error')}`);
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    let message = error instanceof Error ? error.message : String(error);
+    if (/Timeout/i.test(message) && page) {
+      try {
+        const joinedAssistantText = await page.evaluate(() => {
+          const host = document.querySelector('.lamoom-root-host');
+          const root = host?.shadowRoot;
+          if (!root) return '';
+          return Array.from(root.querySelectorAll('.lamoom-message.lamoom-assistant'))
+            .map((el) => (el.textContent || '').trim())
+            .filter(Boolean)
+            .join(' ');
+        });
+        if (joinedAssistantText && !linkRegex.test(joinedAssistantText)) {
+          message = 'assistant response missing direct URL';
+        }
+      } catch {}
+    }
     console.log(`STANDALONE_FAIL|${message}`);
   } finally {
+    if (server) {
+      await new Promise((resolve) => server.close(() => resolve(null)));
+    }
     if (browser) {
       await browser.close();
     }
@@ -875,6 +978,11 @@ NODE
 ) || true
 
   rm -f "$tmp_html"
+
+  if [[ -z "$result" ]]; then
+    fail "T10b: Standalone widget embed" "probe produced no output"
+    return
+  fi
 
   result_type=$(echo "$result" | head -1 | cut -d'|' -f1)
   detail=$(echo "$result" | head -1 | cut -d'|' -f2-)

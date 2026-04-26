@@ -609,6 +609,7 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
         agentId: 'meta',
         sessionKey: buildAgentSessionKey('meta', `admin-${customerId}-${sessionId}`),
         name: 'agent-builder',
+        timeoutSeconds: 240,
       });
 
       if (!agentResponse.success) {

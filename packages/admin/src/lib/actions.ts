@@ -17,25 +17,25 @@ async function requireCustomerId(): Promise<string> {
 
 export async function serverGetAgents() {
   const customerId = await requireCustomerId();
-  return getAgents(customerId, signRequest(customerId));
+  return getAgents(signRequest(customerId));
 }
 
 export async function serverGetAgent(id: string) {
   const customerId = await requireCustomerId();
-  return getAgent(id, customerId, signRequest(customerId));
+  return getAgent(id, signRequest(customerId));
 }
 
 export async function serverUpdateAgent(id: string, data: Record<string, unknown>) {
   const customerId = await requireCustomerId();
-  return updateAgent(id, data as Partial<Agent>, customerId, signRequest(customerId));
+  return updateAgent(id, data as Partial<Agent>, signRequest(customerId));
 }
 
 export async function serverDeleteAgent(id: string) {
   const customerId = await requireCustomerId();
-  return deleteAgent(id, customerId, signRequest(customerId));
+  return deleteAgent(id, signRequest(customerId));
 }
 
 export async function serverRegenerateToken(id: string) {
   const customerId = await requireCustomerId();
-  return regenerateToken(id, customerId, signRequest(customerId));
+  return regenerateToken(id, signRequest(customerId));
 }

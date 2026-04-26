@@ -513,7 +513,8 @@ openclaw agents list                   # List configured agents
 - Proxy: Audit log wired — 5 mutation points write to `audit_log` table
 - DB: Neon PostgreSQL + complete Drizzle schema + migrations, wired via Fastify plugin
 - DB: Embed token generation, validation, and regeneration endpoint
-- Admin: NextAuth v5 + DrizzleAdapter, bcrypt credentials, auto-signup, Email provider
+- Admin: NextAuth v5 + DrizzleAdapter, bcrypt credentials, invite-gated first-time signup, Email provider
+- ✅ Proxy/Admin customer API auth uses signed `x-customer-id` + `x-customer-sig` headers (no `customerId` query fallback)
 - Admin: WS-based create-agent chat (not REST), admin auth mode in proxy
 - Admin: Dashboard with agent list, agent detail page, live widget preview
 - Admin: Login page (credentials, Google, GitHub, magic-link email)
@@ -534,15 +535,8 @@ openclaw agents list                   # List configured agents
    mutating endpoints directly. **Fix:** Route all mutations through Next.js server
    actions or API routes; remove `NEXT_PUBLIC_*` token vars.
 
-2. **Open registration — no signup gate** — Credentials provider auto-creates an
-   account on first login (any email + any password). No email verification, no
-   invite-only gate, no admin approval. Anyone can create an admin account.
-   **Fix:** Add email verification flow, or require invite codes for MVP.
-
-3. **Single shared API token = no tenant isolation** — `requireCustomerAuth()` uses
-   one static bearer token. Any authenticated customer can access any other's agents
-   by passing a different `customerId` query param. **Fix:** Per-customer JWT tokens
-   derived from NextAuth session, validated by proxy.
+2. **(resolved 2026-04-26)** Signup is invite-gated via `AUTH_INVITE_EMAILS`; existing users can still sign in.
+3. **(resolved 2026-04-26)** Customer routes require signed `x-customer-id` + `x-customer-sig` headers (deprecated bearer + `customerId` query fallback removed).
 
 ### 🟠 HIGH — Should Fix Before Launch
 

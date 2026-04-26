@@ -5,12 +5,12 @@
 #
 # Usage: ./test-ai-liveness.sh [PROXY_URL] [API_TOKEN]
 #   PROXY_URL  defaults to $PROXY_URL or https://dev.lamoom.com
-#   API_TOKEN  defaults to $PROXY_API_TOKEN or $NEXT_PUBLIC_PROXY_API_TOKEN
+#   API_TOKEN  defaults to $PROXY_INTERNAL_SECRET, then $PROXY_API_TOKEN, then $PROXY_CUSTOMER_API_TOKEN
 
 set -euo pipefail
 
 PROXY_URL="${1:-${PROXY_URL:-https://dev.lamoom.com}}"
-API_TOKEN="${2:-${PROXY_API_TOKEN:-${NEXT_PUBLIC_PROXY_API_TOKEN:-}}}"
+API_TOKEN="${2:-${PROXY_INTERNAL_SECRET:-${PROXY_API_TOKEN:-${PROXY_CUSTOMER_API_TOKEN:-}}}}"
 CUSTOMER_ID="${TEST_CUSTOMER_ID:-b90daf67-5bda-4df3-a487-3297730b4971}"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
@@ -23,15 +23,24 @@ skip() { ((SKIP++)); printf "${YELLOW}⊘ SKIP${NC}: %s\n" "$1"; }
 call_meta() {
   local messages="$1"
   local session_id="${2:-}"
+  local timestamp
+  local signature
   local body
   if [ -n "$session_id" ]; then
     body=$(printf '{"messages":%s,"sessionId":"%s"}' "$messages" "$session_id")
   else
     body=$(printf '{"messages":%s}' "$messages")
   fi
+  timestamp=$(date +%s)
+  signature=$(printf "%s:%s" "$CUSTOMER_ID" "$timestamp" | openssl dgst -sha256 -hmac "$API_TOKEN" -hex | awk '{print $NF}')
+  if [ -z "$signature" ]; then
+    echo '{"error":"signature_failed"}'
+    return
+  fi
   curl -skf --max-time 180 \
-    -X POST "${PROXY_URL}/api/agents/create-via-meta?customerId=${CUSTOMER_ID}" \
-    -H "Authorization: Bearer ${API_TOKEN}" \
+    -X POST "${PROXY_URL}/api/agents/create-via-meta" \
+    -H "x-customer-id: ${CUSTOMER_ID}" \
+    -H "x-customer-sig: ${signature}:${timestamp}" \
     -H "Content-Type: application/json" \
     -d "$body" 2>/dev/null || echo '{"error":"request_failed"}'
 }
