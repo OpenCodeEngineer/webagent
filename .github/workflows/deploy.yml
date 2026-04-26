@@ -274,11 +274,11 @@ jobs:
                 -H "Content-Type: application/json" \
                 -d '{"messages":[{"role":"user","content":"Health check: reply READY in one short sentence."}]}' || true)
               echo "$SMOKE_RESP"
-              if ! printf '%s' "$SMOKE_RESP" | python3 - <<'PY'
+              if ! python3 - "$SMOKE_RESP" <<'PY'
             import json
             import sys
 
-            raw = sys.stdin.read()
+            raw = sys.argv[1] if len(sys.argv) > 1 else ""
             try:
                 payload = json.loads(raw)
             except Exception:
