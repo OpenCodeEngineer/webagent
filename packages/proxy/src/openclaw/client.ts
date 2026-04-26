@@ -311,6 +311,56 @@ function readGatewayTokenFromConfigFile(): string | undefined {
   return undefined;
 }
 
+function readEnvValueFromProcess(pid: string, key: string): string | undefined {
+  try {
+    const raw = fs.readFileSync(`/proc/${pid}/environ`);
+    const entries = raw.toString('utf8').split('\0');
+    const prefix = `${key}=`;
+    for (const entry of entries) {
+      if (!entry.startsWith(prefix)) {
+        continue;
+      }
+      const value = entry.slice(prefix.length).trim();
+      if (value) {
+        return value;
+      }
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+}
+
+function readGatewayTokenFromRunningProcess(): string | undefined {
+  try {
+    const procEntries = fs.readdirSync('/proc', { withFileTypes: true });
+    for (const entry of procEntries) {
+      if (!entry.isDirectory() || !/^\d+$/.test(entry.name)) {
+        continue;
+      }
+      const pid = entry.name;
+      let cmdline = '';
+      try {
+        cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+      } catch {
+        continue;
+      }
+      if (!cmdline.includes('openclaw-gateway')) {
+        continue;
+      }
+      const token = readEnvValueFromProcess(pid, 'OPENCLAW_GATEWAY_TOKEN');
+      if (token) {
+        return token;
+      }
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+}
+
 function isGatewayTokenAuthError(message: string): boolean {
   const normalized = message.toLowerCase();
   return normalized.includes('gateway token mismatch') || normalized.includes('gateway token missing');
@@ -731,11 +781,13 @@ export class OpenClawClient {
   constructor(gatewayUrl?: string, token?: string) {
     const config = loadConfig();
     const configFileToken = readGatewayTokenFromConfigFile();
+    const runtimeGatewayToken = readGatewayTokenFromRunningProcess();
     this.gatewayWsUrl = toGatewayWsUrl(gatewayUrl || config.openClawGatewayUrl);
     const gatewayHttpUrl = toGatewayHttpUrl(gatewayUrl || config.openClawGatewayUrl);
     this.hooksWakeUrl = new URL('/hooks/wake', gatewayHttpUrl).toString();
     this.tokenCandidates = collectUniqueTokens([
       token,
+      runtimeGatewayToken,
       config.openClawGatewayToken,
       configFileToken,
       process.env.OPENCLAW_GATEWAY_TOKEN,
