@@ -32,6 +32,7 @@ jobs:
 
             echo "→ Aligning gateway auth token..."
             python3 - <<'PY'
+            import re
             import subprocess
             from pathlib import Path
 
@@ -92,6 +93,32 @@ jobs:
             updated = next_lines
 
             env_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+            hooks_token = env_map.get("OPENCLAW_HOOKS_TOKEN") or token
+
+            cfg_path = Path("/opt/webagent/openclaw/config/openclaw.json5")
+            if cfg_path.exists():
+                raw = cfg_path.read_text(encoding="utf-8")
+                next_raw = raw
+                next_raw = re.sub(
+                    r'(auth\\s*:\\s*\\{[\\s\\S]*?token\\s*:\\s*)"(?:[^"\\\\]|\\\\.)*"',
+                    rf'\\1"{token}"',
+                    next_raw,
+                    count=1,
+                )
+                next_raw = re.sub(
+                    r'(remote\\s*:\\s*\\{[\\s\\S]*?token\\s*:\\s*)"(?:[^"\\\\]|\\\\.)*"',
+                    rf'\\1"{token}"',
+                    next_raw,
+                    count=1,
+                )
+                next_raw = re.sub(
+                    r'(hooks\\s*:\\s*\\{[\\s\\S]*?token\\s*:\\s*)"(?:[^"\\\\]|\\\\.)*"',
+                    rf'\\1"{hooks_token}"',
+                    next_raw,
+                    count=1,
+                )
+                if next_raw != raw:
+                    cfg_path.write_text(next_raw, encoding="utf-8")
             PY
 
             echo "→ Installing dependencies..."
