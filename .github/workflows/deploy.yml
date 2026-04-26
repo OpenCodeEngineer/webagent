@@ -31,7 +31,7 @@ jobs:
             chown -R openclaw:openclaw . 2>/dev/null || true
 
             echo "→ Installing dependencies..."
-            sudo -u openclaw bash -c "cd ${APP_DIR} && pnpm install --frozen-lockfile --prod=false"
+            sudo -u openclaw bash -c "cd ${APP_DIR} && CI=1 pnpm install --frozen-lockfile --prod=false --force"
 
             echo "→ Building all packages..."
             sudo -u openclaw bash -c "cd ${APP_DIR} && pnpm build"
