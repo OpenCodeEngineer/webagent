@@ -121,10 +121,12 @@ jobs:
             echo "→ Health checks..."
             curl -sf http://127.0.0.1:3001/health || (echo "PROXY HEALTH FAILED" && exit 1)
             curl -sf http://127.0.0.1:3000/ -o /dev/null || (echo "ADMIN HEALTH FAILED" && exit 1)
-            if ! curl -sf http://127.0.0.1:3001/health/openclaw | grep -q '"ok"'; then
+            OPENCLAW_HEALTH=$(curl -sf http://127.0.0.1:3001/health/openclaw || true)
+            echo "$OPENCLAW_HEALTH"
+            if ! echo "$OPENCLAW_HEALTH" | grep -q '"ok"'; then
               echo "OPENCLAW HEALTH FAILED"
               systemctl --no-pager --full status openclaw-gateway || true
-              journalctl -u openclaw-gateway -n 120 --no-pager || true
+              journalctl -u openclaw-gateway --since "-3 min" --no-pager || true
               exit 1
             fi
 
