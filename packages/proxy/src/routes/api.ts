@@ -240,7 +240,11 @@ async function registerAgentInOpenClaw(
   name: string,
   app: FastifyInstance,
 ): Promise<void> {
-  const configPath = join(homedir(), '.openclaw', 'openclaw.json');
+  // Resolve config path: OPENCLAW_CONFIG_PATH > /opt/webagent/openclaw/config/openclaw.json5 > ~/.openclaw/openclaw.json
+  const configPath =
+    process.env.OPENCLAW_CONFIG_PATH?.trim() ||
+    join(process.cwd(), 'openclaw', 'config', 'openclaw.json5') ||
+    join(homedir(), '.openclaw', 'openclaw.json');
   const lockPath = `${configPath}.lock`;
   try {
     await mkdir(lockPath, { recursive: false });
@@ -252,31 +256,41 @@ async function registerAgentInOpenClaw(
   try {
     try {
       const raw = await readFile(configPath, 'utf8');
-      const config = JSON.parse(raw) as {
+      // Strip JSON5 features (single-line comments, multi-line comments, trailing commas, unquoted keys)
+      const jsonStr = raw
+        .replace(/\/\/.*$/gm, '')                           // single-line comments
+        .replace(/\/\*[\s\S]*?\*\//g, '')                   // multi-line comments
+        .replace(/,\s*([\]}])/g, '$1')                      // trailing commas
+        .replace(/(?<=[{,]\s*)([a-zA-Z_]\w*)\s*:/g, '"$1":'); // unquoted keys
+      const config = JSON.parse(jsonStr) as {
         agents?: { list?: Array<{ id: string; [k: string]: unknown }> };
         [k: string]: unknown;
       };
 
       if (!config.agents?.list) {
-        app.log.warn('openclaw.json missing agents.list — skipping registration');
+        app.log.warn('openclaw config missing agents.list — skipping registration');
         return;
       }
 
       if (config.agents.list.some((a) => a.id === slug)) {
-        app.log.info({ slug }, 'agent already in openclaw.json — skipping');
+        app.log.info({ slug }, 'agent already in openclaw config — skipping');
         return;
       }
+
+      // Resolve workspace path for the new agent
+      const workspacesDir = process.env.OPENCLAW_WORKSPACES_DIR?.trim()
+        || join(process.cwd(), 'openclaw', 'workspaces');
 
       config.agents.list.push({
         id: slug,
         name,
-        workspace: `~/openclaw/workspaces/${slug}`,
+        workspace: join(workspacesDir, slug),
         skills: ['website-api'],
         heartbeat: { every: '30m' },
       });
 
       await writeFile(configPath, JSON.stringify(config, null, 2), 'utf8');
-      app.log.info({ slug }, 'registered agent in openclaw.json');
+      app.log.info({ slug, configPath }, 'registered agent in openclaw config');
 
       // Try SIGHUP first (no root needed for same-user processes), fall back to systemctl
       const reloaded = await new Promise<boolean>((resolve) => {

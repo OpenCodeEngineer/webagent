@@ -144,6 +144,42 @@ jobs:
                 next_lines.append(f"OPENCLAW_HOOKS_TOKEN={hooks_token}")
             if not replaced_cfg_path:
                 next_lines.append(f"OPENCLAW_CONFIG_PATH={cfg_env_path}")
+
+            # Ensure AUTH_URL / NEXTAUTH_URL point to production domain
+            prod_domain = "https://dev.lamoom.com"
+            auth_lines_to_add = []
+            has_correct_auth_url = False
+            has_correct_nextauth_url = False
+            fixed_lines = []
+            for line in next_lines:
+                if line.startswith("AUTH_URL="):
+                    if "localhost" in line or "127.0.0.1" in line:
+                        fixed_lines.append(f"AUTH_URL={prod_domain}")
+                    else:
+                        fixed_lines.append(line)
+                    has_correct_auth_url = True
+                elif line.startswith("NEXTAUTH_URL="):
+                    if "localhost" in line or "127.0.0.1" in line:
+                        fixed_lines.append(f"NEXTAUTH_URL={prod_domain}")
+                    else:
+                        fixed_lines.append(line)
+                    has_correct_nextauth_url = True
+                else:
+                    fixed_lines.append(line)
+            if not has_correct_auth_url:
+                fixed_lines.append(f"AUTH_URL={prod_domain}")
+            if not has_correct_nextauth_url:
+                fixed_lines.append(f"NEXTAUTH_URL={prod_domain}")
+            next_lines = fixed_lines
+
+            # Ensure OPENCLAW_WORKSPACES_DIR is set for agent creation detection
+            has_workspaces_dir = any(
+                line.startswith("OPENCLAW_WORKSPACES_DIR=")
+                for line in next_lines
+            )
+            if not has_workspaces_dir:
+                next_lines.append("OPENCLAW_WORKSPACES_DIR=/opt/webagent/openclaw/workspaces")
+
             updated = next_lines
 
             env_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
