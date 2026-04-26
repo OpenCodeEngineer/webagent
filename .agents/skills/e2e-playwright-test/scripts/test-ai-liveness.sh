@@ -150,17 +150,17 @@ echo "▸ Test 5: Session memory (follow-up in same session)"
 if [ -z "$SID3" ]; then
   skip "Session memory — no sessionId from test 4"
 else
-  RESULT4=$(call_meta '[{"role":"user","content":"What domain did I say my shop is on?"}]' "$SID3")
+  RESULT4=$(call_meta '[{"role":"user","content":"What website did I say I wanted to create an agent for?"}]' "$SID3")
   RESP4=$(extract_response "$RESULT4")
 
   if [ -z "$RESP4" ]; then
     fail "Session memory" "Empty response to follow-up"
-  elif echo "$RESP4" | grep -qi "pottery-palace"; then
-    pass "Session memory — AI recalled pottery-palace.com"
-  elif echo "$RESP4" | grep -qi "pottery"; then
-    pass "Session memory — AI recalled pottery context (partial)"
+  elif echo "$RESP4" | grep -qi "vibebrowser"; then
+    pass "Session memory — AI recalled vibebrowser.app"
+  elif echo "$RESP4" | grep -qi "browser"; then
+    pass "Session memory — AI recalled browser context (partial)"
   else
-    fail "Session memory" "AI didn't recall pottery-palace.com: ${RESP4:0:200}"
+    fail "Session memory" "AI didn't recall vibebrowser.app: ${RESP4:0:200}"
   fi
 fi
 

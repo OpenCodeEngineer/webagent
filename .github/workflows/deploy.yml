@@ -25,8 +25,9 @@ jobs:
             cd "${APP_DIR}"
 
             echo "→ Pulling latest code..."
+            git checkout -- . 2>/dev/null || true
+            git clean -fd openclaw/config/ 2>/dev/null || true
             git pull origin main
-            git checkout -- openclaw/config/openclaw.json5 2>/dev/null || true
 
             echo "→ Fixing permissions..."
             chown -R openclaw:openclaw . 2>/dev/null || true
