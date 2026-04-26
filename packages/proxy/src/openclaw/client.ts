@@ -285,6 +285,7 @@ function readGatewayTokenFromConfigFile(): string | undefined {
   const home = process.env.HOME?.trim();
   const candidates = [
     process.env.OPENCLAW_CONFIG_PATH?.trim(),
+    home ? path.join(home, '.openclaw', 'config', 'openclaw.json5') : undefined,
     home ? path.join(home, 'openclaw', 'config', 'openclaw.json5') : undefined,
     path.join(process.cwd(), 'openclaw', 'config', 'openclaw.json5'),
   ];

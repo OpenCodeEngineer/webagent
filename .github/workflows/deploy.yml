@@ -78,6 +78,7 @@ jobs:
 
             # Keep OpenClaw runtime config aligned when it uses a user-home config file.
             config_candidates = [
+                Path("/home/openclaw/.openclaw/config/openclaw.json5"),
                 Path("/home/openclaw/openclaw/config/openclaw.json5"),
                 Path("/opt/webagent/openclaw/config/openclaw.json5"),
             ]
