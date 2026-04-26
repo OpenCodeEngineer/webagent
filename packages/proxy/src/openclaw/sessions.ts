@@ -2,8 +2,22 @@ import { and, eq } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
 import { widgetSessions } from '../db/schema.js';
 
+function normalizeSessionSegment(value: string): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9:_-]+/g, '-')
+    .replace(/^-+/, '')
+    .replace(/-+$/, '');
+  return normalized || 'main';
+}
+
+export function buildAgentSessionKey(agentId: string, suffix: string): string {
+  return `agent:${normalizeSessionSegment(agentId)}:${normalizeSessionSegment(suffix)}`;
+}
+
 function sessionKey(agentId: string, userId: string): string {
-  return `widget-${agentId}-${userId}`;
+  return buildAgentSessionKey(agentId, `widget-${agentId}-${userId}`);
 }
 
 export async function getOrCreateSession(

@@ -5,7 +5,7 @@ import { and, eq } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
 import { agents, widgetEmbeds } from '../db/schema.js';
 import { OpenClawClient } from '../openclaw/client.js';
-import { getOrCreateSession, touchSessionLastActiveAt } from '../openclaw/sessions.js';
+import { buildAgentSessionKey, getOrCreateSession, touchSessionLastActiveAt } from '../openclaw/sessions.js';
 import { detectAgentCreation } from '../routes/api.js';
 
 interface WebSocket {
@@ -203,7 +203,7 @@ export function handleConnection(
             state.userId = msg.userId;
             state.agentId = 'meta';
             state.openclawAgentId = 'meta';
-            state.sessionKey = `admin-${msg.userId}-${crypto.randomUUID()}`;
+            state.sessionKey = buildAgentSessionKey('meta', `admin-${msg.userId}-${crypto.randomUUID()}`);
             state.authenticated = true;
             state.isAdmin = true;
             state.firstMessage = true;

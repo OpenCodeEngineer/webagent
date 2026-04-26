@@ -7,6 +7,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { and, count, eq, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import { OpenClawClient } from '../openclaw/client.js';
+import { buildAgentSessionKey } from '../openclaw/sessions.js';
 import { agents, auditLog, customers, widgetEmbeds, widgetSessions } from '../db/schema.js';
 import { invalidateEmbedTokenCache } from '../ws/handler.js';
 
@@ -494,7 +495,7 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
       const agentResponse = await openclawClient.sendMessage({
         message: messageForAgent,
         agentId: 'meta',
-        sessionKey: `admin-${query.customerId}-${sessionId}`,
+        sessionKey: buildAgentSessionKey('meta', `admin-${query.customerId}-${sessionId}`),
         name: 'agent-builder',
       });
 
