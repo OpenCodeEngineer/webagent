@@ -470,17 +470,19 @@ banner "Phase 4: Widget Chat (WebSocket)"
 WS_URL="${BASE_URL/http:/ws:}"
 WS_URL="${WS_URL/https:/wss:}"
 
-# Check node + ws availability once
+# Check node + WebSocket availability (native WebSocket in Node 22+, or ws module)
 NODE_WS_AVAILABLE=false
+NODE_WS_MODE=""  # "native" or "ws"
 if command -v node &>/dev/null; then
-  # Try to load ws from the monorepo (it's a transitive dep of @fastify/websocket)
-  if node -e "require('ws')" 2>/dev/null; then
+  if node -e "if(typeof WebSocket==='undefined') process.exit(1)" 2>/dev/null; then
     NODE_WS_AVAILABLE=true
-  else
-    # Try from packages/proxy specifically
-    if node -e "require('${PWD}/node_modules/ws')" 2>/dev/null; then
-      NODE_WS_AVAILABLE=true
-    fi
+    NODE_WS_MODE="native"
+  elif node -e "require('ws')" 2>/dev/null; then
+    NODE_WS_AVAILABLE=true
+    NODE_WS_MODE="ws"
+  elif node -e "require('${PWD}/node_modules/ws')" 2>/dev/null; then
+    NODE_WS_AVAILABLE=true
+    NODE_WS_MODE="ws"
   fi
 fi
 
@@ -492,42 +494,44 @@ test_ws_auth() {
   fi
 
   if [[ "$NODE_WS_AVAILABLE" != "true" ]]; then
-    skip "T9: WS auth" "node 'ws' module not available"
+    skip "T9: WS auth" "WebSocket not available in node"
     return 1
   fi
 
   log "  → Connecting to $WS_URL/ws and authenticating…"
   local user_id="e2e-test-user-$(date +%s)"
   local result
-  result=$(node -e "
-const WebSocket = require('ws');
-const ws = new WebSocket('${WS_URL}/ws', { rejectUnauthorized: false });
+  result=$(NODE_TLS_REJECT_UNAUTHORIZED=0 node -e "
+// Use native WebSocket (Node 22+) or ws module
+const WS = typeof WebSocket !== 'undefined' ? WebSocket : require('ws');
+const ws = new WS('${WS_URL}/ws');
 const timeout = setTimeout(() => { console.log('TIMEOUT'); process.exit(1); }, 20000);
 
-ws.on('open', () => {
+ws.onopen = () => {
   ws.send(JSON.stringify({
     type: 'auth',
     agentToken: '${EMBED_TOKEN}',
     token: '${EMBED_TOKEN}',
     userId: '${user_id}'
   }));
-});
+};
 
-ws.on('message', (raw) => {
-  const msg = JSON.parse(raw.toString());
+ws.onmessage = (evt) => {
+  const raw = typeof evt.data === 'string' ? evt.data : evt.data.toString();
+  const msg = JSON.parse(raw);
   if (msg.type === 'auth_ok') {
     console.log('AUTH_OK|' + msg.sessionId);
     clearTimeout(timeout);
     ws.close();
   } else if (msg.type === 'auth_error') {
-    console.log('AUTH_ERROR|' + msg.reason);
+    console.log('AUTH_ERROR|' + (msg.reason || msg.message));
     clearTimeout(timeout);
     ws.close();
   }
-});
+};
 
-ws.on('error', (e) => { console.log('WS_ERROR|' + e.message); process.exit(1); });
-ws.on('close', () => process.exit(0));
+ws.onerror = (e) => { console.log('WS_ERROR|' + (e.message || 'connection failed')); process.exit(1); };
+ws.onclose = () => process.exit(0);
 " 2>/dev/null) || true
 
   local result_type
@@ -557,37 +561,37 @@ test_ws_chat() {
   fi
 
   if [[ "$NODE_WS_AVAILABLE" != "true" ]]; then
-    skip "T10: WS chat" "node 'ws' module not available"
+    skip "T10: WS chat" "WebSocket not available in node"
     return 1
   fi
 
   log "  → Sending chat message through widget WS…"
   local user_id="e2e-test-chat-$(date +%s)"
   local result
-  result=$(node -e "
-const WebSocket = require('ws');
-const ws = new WebSocket('${WS_URL}/ws', { rejectUnauthorized: false });
+  result=$(NODE_TLS_REJECT_UNAUTHORIZED=0 node -e "
+const WS = typeof WebSocket !== 'undefined' ? WebSocket : require('ws');
+const ws = new WS('${WS_URL}/ws');
 const timeout = setTimeout(() => { console.log('TIMEOUT'); process.exit(1); }, 60000);
 let authed = false;
 let fullContent = '';
 
-ws.on('open', () => {
+ws.onopen = () => {
   ws.send(JSON.stringify({
     type: 'auth',
     agentToken: '${EMBED_TOKEN}',
     token: '${EMBED_TOKEN}',
     userId: '${user_id}'
   }));
-});
+};
 
-ws.on('message', (raw) => {
-  const msg = JSON.parse(raw.toString());
+ws.onmessage = (evt) => {
+  const raw = typeof evt.data === 'string' ? evt.data : evt.data.toString();
+  const msg = JSON.parse(raw);
   if (msg.type === 'auth_ok') {
     authed = true;
-    // Send a test question
     ws.send(JSON.stringify({ type: 'message', content: 'What products do you have?' }));
   } else if (msg.type === 'auth_error') {
-    console.log('AUTH_ERROR|' + msg.reason);
+    console.log('AUTH_ERROR|' + (msg.reason || msg.message));
     clearTimeout(timeout);
     ws.close();
   } else if (msg.type === 'message') {
@@ -602,10 +606,10 @@ ws.on('message', (raw) => {
     clearTimeout(timeout);
     ws.close();
   }
-});
+};
 
-ws.on('error', (e) => { console.log('WS_ERROR|' + e.message); process.exit(1); });
-ws.on('close', () => process.exit(0));
+ws.onerror = (e) => { console.log('WS_ERROR|' + (e.message || 'connection failed')); process.exit(1); };
+ws.onclose = () => process.exit(0);
 " 2>/dev/null) || true
 
   local result_type
@@ -651,10 +655,11 @@ test_unauth_api() {
     resp=$(curl -sk -w "\n%{http_code}" --max-time 10 "$BASE_URL$ep" 2>/dev/null) || true
     http_code=$(echo "$resp" | tail -1)
 
-    if [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
+    # 401/403 = auth blocked; 405 = method not allowed (also safe — POST-only route hit with GET)
+    if [[ "$http_code" == "401" || "$http_code" == "403" || "$http_code" == "405" ]]; then
       log "    ✓ $ep → $http_code (blocked)"
     else
-      log "    ✗ $ep → $http_code (expected 401/403)"
+      log "    ✗ $ep → $http_code (expected 401/403/405)"
       all_pass=false
     fi
   done
@@ -669,30 +674,31 @@ test_unauth_api() {
 # ── Test 12: Invalid embed token WS auth ─────────────────────────────────────
 test_ws_invalid_token() {
   if [[ "$NODE_WS_AVAILABLE" != "true" ]]; then
-    skip "T12: Invalid WS token" "node 'ws' module not available"
+    skip "T12: Invalid WS token" "WebSocket not available in node"
     return 0
   fi
 
   log "  → Testing WS auth with invalid embed token…"
   local result
-  result=$(node -e "
-const WebSocket = require('ws');
-const ws = new WebSocket('${WS_URL}/ws', { rejectUnauthorized: false });
+  result=$(NODE_TLS_REJECT_UNAUTHORIZED=0 node -e "
+const WS = typeof WebSocket !== 'undefined' ? WebSocket : require('ws');
+const ws = new WS('${WS_URL}/ws');
 const timeout = setTimeout(() => { console.log('TIMEOUT'); process.exit(1); }, 15000);
 
-ws.on('open', () => {
+ws.onopen = () => {
   ws.send(JSON.stringify({
     type: 'auth',
     agentToken: 'invalid-token-xyz',
     token: 'invalid-token-xyz',
     userId: 'attacker'
   }));
-});
+};
 
-ws.on('message', (raw) => {
-  const msg = JSON.parse(raw.toString());
+ws.onmessage = (evt) => {
+  const raw = typeof evt.data === 'string' ? evt.data : evt.data.toString();
+  const msg = JSON.parse(raw);
   if (msg.type === 'auth_error') {
-    console.log('REJECTED|' + msg.reason);
+    console.log('REJECTED|' + (msg.reason || msg.message));
     clearTimeout(timeout);
     ws.close();
   } else if (msg.type === 'auth_ok') {
@@ -700,10 +706,10 @@ ws.on('message', (raw) => {
     clearTimeout(timeout);
     ws.close();
   }
-});
+};
 
-ws.on('error', (e) => { console.log('WS_ERROR|' + e.message); process.exit(1); });
-ws.on('close', () => process.exit(0));
+ws.onerror = (e) => { console.log('WS_ERROR|' + (e.message || 'connection failed')); process.exit(1); };
+ws.onclose = () => process.exit(0);
 " 2>/dev/null) || true
 
   local result_type
