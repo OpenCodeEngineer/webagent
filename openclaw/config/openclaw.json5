@@ -5,11 +5,11 @@
     auth: {
       mode: "token",
       // Auto-generated on first run; do NOT set same as hooks.token
-      token: "$OPENCLAW_GATEWAY_TOKEN",
+      token: "${OPENCLAW_GATEWAY_TOKEN}",
     },
     remote: {
       // Must match gateway.auth.token for CLI to connect
-      token: "$OPENCLAW_GATEWAY_TOKEN",
+      token: "${OPENCLAW_GATEWAY_TOKEN}",
     },
   },
   agents: {
@@ -38,7 +38,7 @@
   },
   hooks: {
     enabled: true,
-    token: "$OPENCLAW_HOOKS_TOKEN",
+    token: "${OPENCLAW_HOOKS_TOKEN}",
     path: "/hooks",
     allowRequestSessionKey: true,
     allowedSessionKeyPrefixes: ["widget-", "admin-", "hook:"],
