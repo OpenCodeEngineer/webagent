@@ -367,7 +367,7 @@ test_list_agents() {
     return 1
   fi
 
-  log "  → Listing agents for customer $CUSTOMER_ID…"
+  log "  → Listing agents for customer ${CUSTOMER_ID}..."
   local resp http_code body
   resp=$(curl -sk -w "\n%{http_code}" --max-time 30 \
     "$BASE_URL/api/agents?customerId=$CUSTOMER_ID" \
