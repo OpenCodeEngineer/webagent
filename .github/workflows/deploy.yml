@@ -116,12 +116,19 @@ jobs:
             systemctl start openclaw-gateway
             systemctl restart webagent-proxy
             systemctl restart webagent-admin
-            sleep 5
+            sleep 3
 
             echo "→ Health checks..."
             curl -sf http://127.0.0.1:3001/health || (echo "PROXY HEALTH FAILED" && exit 1)
             curl -sf http://127.0.0.1:3000/ -o /dev/null || (echo "ADMIN HEALTH FAILED" && exit 1)
-            OPENCLAW_HEALTH=$(curl -sf http://127.0.0.1:3001/health/openclaw || true)
+            OPENCLAW_HEALTH=""
+            for _ in $(seq 1 30); do
+              OPENCLAW_HEALTH=$(curl -sf http://127.0.0.1:3001/health/openclaw || true)
+              if echo "$OPENCLAW_HEALTH" | grep -q '"ok"'; then
+                break
+              fi
+              sleep 2
+            done
             echo "$OPENCLAW_HEALTH"
             if ! echo "$OPENCLAW_HEALTH" | grep -q '"ok"'; then
               echo "OPENCLAW HEALTH FAILED"
