@@ -4,6 +4,7 @@ import type { Agent } from "@/lib/api";
 import { deleteAgent, getAgent, getAgents, regenerateToken, updateAgent } from "@/lib/api";
 import { auth } from "@/lib/auth";
 import { normalizeCustomerIdToUuid } from "@/lib/customer-id";
+import { signRequest } from "@/lib/proxy-auth";
 
 async function requireCustomerId(): Promise<string> {
   const session = await auth();
@@ -16,25 +17,25 @@ async function requireCustomerId(): Promise<string> {
 
 export async function serverGetAgents() {
   const customerId = await requireCustomerId();
-  return getAgents(customerId);
+  return getAgents(customerId, signRequest(customerId));
 }
 
 export async function serverGetAgent(id: string) {
   const customerId = await requireCustomerId();
-  return getAgent(id, customerId);
+  return getAgent(id, customerId, signRequest(customerId));
 }
 
 export async function serverUpdateAgent(id: string, data: Record<string, unknown>) {
   const customerId = await requireCustomerId();
-  return updateAgent(id, data as Partial<Agent>, customerId);
+  return updateAgent(id, data as Partial<Agent>, customerId, signRequest(customerId));
 }
 
 export async function serverDeleteAgent(id: string) {
   const customerId = await requireCustomerId();
-  return deleteAgent(id, customerId);
+  return deleteAgent(id, customerId, signRequest(customerId));
 }
 
 export async function serverRegenerateToken(id: string) {
   const customerId = await requireCustomerId();
-  return regenerateToken(id, customerId);
+  return regenerateToken(id, customerId, signRequest(customerId));
 }

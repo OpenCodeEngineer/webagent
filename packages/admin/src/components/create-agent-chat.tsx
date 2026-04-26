@@ -11,10 +11,9 @@ const MAX_RECONNECT_MS = 30000;
 
 interface CreateAgentChatProps {
   customerId?: string;
-  wsToken: string;
 }
 
-export function CreateAgentChat({ customerId, wsToken }: CreateAgentChatProps) {
+export function CreateAgentChat({ customerId }: CreateAgentChatProps) {
   const [messages, setMessages] = useState<MetaAgentMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -39,20 +38,32 @@ export function CreateAgentChat({ customerId, wsToken }: CreateAgentChatProps) {
   useEffect(() => {
     mountedRef.current = true;
 
-    function connect() {
+    async function connect() {
       if (!mountedRef.current) return;
 
       shouldReconnectRef.current = true;
-      const token = wsToken;
-      if (!token) {
+
+      let ticket: string;
+      try {
+        const res = await fetch("/api/auth/ws-ticket", { method: "POST" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = (await res.json()) as { ticket?: string };
+        if (!body.ticket) throw new Error("No ticket returned");
+        ticket = body.ticket;
+      } catch {
         shouldReconnectRef.current = false;
         authFailureNotifiedRef.current = true;
-        setMessages([{
-          role: "assistant",
-          content: "⚠️ Missing authentication token. Please check your environment configuration and refresh.",
-        }]);
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant" as const,
+            content: "⚠️ Unable to authenticate WebSocket connection. Please refresh and try again.",
+          },
+        ]);
         return;
       }
+
+      if (!mountedRef.current) return;
 
       const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
@@ -65,7 +76,7 @@ export function CreateAgentChat({ customerId, wsToken }: CreateAgentChatProps) {
         reconnectAttempt.current = 0;
         ws.send(JSON.stringify({
           type: "auth",
-          token,
+          ticket,
           userId: customerId || "unknown",
           mode: "admin",
         }));
@@ -159,7 +170,7 @@ export function CreateAgentChat({ customerId, wsToken }: CreateAgentChatProps) {
         socketRef.current = null;
       }
     };
-  }, [customerId, wsToken]);
+  }, [customerId]);
 
   // --- Send handler ---
   const onSend = useCallback(() => {

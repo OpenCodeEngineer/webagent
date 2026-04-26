@@ -57,7 +57,7 @@ Widget (browser)
   ▼
 Proxy WS handler (ws/handler.ts)
   │ 1. Validate auth (embed token → agentId lookup via DB)
-  │ 2. Build sessionKey: "widget:<agentId>:<userId>"
+  │ 2. Build sessionKey: "agent:<agentId>:<suffix>"
   │ 3. Look up or create widget_session in DB
   ▼
 Proxy → OpenClaw Gateway (shared WS connection)
@@ -77,7 +77,7 @@ Admin UI /create page
   │ Chat interface (WS to proxy)
   ▼
 Proxy WS — routes to OpenClaw gateway WS (model: "openclaw/meta")
-  │ sessionKey: "admin:<customerId>"
+  │ sessionKey: "agent:meta:<suffix>"
   ▼
 OpenClaw meta-agent (workspace: openclaw/workspaces/meta/)
   │ Follows create-agent skill (SKILL.md):
@@ -247,7 +247,7 @@ webagent/
 - Proxy maintains ONE persistent WebSocket to OpenClaw gateway (`:18789`)
 - Both admin (meta-agent) and widget (customer agent) traffic multiplexed on same WS
 - Agent selected via `model: "openclaw/<agentId>"` in each request
-- Sessions identified by `sessionKey` — e.g. `"widget:<agentId>:<userId>"` or `"admin:<customerId>"`
+- Sessions identified by `sessionKey` — runtime format: `"agent:<agentId>:<suffix>"`
 - Streaming: gateway sends `agent` events token-by-token; proxy relays to client
 - Fallback: `/v1/responses` HTTP endpoint available for simple request-response
 - Hooks API (`/hooks/agent`) kept only for fire-and-forget (wake, cron triggers)
@@ -255,7 +255,7 @@ webagent/
 ### OpenClaw Session Persistence
 - Each `sessionKey` maintains isolated multi-turn conversation state
 - `hooks.allowRequestSessionKey: true` in config
-- Constrained with `allowedSessionKeyPrefixes: ["widget:", "admin:"]`
+- Constrained with `allowedSessionKeyPrefixes: ["agent:", "widget-", "admin-", "hook:"]`
 
 ### Sandbox Model (NO Docker)
 - `sandbox.mode: "off"` — no containers
@@ -310,7 +310,7 @@ widget_sessions
   id                UUID PK
   agentId           UUID FK → agents.id (CASCADE)
   externalUserId    TEXT NOT NULL          ← visitor's userId from widget
-  openclawSessionKey TEXT NOT NULL         ← "widget:<agentId>:<userId>"
+  openclawSessionKey TEXT NOT NULL         ← "agent:<agentId>:<suffix>"
   lastActiveAt      TIMESTAMP
   createdAt         TIMESTAMP
   UNIQUE(agentId, externalUserId)
@@ -376,7 +376,7 @@ Customer A                          Customer B
 ┌─────────────┐ ┌──────────┐  ┌─────────────┐ ┌──────────┐
 │ Visitor X   │ │Visitor Y │  │ Visitor P   │ │Visitor Q │
 │ session:    │ │session:  │  │ session:    │ │session:  │
-│ widget:a:X  │ │widget:a:Y│  │ widget:b:P  │ │widget:b:Q│
+│ agent:a:suffix-x │ │agent:a:suffix-y│  │ agent:b:suffix-p │ │agent:b:suffix-q│
 └─────────────┘ └──────────┘  └─────────────┘ └──────────┘
 
 Sandbox approach: WORKSPACE-SCOPED TOOL ACCESS (no Docker)
@@ -385,7 +385,7 @@ Sandbox approach: WORKSPACE-SCOPED TOOL ACCESS (no Docker)
 • tools.deny: ["exec", "process", "browser", "canvas", ...] — no shell/system
 • read/write/edit are workspace-scoped by default in OpenClaw
   → each agent can only access files within its own workspace dir
-• Each visitor = unique sessionKey ("widget:<agentId>:<userId>")
+• Each visitor = unique sessionKey ("agent:<agentId>:<suffix>")
   → OpenClaw isolates conversation state per sessionKey
 • Cron/heartbeat scoped per agent, never touches other agents' sessions
 • Meta-agent is the only agent with sandbox: "off" + elevated access
@@ -398,17 +398,17 @@ Sandbox approach: WORKSPACE-SCOPED TOOL ACCESS (no Docker)
 
 ### Client → Server
 ```typescript
-{ type: "auth", token: string, userId: string }       // First message, must arrive within 30s
+{ type: "auth", userId: string, mode?: "widget" | "admin", token: string, agentToken?: string, ticket?: string } | { type: "auth", userId: string, mode?: "widget" | "admin", agentToken: string, token?: string, ticket?: string } // First message within 30s; one of token or agentToken required, mode optional
 { type: "message", content: string }                    // Chat message
 { type: "ping" }                                        // Keepalive
 ```
 
 ### Server → Client
 ```typescript
-{ type: "auth_ok", agentId: string }                    // Auth succeeded
+{ type: "auth_ok", sessionId: string }                  // Auth succeeded
 { type: "auth_error", reason: string }                  // Auth failed
 { type: "message", content: string, done: boolean }     // Agent response
-{ type: "error", code: string, message: string }        // Error
+{ type: "error", message: string }                      // Error
 { type: "pong" }                                        // Keepalive response
 ```
 
@@ -499,9 +499,17 @@ openclaw agents list                   # List configured agents
 ### ✅ Done & Working
 - Monorepo scaffold (pnpm + Turborepo, all packages build)
 - Proxy: Fastify boot, WS handler with auth protocol, health routes, widget serving
-- Proxy: OpenClaw CLI integration works (sync responses, AI liveness confirmed)
+- Proxy: OpenClaw Gateway WS integration (streaming responses, single persistent connection)
 - Proxy: Agent creation detection (`[AGENT_CREATED::]` marker → DB + embed token + embed snippet)
-- Proxy: Auto-registers new agents in `~/.openclaw/openclaw.json` + reloads gateway (SIGHUP)
+- Proxy: Auto-registers new agents in OpenClaw config + restarts gateway
+- ✅ Proxy: `@fastify/rate-limit` enabled; WS + REST throttling enforced
+- ✅ Infra: `infra/setup.sh` and deploy workflow include both `pnpm build` and `db:migrate`
+- ✅ Proxy: Gateway WS transport replaces CLI process spawning (single shared connection)
+- ✅ Security: Timing-safe token comparison in API + WS auth handlers
+- ✅ Proxy: WS `maxPayload: 65536` configured
+- ✅ Proxy: `unhandledRejection` / `uncaughtException` handlers wired
+- ✅ Proxy: OpenClaw gateway request concurrency guard (`MAX_CONCURRENT_REQUESTS`) in place
+- ✅ Proxy: Per-IP WS connection cap enforced (`MAX_WS_PER_IP=20`)
 - Proxy: Audit log wired — 5 mutation points write to `audit_log` table
 - DB: Neon PostgreSQL + complete Drizzle schema + migrations, wired via Fastify plugin
 - DB: Embed token generation, validation, and regeneration endpoint
@@ -531,26 +539,12 @@ openclaw agents list                   # List configured agents
    invite-only gate, no admin approval. Anyone can create an admin account.
    **Fix:** Add email verification flow, or require invite codes for MVP.
 
-3. **No rate limiting** — No `@fastify/rate-limit` or equivalent on WS connections,
-   REST API, or auth endpoints. Trivial to DoS (each message spawns a CLI process).
-   **Fix:** Install `@fastify/rate-limit`, add per-IP limits on WS upgrade + REST.
-
-4. **Single shared API token = no tenant isolation** — `requireCustomerAuth()` uses
+3. **Single shared API token = no tenant isolation** — `requireCustomerAuth()` uses
    one static bearer token. Any authenticated customer can access any other's agents
    by passing a different `customerId` query param. **Fix:** Per-customer JWT tokens
    derived from NextAuth session, validated by proxy.
 
-5. **setup.sh missing build + migrate** — Fresh deploy will crash: no `pnpm build`
-   step, no `db:migrate` step. Tables won't exist, `dist/` will be empty.
-
-6. **CLI → WS rewrite still pending** — `openclaw/client.ts` spawns child processes
-   via `execFile`. No streaming, process-per-message overhead, no connection reuse.
-   This is the #1 scalability blocker. Blocked on OpenClaw `/v1/responses` API.
-
 ### 🟠 HIGH — Should Fix Before Launch
-
-7. **Token comparison not timing-safe** — `api.ts` and `handler.ts` use `!==` for
-   token comparison. Must use `crypto.timingSafeEqual` to prevent timing attacks.
 
 8. **Password stored in `access_token` column** — bcrypt hash is placed in
    `accounts.access_token` instead of a dedicated column. Semantically wrong and
@@ -559,12 +553,6 @@ openclaw agents list                   # List configured agents
 9. **No JWT expiry configured** — NextAuth `session.strategy: "jwt"` but no
    `maxAge`. Stolen JWTs persist indefinitely.
 
-10. **No WS `maxPayload` limit** — Default `ws` library allows 100MB frames. No
-    explicit limit configured. Add `maxPayload: 65536` to `@fastify/websocket`.
-
-11. **No `unhandledRejection` / `uncaughtException` handlers** — Only SIGTERM/SIGINT
-    handled. An unhandled promise rejection crashes the process.
-
 12. **Agent registration TOCTOU race** — `registerAgentInOpenClaw` reads config,
     checks slug, writes. Two concurrent creates for same slug can both pass the
     check. Needs file locking or atomic compare-and-write.
@@ -572,13 +560,6 @@ openclaw agents list                   # List configured agents
 13. **`detectAgentCreation` DB insert race** — No `onConflictDoNothing` on agent
     insert. Concurrent creation of same `openclawAgentId` throws unhandled unique
     violation.
-
-14. **No circuit breaker / concurrency limit for OpenClaw CLI** — Under load,
-    hundreds of concurrent `execFile` processes can be spawned. No semaphore, no
-    circuit breaker to fail fast after repeated failures.
-
-15. **No connection limit per IP** — Single IP can open unlimited WS connections,
-    exhausting server memory.
 
 16. **Admin auth tables have no migration** — `users`, `accounts`, `sessions`,
     `verification_tokens` tables are defined in `auth-schema.ts` but have no

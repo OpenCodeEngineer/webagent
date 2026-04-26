@@ -5,6 +5,7 @@ export type ClientMessage =
     userId: string;
     mode?: 'widget' | 'admin';
     token: string;
+    ticket?: string;
     agentToken?: string;
   }
   | {
@@ -13,6 +14,15 @@ export type ClientMessage =
     mode?: 'widget' | 'admin';
     agentToken: string;
     token?: string;
+    ticket?: string;
+  }
+  | {
+    type: 'auth';
+    userId: string;
+    mode?: 'widget' | 'admin';
+    ticket: string;
+    token?: string;
+    agentToken?: string;
   }
   | { type: 'message'; content: string }
   | { type: 'ping' };

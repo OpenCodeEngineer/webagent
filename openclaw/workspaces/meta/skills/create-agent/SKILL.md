@@ -16,13 +16,15 @@ This skill creates a fully configured customer agent for the WebAgent platform w
 
 ## 4-Step Flow
 
-### Step 1 — Gather info conversationally and confirm understanding
-Collect and confirm:
-- Website/product: `websiteName`, `websiteUrl`, and product summary.
-- API details: API style (`REST`/`GraphQL`), base URL, authentication method, and key endpoints/actions.
-- Personality/tone: how the assistant should sound and behave.
+### Step 1 — Discover and confirm
+When the customer provides a website URL:
+1. Use the `web` tool to fetch the website homepage
+2. Try to fetch API documentation (`/api`, `/docs`, `/swagger.json`, `/openapi.json`)
+3. From the fetched content, infer: `websiteName`, `websiteUrl`, product summary, audience, tone, and API details
+4. Present a compact summary and get explicit customer confirmation
 
-Before generating anything, send a compact confirmation summary and get explicit customer confirmation that details are correct.
+If web fetch fails or returns limited info, fall back to asking the customer directly.
+Collect and confirm: `websiteName`, `websiteUrl`, product summary, API style/base URL/key endpoints, and personality/tone.
 
 ### Step 2 — Generate workspace files via `write`
 Derive:

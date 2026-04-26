@@ -100,13 +100,13 @@ Common cause: DrizzleAdapter table name mismatch (adapter expects singular `acco
 
 ### Phase 3: Agent Creation Conversation
 
-1. **Type** a test website description in the input:
-   > "It's called PetPal, a pet supplies store at https://petpal.example.com. We have a REST API at https://api.petpal.example.com for products, orders, and customer accounts. Tone should be friendly and helpful."
+1. **Type** a real website description in the input:
+   > "I want to create an AI chat agent for vibebrowser.app — it's a browser with built-in AI capabilities."
 2. **Press Enter** to send
 3. **CHECK**: User message appears as a right-aligned chat bubble
 4. **CHECK**: Typing indicator shows
 5. **Wait** for meta-agent response (up to 120s)
-6. **CHECK**: Bot response appears, mentions PetPal or pets
+6. **CHECK**: Bot response appears, mentions vibebrowser or browser or AI agent
 7. **SCREENSHOT**: Chat with both messages visible
 
 8. If the meta-agent asks for confirmation, **type**: "Yes, that's correct. Please create the agent now."
@@ -117,7 +117,7 @@ Common cause: DrizzleAdapter table name mismatch (adapter expects singular `acco
 ### Phase 4: Verify Created Agent
 
 1. **Navigate** to `https://dev.lamoom.com/dashboard`
-2. **CHECK**: New agent (PetPal or similar) appears in the agent list
+2. **CHECK**: New agent (vibebrowser or similar) appears in the agent list
 3. **CHECK**: Agent shows "active" status
 4. **CHECK**: "View" link works → agent detail page shows embed code
 

@@ -9,6 +9,7 @@ const getApiBaseUrl = (): string => {
 };
 
 type JsonObject = Record<string, unknown>;
+export type AuthHeaders = HeadersInit;
 
 export type AgentStatus = "active" | "paused" | "deleted";
 
@@ -183,7 +184,8 @@ const safeJson = async (response: Response): Promise<unknown> => {
   }
 };
 
-const getApiToken = (): string | undefined =>
+/** @deprecated Prefer passing signed auth headers via authHeaders. */
+export const getApiToken = (): string | undefined =>
   process.env.PROXY_CUSTOMER_API_TOKEN ??
   process.env.PROXY_API_TOKEN ??
   process.env.OPENCLAW_GATEWAY_TOKEN;
@@ -205,14 +207,24 @@ const extractErrorMessage = (payload: unknown, statusText: string): string => {
 const request = async <T>(
   path: string,
   init?: RequestInit,
+  authHeaders?: AuthHeaders,
 ): Promise<T | undefined> => {
-  const token = getApiToken();
   const headers = new Headers(init?.headers);
   if (init?.body) {
     headers.set("Content-Type", "application/json");
   }
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
+  if (authHeaders) {
+    const signedHeaders = new Headers(authHeaders);
+    signedHeaders.forEach((value, key) => {
+      headers.set(key, value);
+    });
+  }
+
+  if (!authHeaders) {
+    const token = getApiToken();
+    if (token && !headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
   }
 
   const response = await fetch(withApiPath(path), {
@@ -251,9 +263,9 @@ const unwrapOne = (value: unknown): unknown => {
   return value;
 };
 
-export async function getAgents(customerId?: string): Promise<Agent[]> {
+export async function getAgents(customerId?: string, authHeaders?: AuthHeaders): Promise<Agent[]> {
   const query = customerId ? `?customerId=${encodeURIComponent(customerId)}` : "";
-  const payload = await request<ApiEnvelope<unknown> | unknown[]>(`/api/agents${query}`);
+  const payload = await request<ApiEnvelope<unknown> | unknown[]>(`/api/agents${query}`, undefined, authHeaders);
 
   const list = Array.isArray(payload)
     ? payload
@@ -275,9 +287,11 @@ export async function getAgents(customerId?: string): Promise<Agent[]> {
 const withCustomerId = (path: string, customerId?: string): string =>
   customerId ? `${path}?customerId=${encodeURIComponent(customerId)}` : path;
 
-export async function getAgent(id: string, customerId?: string): Promise<Agent | undefined> {
+export async function getAgent(id: string, customerId?: string, authHeaders?: AuthHeaders): Promise<Agent | undefined> {
   const payload = await request<ApiEnvelope<unknown> | unknown>(
     withCustomerId(`/api/agents/${encodeURIComponent(id)}`, customerId),
+    undefined,
+    authHeaders,
   );
 
   return parseAgent(unwrapOne(payload));
@@ -287,6 +301,7 @@ export async function createAgentViaMetaAgent(
   messages: MetaAgentMessage[],
   sessionId?: string,
   customerId?: string,
+  authHeaders?: AuthHeaders,
 ): Promise<CreateViaMetaAgentResponse> {
   const payload = await request<ApiEnvelope<unknown> | unknown>(
     withCustomerId("/api/agents/create-via-meta", customerId),
@@ -294,6 +309,7 @@ export async function createAgentViaMetaAgent(
       method: "POST",
       body: JSON.stringify({ messages, sessionId } satisfies CreateViaMetaAgentRequest),
     },
+    authHeaders,
   );
 
   return parseCreateViaMetaAgentResponse(unwrapOne(payload));
@@ -303,6 +319,7 @@ export async function updateAgent(
   id: string,
   data: Partial<Agent>,
   customerId?: string,
+  authHeaders?: AuthHeaders,
 ): Promise<Agent | undefined> {
   const payload = await request<ApiEnvelope<unknown> | unknown>(
     withCustomerId(`/api/agents/${encodeURIComponent(id)}`, customerId),
@@ -310,25 +327,27 @@ export async function updateAgent(
       method: "PATCH",
       body: JSON.stringify(data),
     },
+    authHeaders,
   );
 
   return parseAgent(unwrapOne(payload));
 }
 
-export async function deleteAgent(id: string, customerId?: string): Promise<boolean> {
+export async function deleteAgent(id: string, customerId?: string, authHeaders?: AuthHeaders): Promise<boolean> {
   await request(withCustomerId(`/api/agents/${encodeURIComponent(id)}`, customerId), {
     method: "DELETE",
-  });
+  }, authHeaders);
 
   return true;
 }
 
-export async function regenerateToken(id: string, customerId?: string): Promise<Agent | undefined> {
+export async function regenerateToken(id: string, customerId?: string, authHeaders?: AuthHeaders): Promise<Agent | undefined> {
   const payload = await request<ApiEnvelope<unknown> | unknown>(
     withCustomerId(`/api/agents/${encodeURIComponent(id)}/embed-token`, customerId),
     {
       method: "POST",
     },
+    authHeaders,
   );
 
   return parseAgent(unwrapOne(payload));

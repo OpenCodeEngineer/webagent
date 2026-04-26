@@ -120,17 +120,17 @@ fi
 # ──────────────────────────────────────────
 # TEST 4: Contextual relevance — ask about pottery, response should mention pottery
 # ──────────────────────────────────────────
-echo "▸ Test 4: Contextual relevance (ask about pottery shop)"
-RESULT3=$(call_meta '[{"role":"user","content":"I run an online pottery shop at pottery-palace.com selling handmade ceramic bowls and vases"}]')
+echo "▸ Test 4: Contextual relevance (ask about vibebrowser.app)"
+RESULT3=$(call_meta '[{"role":"user","content":"I want to create a chat agent for vibebrowser.app - its a browser with built-in AI capabilities for web automation"}]')
 RESP3=$(extract_response "$RESULT3")
 SID3=$(extract_session "$RESULT3")
 
 if [ -z "$RESP3" ]; then
   fail "Contextual relevance" "Empty response"
 else
-  # Check if response mentions pottery/ceramic/bowls/vases — at least one
+  # Check if response mentions browser/vibebrowser/agent/automation — at least one
   RELEVANT=0
-  for keyword in pottery ceramic bowls vases handmade; do
+  for keyword in browser vibebrowser agent automation web AI; do
     if echo "$RESP3" | grep -qi "$keyword"; then
       RELEVANT=1
       break
@@ -139,7 +139,7 @@ else
   if [ $RELEVANT -eq 1 ]; then
     pass "Contextual relevance — response references user's domain"
   else
-    fail "Contextual relevance" "Response doesn't mention pottery/ceramic/bowls/vases: ${RESP3:0:200}"
+    fail "Contextual relevance" "Response doesn't mention browser/vibebrowser/agent/automation: ${RESP3:0:200}"
   fi
 fi
 

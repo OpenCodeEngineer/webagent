@@ -54,6 +54,60 @@ function timingSafeBufferEqual(a: string, b: string): boolean {
   return crypto.timingSafeEqual(left, right);
 }
 
+function getInternalSecret(): string {
+  return (
+    process.env.PROXY_INTERNAL_SECRET?.trim()
+    || process.env.PROXY_API_TOKEN?.trim()
+    || process.env.PROXY_CUSTOMER_API_TOKEN?.trim()
+    || ''
+  );
+}
+
+function verifyWsTicket(ticket: string): string | null {
+  const trimmed = ticket.trim();
+  const [b64Raw, signatureRaw] = trimmed.split('.');
+  const b64 = b64Raw?.trim();
+  const signature = signatureRaw?.trim();
+  if (!b64 || !signature) {
+    return null;
+  }
+
+  const secret = getInternalSecret();
+  if (!secret) {
+    return null;
+  }
+
+  const expected = crypto.createHmac('sha256', secret).update(b64).digest('hex');
+  if (!timingSafeBufferEqual(signature, expected)) {
+    return null;
+  }
+
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(Buffer.from(b64, 'base64url').toString('utf8')) as unknown;
+  } catch {
+    return null;
+  }
+
+  if (!decoded || typeof decoded !== 'object') {
+    return null;
+  }
+
+  const payload = decoded as Record<string, unknown>;
+  const customerId = typeof payload.customerId === 'string' ? payload.customerId : '';
+  const exp = typeof payload.exp === 'number' ? payload.exp : Number.NaN;
+  if (!customerId || !Number.isFinite(exp)) {
+    return null;
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  if (exp < now) {
+    return null;
+  }
+
+  return customerId;
+}
+
 export function invalidateEmbedTokenCache(token?: string): void {
   if (token) {
     tokenCache.delete(token);
@@ -180,35 +234,41 @@ export function handleConnection(
             return;
           }
 
-          const authToken = msg.token ?? msg.agentToken;
-          if (!authToken) {
-            send(ws, { type: 'auth_error', reason: 'Invalid agent token' });
-            ws.close(4003, 'Invalid token');
-            return;
-          }
-
           if (msg.mode === 'admin') {
-            const expectedToken = (
-              process.env.PROXY_CUSTOMER_API_TOKEN?.trim()
-              || process.env.PROXY_API_TOKEN?.trim()
-              || process.env.OPENCLAW_GATEWAY_TOKEN?.trim()
-            );
-            if (!expectedToken || !timingSafeBufferEqual(authToken, expectedToken)) {
-              send(ws, { type: 'auth_error', reason: 'Invalid admin token' });
-              ws.close(4003, 'Invalid admin token');
-              return;
+            const rawTicket = (msg as { ticket?: unknown }).ticket;
+            const ticketCustomerId = typeof rawTicket === 'string' ? verifyWsTicket(rawTicket) : null;
+            const authToken = msg.token ?? msg.agentToken;
+
+            if (!ticketCustomerId) {
+              const expectedToken = (
+                process.env.PROXY_CUSTOMER_API_TOKEN?.trim()
+                || process.env.PROXY_API_TOKEN?.trim()
+                || process.env.OPENCLAW_GATEWAY_TOKEN?.trim()
+              );
+              if (!authToken || !expectedToken || !timingSafeBufferEqual(authToken, expectedToken)) {
+                send(ws, { type: 'auth_error', reason: 'Invalid admin token' });
+                ws.close(4003, 'Invalid admin token');
+                return;
+              }
             }
 
-            state.agentToken = authToken;
-            state.userId = msg.userId;
+            state.agentToken = authToken ?? '';
+            state.userId = ticketCustomerId ?? msg.userId;
             state.agentId = 'meta';
             state.openclawAgentId = 'meta';
-            state.sessionKey = buildAgentSessionKey('meta', `admin-${msg.userId}-${crypto.randomUUID()}`);
+            state.sessionKey = buildAgentSessionKey('meta', `admin-${state.userId}-${crypto.randomUUID()}`);
             state.authenticated = true;
             state.isAdmin = true;
             state.firstMessage = true;
             clearTimeout(authTimeout);
             send(ws, { type: 'auth_ok', sessionId: state.sessionKey });
+            return;
+          }
+
+          const authToken = msg.token ?? msg.agentToken;
+          if (!authToken) {
+            send(ws, { type: 'auth_error', reason: 'Invalid agent token' });
+            ws.close(4003, 'Invalid token');
             return;
           }
 

@@ -1,4 +1,4 @@
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { mkdir, readFile, rmdir, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'node:os';
@@ -25,7 +25,7 @@ const createInternalAgentBodySchema = z.object({
 });
 
 const agentsQuerySchema = z.object({
-  customerId: z.string().uuid(),
+  customerId: z.string().uuid().optional(),
 });
 
 const idParamsSchema = z.object({
@@ -119,6 +119,15 @@ function getCustomerApiToken(): string | null {
   );
 }
 
+function getInternalSecret(): string {
+  return (
+    process.env.PROXY_INTERNAL_SECRET?.trim()
+    || process.env.PROXY_API_TOKEN?.trim()
+    || process.env.PROXY_CUSTOMER_API_TOKEN?.trim()
+    || ''
+  );
+}
+
 function timingSafeBufferEqual(a: string, b: string): boolean {
   const left = Buffer.from(a);
   const right = Buffer.from(b);
@@ -129,20 +138,78 @@ function timingSafeBufferEqual(a: string, b: string): boolean {
   return timingSafeEqual(left, right);
 }
 
-function requireCustomerAuth(request: FastifyRequest, reply: FastifyReply): boolean {
+function getHeaderValue(value: string | string[] | undefined): string | null {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value[0] ?? null;
+  }
+  return null;
+}
+
+function verifyCustomerHmac(request: FastifyRequest): string | null {
+  const customerId = getHeaderValue(request.headers['x-customer-id'])?.trim() ?? null;
+  const customerSig = getHeaderValue(request.headers['x-customer-sig'])?.trim() ?? null;
+  if (!customerId || !customerSig) {
+    return null;
+  }
+
+  const [signatureRaw, timestampRaw] = customerSig.split(':');
+  const signature = signatureRaw?.trim();
+  const timestampStr = timestampRaw?.trim();
+  if (!signature || !timestampStr) {
+    return null;
+  }
+
+  const timestamp = Number.parseInt(timestampStr, 10);
+  if (!Number.isFinite(timestamp)) {
+    return null;
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  if (Math.abs(now - timestamp) > 300) {
+    return null;
+  }
+
+  const secret = getInternalSecret();
+  if (!secret) {
+    return null;
+  }
+
+  const expected = createHmac('sha256', secret)
+    .update(`${customerId}:${timestamp}`)
+    .digest('hex');
+
+  if (!timingSafeBufferEqual(signature, expected)) {
+    return null;
+  }
+
+  return customerId;
+}
+
+function requireCustomerAuth(request: FastifyRequest, reply: FastifyReply): string | null {
+  const hmacCustomerId = verifyCustomerHmac(request);
+  if (hmacCustomerId) {
+    return hmacCustomerId;
+  }
+
   const expected = getCustomerApiToken();
-  if (!expected) {
-    sendError(reply, 500, 'missing_api_token', 'Server API token is not configured');
-    return false;
-  }
-
   const token = readBearerToken(request);
-  if (!token || !timingSafeBufferEqual(token, expected)) {
-    sendError(reply, 401, 'unauthorized', 'Invalid or missing bearer token');
-    return false;
+  if (!expected || !token || !timingSafeBufferEqual(token, expected)) {
+    sendError(reply, 401, 'unauthorized', 'Invalid or missing credentials');
+    return null;
   }
 
-  return true;
+  const query = agentsQuerySchema.safeParse(request.query);
+  const customerId = query.success ? query.data.customerId : undefined;
+  if (!customerId) {
+    sendError(reply, 401, 'unauthorized', 'Missing customerId query parameter for bearer authentication');
+    return null;
+  }
+
+  request.log.warn('Bearer customer auth is deprecated; use x-customer-id/x-customer-sig headers.');
+  return customerId;
 }
 
 async function ensureCustomer(app: FastifyInstance, customerId: string) {
@@ -456,10 +523,8 @@ export function registerApiRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/agents/create-via-meta', { config: { rateLimit: mutationRateLimit } }, async (request, reply) => {
-    if (!requireCustomerAuth(request, reply)) return;
-
-    const query = parseOrError(agentsQuerySchema, request.query, reply, 'invalid_agents_query');
-    if (!query) return;
+    const customerId = requireCustomerAuth(request, reply);
+    if (!customerId) return;
 
     const body = parseOrError(
       createViaMetaBodySchema,
@@ -480,7 +545,7 @@ export function registerApiRoutes(app: FastifyInstance) {
     const domain = (process.env.AUTH_URL || 'https://dev.lamoom.com').replace(/\/+$/, '');
     const messageForAgent = isNewSession
       ? `[Lamoom Platform — Agent Creation Session]
-Customer ID: ${query.customerId}
+Customer ID: ${customerId}
 Platform domain: ${domain}
 
 Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'}`
@@ -495,7 +560,7 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
       const agentResponse = await openclawClient.sendMessage({
         message: messageForAgent,
         agentId: 'meta',
-        sessionKey: buildAgentSessionKey('meta', `admin-${query.customerId}-${sessionId}`),
+        sessionKey: buildAgentSessionKey('meta', `admin-${customerId}-${sessionId}`),
         name: 'agent-builder',
       });
 
@@ -512,7 +577,7 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
       const responseText = agentResponse.response ?? '';
       const existingEmbedCode
         = responseText.match(/<script\s[^>]*data-agent-token="[^"]*"[^>]*><\/script>/i)?.[0] ?? '';
-      const createdAgentData = await detectAgentCreation(responseText, query.customerId, app, domain);
+      const createdAgentData = await detectAgentCreation(responseText, customerId, app, domain);
 
       return reply.send({
         data: {
@@ -535,16 +600,14 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
   });
 
   app.get('/api/agents', async (request, reply) => {
-    if (!requireCustomerAuth(request, reply)) return;
-
-    const query = parseOrError(agentsQuerySchema, request.query, reply, 'invalid_agents_query');
-    if (!query) return;
+    const customerId = requireCustomerAuth(request, reply);
+    if (!customerId) return;
 
     try {
       const rows = await app.db
         .select()
         .from(agents)
-        .where(and(eq(agents.customerId, query.customerId), ne(agents.status, 'deleted')));
+        .where(and(eq(agents.customerId, customerId), ne(agents.status, 'deleted')));
 
       let sessionCountByAgentId = new Map<string, number>();
       if (rows.length > 0) {
@@ -556,7 +619,7 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
             })
             .from(widgetSessions)
             .innerJoin(agents, eq(widgetSessions.agentId, agents.id))
-            .where(and(eq(agents.customerId, query.customerId), ne(agents.status, 'deleted')))
+            .where(and(eq(agents.customerId, customerId), ne(agents.status, 'deleted')))
             .groupBy(widgetSessions.agentId);
 
           sessionCountByAgentId = new Map(
@@ -580,12 +643,11 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
   });
 
   app.get('/api/agents/:id', async (request, reply) => {
-    if (!requireCustomerAuth(request, reply)) return;
+    const customerId = requireCustomerAuth(request, reply);
+    if (!customerId) return;
 
     const params = parseOrError(idParamsSchema, request.params, reply, 'invalid_agent_id');
     if (!params) return;
-    const query = parseOrError(agentsQuerySchema, request.query, reply, 'invalid_agents_query');
-    if (!query) return;
 
     try {
       const rows = await app.db
@@ -594,7 +656,7 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
         .where(
           and(
             eq(agents.id, params.id),
-            eq(agents.customerId, query.customerId),
+            eq(agents.customerId, customerId),
             ne(agents.status, 'deleted'),
           ),
         )
@@ -626,13 +688,11 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
   });
 
   app.patch('/api/agents/:id', { config: { rateLimit: mutationRateLimit } }, async (request, reply) => {
-    if (!requireCustomerAuth(request, reply)) return;
+    const customerId = requireCustomerAuth(request, reply);
+    if (!customerId) return;
 
     const params = parseOrError(idParamsSchema, request.params, reply, 'invalid_agent_id');
     if (!params) return;
-
-    const query = parseOrError(agentsQuerySchema, request.query, reply, 'invalid_agents_query');
-    if (!query) return;
 
     const body = parseOrError(updateAgentBodySchema, request.body, reply, 'invalid_agent_patch');
     if (!body) return;
@@ -644,7 +704,7 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
         .where(
           and(
             eq(agents.id, params.id),
-            eq(agents.customerId, query.customerId),
+            eq(agents.customerId, customerId),
             ne(agents.status, 'deleted'),
           ),
         )
@@ -660,14 +720,14 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
           ...body,
           updatedAt: new Date(),
         })
-        .where(and(eq(agents.id, params.id), eq(agents.customerId, query.customerId)))
+        .where(and(eq(agents.id, params.id), eq(agents.customerId, customerId)))
         .returning();
 
       const updated = updatedRows[0];
       if (!updated) {
         return sendError(reply, 404, 'not_found', 'Agent not found');
       }
-      await insertAuditLog(app, query.customerId, 'agent.update', {
+      await insertAuditLog(app, customerId, 'agent.update', {
         agentId: params.id,
         fields: Object.keys(body),
       });
@@ -690,20 +750,18 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
   });
 
   app.delete('/api/agents/:id', { config: { rateLimit: mutationRateLimit } }, async (request, reply) => {
-    if (!requireCustomerAuth(request, reply)) return;
+    const customerId = requireCustomerAuth(request, reply);
+    if (!customerId) return;
 
     const params = parseOrError(idParamsSchema, request.params, reply, 'invalid_agent_id');
     if (!params) return;
-
-    const query = parseOrError(agentsQuerySchema, request.query, reply, 'invalid_agents_query');
-    if (!query) return;
 
     try {
       const embedRows = await app.db
         .select({ embedToken: widgetEmbeds.embedToken })
         .from(widgetEmbeds)
         .innerJoin(agents, eq(widgetEmbeds.agentId, agents.id))
-        .where(and(eq(agents.id, params.id), eq(agents.customerId, query.customerId)));
+        .where(and(eq(agents.id, params.id), eq(agents.customerId, customerId)));
 
       const updatedRows = await app.db
         .update(agents)
@@ -714,7 +772,7 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
         .where(
           and(
             eq(agents.id, params.id),
-            eq(agents.customerId, query.customerId),
+            eq(agents.customerId, customerId),
             ne(agents.status, 'deleted'),
           ),
         )
@@ -724,7 +782,7 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
       if (!updated) {
         return sendError(reply, 404, 'not_found', 'Agent not found');
       }
-      await insertAuditLog(app, query.customerId, 'agent.delete', { agentId: params.id });
+      await insertAuditLog(app, customerId, 'agent.delete', { agentId: params.id });
 
       for (const embedRow of embedRows) {
         invalidateEmbedTokenCache(embedRow.embedToken);
@@ -738,13 +796,11 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
   });
 
   app.post('/api/agents/:id/embed-token', { config: { rateLimit: mutationRateLimit } }, async (request, reply) => {
-    if (!requireCustomerAuth(request, reply)) return;
+    const customerId = requireCustomerAuth(request, reply);
+    if (!customerId) return;
 
     const params = parseOrError(idParamsSchema, request.params, reply, 'invalid_agent_id');
     if (!params) return;
-
-    const query = parseOrError(agentsQuerySchema, request.query, reply, 'invalid_agents_query');
-    if (!query) return;
 
     const body = parseOrError(createEmbedBodySchema, request.body ?? {}, reply, 'invalid_embed_payload');
     if (!body) return;
@@ -756,7 +812,7 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
         .where(
           and(
             eq(agents.id, params.id),
-            eq(agents.customerId, query.customerId),
+            eq(agents.customerId, customerId),
             ne(agents.status, 'deleted'),
           ),
         )
@@ -793,7 +849,7 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
       }
 
       invalidateEmbedTokenCache(embedToken);
-      await insertAuditLog(app, query.customerId, 'embed.rotate', { agentId: params.id });
+      await insertAuditLog(app, customerId, 'embed.rotate', { agentId: params.id });
 
       return reply.send({ embedToken });
     } catch (error) {

@@ -219,7 +219,7 @@ test_meta_describe() {
   fi
 
   log "  → Describing test business to meta-agent…"
-  local msg="I have a pet store called TestPetShop at https://testpetshop.example.com. It has a REST API at https://api.testpetshop.example.com for managing pets, orders, and customers. The tone should be friendly and helpful."
+  local msg="I want to create an AI chat agent for my website vibebrowser.app — it's a browser with built-in AI agent capabilities. Please check it out and create an agent for it."
   local payload
   payload=$(printf '{"messages":[{"role":"user","content":"%s"}],"sessionId":"%s"}' "$msg" "$SESSION_ID")
 
