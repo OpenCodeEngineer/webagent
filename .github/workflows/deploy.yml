@@ -138,7 +138,12 @@ jobs:
             echo "→ Health checks..."
             curl -sf http://127.0.0.1:3001/health || (echo "PROXY HEALTH FAILED" && exit 1)
             curl -sf http://127.0.0.1:3000/ -o /dev/null || (echo "ADMIN HEALTH FAILED" && exit 1)
-            curl -sf http://127.0.0.1:3001/health/openclaw | grep -q '"ok"' || echo "WARNING: OpenClaw gateway not healthy (non-blocking)"
+            if ! curl -sf http://127.0.0.1:3001/health/openclaw | grep -q '"ok"'; then
+              echo "OPENCLAW HEALTH FAILED"
+              systemctl --no-pager --full status openclaw-gateway || true
+              journalctl -u openclaw-gateway -n 120 --no-pager || true
+              exit 1
+            fi
 
             echo "→ Static asset check..."
             CSS_PATH=$(curl -s http://127.0.0.1:3000/login | grep -oE '_next/static/css/[^"]+' | head -1)
