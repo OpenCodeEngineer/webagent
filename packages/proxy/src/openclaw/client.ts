@@ -268,6 +268,48 @@ function collectUniqueTokens(values: Array<string | undefined | null>): string[]
   return tokens;
 }
 
+function extractGatewayTokenFromConfig(raw: string): string | undefined {
+  const gatewayAuthBlockMatch = raw.match(
+    /gateway\s*:\s*\{[\s\S]*?auth\s*:\s*\{[\s\S]*?\}[\s\S]*?\}/m,
+  );
+  const source = gatewayAuthBlockMatch?.[0] ?? raw;
+  const tokenMatch = source.match(/token\s*:\s*["']([^"']+)["']/m);
+  const token = tokenMatch?.[1]?.trim();
+  if (!token || token.startsWith('$')) {
+    return undefined;
+  }
+  return token;
+}
+
+function readGatewayTokenFromConfigFile(): string | undefined {
+  const home = process.env.HOME?.trim();
+  const candidates = [
+    process.env.OPENCLAW_CONFIG_PATH?.trim(),
+    home ? path.join(home, 'openclaw', 'config', 'openclaw.json5') : undefined,
+    path.join(process.cwd(), 'openclaw', 'config', 'openclaw.json5'),
+  ];
+
+  for (const filePath of candidates) {
+    if (!filePath) {
+      continue;
+    }
+    try {
+      if (!fs.existsSync(filePath)) {
+        continue;
+      }
+      const raw = fs.readFileSync(filePath, 'utf8');
+      const token = extractGatewayTokenFromConfig(raw);
+      if (token) {
+        return token;
+      }
+    } catch {
+      // ignore unreadable config candidates
+    }
+  }
+
+  return undefined;
+}
+
 function isGatewayTokenAuthError(message: string): boolean {
   const normalized = message.toLowerCase();
   return normalized.includes('gateway token mismatch') || normalized.includes('gateway token missing');
@@ -687,12 +729,14 @@ export class OpenClawClient {
 
   constructor(gatewayUrl?: string, token?: string) {
     const config = loadConfig();
+    const configFileToken = readGatewayTokenFromConfigFile();
     this.gatewayWsUrl = toGatewayWsUrl(gatewayUrl || config.openClawGatewayUrl);
     const gatewayHttpUrl = toGatewayHttpUrl(gatewayUrl || config.openClawGatewayUrl);
     this.hooksWakeUrl = new URL('/hooks/wake', gatewayHttpUrl).toString();
     this.tokenCandidates = collectUniqueTokens([
       token,
       config.openClawGatewayToken,
+      configFileToken,
       process.env.OPENCLAW_GATEWAY_TOKEN,
       process.env.PROXY_CUSTOMER_API_TOKEN,
       process.env.PROXY_API_TOKEN,
