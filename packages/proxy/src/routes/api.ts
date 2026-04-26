@@ -395,38 +395,69 @@ export async function detectAgentCreation(
   await ensureCustomer(app, customerId);
 
   const now = new Date();
-  const createdAgentRows = await app.db
-    .insert(agents)
-    .values({
-      id: randomUUID(),
+
+  // Try to reclaim a previously-deleted agent with the same slug
+  const reclaimedRows = await app.db
+    .update(agents)
+    .set({
       customerId,
-      openclawAgentId: config.agentSlug,
       name: config.agentName,
       websiteUrl: normalizeNullable(config.websiteUrl),
       apiDescription: normalizeNullable(config.apiDescription),
-      description: null,
       status: 'active',
-      createdAt: now,
       updatedAt: now,
     })
-    .onConflictDoNothing({ target: agents.openclawAgentId })
+    .where(
+      and(
+        eq(agents.openclawAgentId, config.agentSlug),
+        eq(agents.status, 'deleted'),
+      ),
+    )
     .returning();
 
-  const createdAgent = createdAgentRows[0]
-    ?? (
-      await app.db
-        .select()
-        .from(agents)
-        .where(
-          and(
-            eq(agents.openclawAgentId, config.agentSlug),
-            eq(agents.customerId, customerId),
-            ne(agents.status, 'deleted'),
-          ),
-        )
-        .limit(1)
-    )[0];
-  if (!createdAgent) return null;
+  let createdAgent = reclaimedRows[0];
+
+  if (!createdAgent) {
+    const createdAgentRows = await app.db
+      .insert(agents)
+      .values({
+        id: randomUUID(),
+        customerId,
+        openclawAgentId: config.agentSlug,
+        name: config.agentName,
+        websiteUrl: normalizeNullable(config.websiteUrl),
+        apiDescription: normalizeNullable(config.apiDescription),
+        description: null,
+        status: 'active',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoNothing({ target: agents.openclawAgentId })
+      .returning();
+
+    createdAgent = createdAgentRows[0]
+      ?? (
+        await app.db
+          .select()
+          .from(agents)
+          .where(
+            and(
+              eq(agents.openclawAgentId, config.agentSlug),
+              eq(agents.customerId, customerId),
+              ne(agents.status, 'deleted'),
+            ),
+          )
+          .limit(1)
+      )[0];
+  }
+
+  if (!createdAgent) {
+    app.log.warn(
+      { slug: config.agentSlug, customerId },
+      'agent slug already owned by another customer',
+    );
+    return null;
+  }
 
   // Register agent in OpenClaw gateway config and restart gateway
   await registerAgentInOpenClaw(config.agentSlug, config.agentName, app);
