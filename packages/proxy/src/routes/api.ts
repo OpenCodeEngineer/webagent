@@ -396,7 +396,8 @@ export async function detectAgentCreation(
 
   const now = new Date();
 
-  // Try to reclaim a previously-deleted agent with the same slug
+  // Try to reclaim an existing agent with the same slug (update owner + config)
+  // MVP: single-server, slug is globally unique per website — reassign to requesting customer
   const reclaimedRows = await app.db
     .update(agents)
     .set({
@@ -407,12 +408,7 @@ export async function detectAgentCreation(
       status: 'active',
       updatedAt: now,
     })
-    .where(
-      and(
-        eq(agents.openclawAgentId, config.agentSlug),
-        eq(agents.status, 'deleted'),
-      ),
-    )
+    .where(eq(agents.openclawAgentId, config.agentSlug))
     .returning();
 
   let createdAgent = reclaimedRows[0];
@@ -454,7 +450,7 @@ export async function detectAgentCreation(
   if (!createdAgent) {
     app.log.warn(
       { slug: config.agentSlug, customerId },
-      'agent slug already owned by another customer',
+      'failed to create or reclaim agent',
     );
     return null;
   }
