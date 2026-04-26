@@ -76,7 +76,7 @@ jobs:
 
             def extract_token_in_block(raw, block_name):
                 match = re.search(
-                    rf"{block_name}\s*:\s*\{{[\s\S]*?token\s*:\s*\"([^\"]+)\"",
+                    rf"""{block_name}\s*:\s*\{{[\s\S]*?token\s*:\s*['"]([^'"]+)['"]""",
                     raw,
                     re.MULTILINE,
                 )
@@ -110,19 +110,26 @@ jobs:
                 f"running_proxy={fingerprint(running_proxy_token)}",
             )
 
-            updated = [line for line in raw_lines if not line.startswith("OPENCLAW_CONFIG_PATH=")]
-            replaced = False
+            cfg_env_path = "/opt/webagent/openclaw/config/openclaw.json5"
+            updated = list(raw_lines)
+            replaced_gateway = False
+            replaced_cfg_path = False
             next_lines = []
             for line in updated:
                 if line.startswith("OPENCLAW_GATEWAY_TOKEN="):
                     next_lines.append(f"OPENCLAW_GATEWAY_TOKEN={token}")
-                    replaced = True
+                    replaced_gateway = True
+                elif line.startswith("OPENCLAW_CONFIG_PATH="):
+                    next_lines.append(f"OPENCLAW_CONFIG_PATH={cfg_env_path}")
+                    replaced_cfg_path = True
                 else:
                     next_lines.append(line)
-            if not replaced:
+            if not replaced_gateway:
                 if next_lines and next_lines[-1].strip():
                     next_lines.append("")
                 next_lines.append(f"OPENCLAW_GATEWAY_TOKEN={token}")
+            if not replaced_cfg_path:
+                next_lines.append(f"OPENCLAW_CONFIG_PATH={cfg_env_path}")
             updated = next_lines
 
             env_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
@@ -131,21 +138,28 @@ jobs:
             cfg_path = Path("/opt/webagent/openclaw/config/openclaw.json5")
             if cfg_path.exists():
                 raw = cfg_path.read_text(encoding="utf-8")
+                print(
+                    "Config presence flags:",
+                    f"has_gateway={'gateway:' in raw}",
+                    f"has_auth={'auth:' in raw}",
+                    f"has_remote={'remote:' in raw}",
+                    f"has_hooks={'hooks:' in raw}",
+                )
                 next_raw = raw
                 next_raw = re.sub(
-                    r'(auth\s*:\s*\{[\s\S]*?token\s*:\s*)"(?:[^"\\]|\\.)*"',
+                    r"""(auth\s*:\s*\{[\s\S]*?token\s*:\s*)['"][^'"]*['"]""",
                     rf'\\1"{token}"',
                     next_raw,
                     count=1,
                 )
                 next_raw = re.sub(
-                    r'(remote\s*:\s*\{[\s\S]*?token\s*:\s*)"(?:[^"\\]|\\.)*"',
+                    r"""(remote\s*:\s*\{[\s\S]*?token\s*:\s*)['"][^'"]*['"]""",
                     rf'\\1"{token}"',
                     next_raw,
                     count=1,
                 )
                 next_raw = re.sub(
-                    r'(hooks\s*:\s*\{[\s\S]*?token\s*:\s*)"(?:[^"\\]|\\.)*"',
+                    r"""(hooks\s*:\s*\{[\s\S]*?token\s*:\s*)['"][^'"]*['"]""",
                     rf'\\1"{hooks_token}"',
                     next_raw,
                     count=1,
