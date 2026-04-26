@@ -19,7 +19,7 @@ set -euo pipefail
 # ── Config ───────────────────────────────────────────────────────────────────
 BASE_URL="${1:-${PROXY_URL:-${BASE_URL:-https://dev.lamoom.com}}}"
 API_TOKEN="${2:-${PROXY_API_TOKEN:-}}"
-CUSTOMER_ID="${TEST_CUSTOMER_ID:-e2e-test-$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' || date +%s)}"
+CUSTOMER_ID="${TEST_CUSTOMER_ID:-$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' || python3 -c 'import uuid;print(uuid.uuid4())' 2>/dev/null || echo '00000000-0000-4000-a000-'$(date +%s))}"
 WORKSPACES_DIR="${OPENCLAW_WORKSPACES_DIR:-}"
 
 # Strip trailing slash
