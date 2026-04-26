@@ -68,7 +68,7 @@ jobs:
                 return None
 
             token = (
-                or env_map.get("PROXY_CUSTOMER_API_TOKEN")
+                env_map.get("PROXY_CUSTOMER_API_TOKEN")
                 or env_map.get("PROXY_API_TOKEN")
                 or env_map.get("OPENCLAW_HOOKS_TOKEN")
                 or env_map.get("OPENCLAW_GATEWAY_TOKEN")
