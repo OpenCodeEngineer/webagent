@@ -125,6 +125,34 @@ jobs:
             echo "$OPENCLAW_HEALTH"
             if ! echo "$OPENCLAW_HEALTH" | grep -q '"ok"'; then
               echo "OPENCLAW HEALTH FAILED"
+              GATEWAY_URL_LINE=$(grep -E '^OPENCLAW_GATEWAY_URL=' "${APP_DIR}/.env" || true)
+              if [ -n "$GATEWAY_URL_LINE" ]; then
+                echo "Configured OPENCLAW_GATEWAY_URL: ${GATEWAY_URL_LINE#OPENCLAW_GATEWAY_URL=}"
+              fi
+              GATEWAY_TOKEN=$(grep -E '^OPENCLAW_GATEWAY_TOKEN=' "${APP_DIR}/.env" | head -1 | cut -d= -f2- || true)
+              HOOKS_TOKEN=$(grep -E '^OPENCLAW_HOOKS_TOKEN=' "${APP_DIR}/.env" | head -1 | cut -d= -f2- || true)
+              for LABEL in gateway hooks; do
+                TOKEN=""
+                if [ "$LABEL" = "gateway" ]; then
+                  TOKEN="$GATEWAY_TOKEN"
+                else
+                  TOKEN="$HOOKS_TOKEN"
+                fi
+                if [ -z "$TOKEN" ]; then
+                  continue
+                fi
+                PROBE_FILE="/tmp/openclaw-hook-probe-${LABEL}.json"
+                STATUS=$(curl -s -o "$PROBE_FILE" -w "%{http_code}" \
+                  -X POST "http://127.0.0.1:18789/hooks/wake" \
+                  -H "Authorization: Bearer ${TOKEN}" \
+                  -H "Content-Type: application/json" \
+                  -d '{"text":"health-check","mode":"next-heartbeat"}' || true)
+                echo "hooks/wake probe (${LABEL} token): HTTP ${STATUS}"
+                if [ -s "$PROBE_FILE" ]; then
+                  cat "$PROBE_FILE"
+                  echo
+                fi
+              done
               systemctl --no-pager --full status openclaw-gateway || true
               journalctl -u openclaw-gateway --since "-3 min" --no-pager || true
               exit 1
