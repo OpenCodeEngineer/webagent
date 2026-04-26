@@ -76,7 +76,7 @@ jobs:
 
             def extract_token_in_block(raw, block_name):
                 match = re.search(
-                    rf"""{block_name}\s*:\s*\{{[\s\S]*?token\s*:\s*['"]([^'"]+)['"]""",
+                    rf"""["']?{block_name}["']?\s*:\s*\{{[\s\S]*?["']?token["']?\s*:\s*['"]([^'"]+)['"]""",
                     raw,
                     re.MULTILINE,
                 )
@@ -140,26 +140,26 @@ jobs:
                 raw = cfg_path.read_text(encoding="utf-8")
                 print(
                     "Config presence flags:",
-                    f"has_gateway={'gateway:' in raw}",
-                    f"has_auth={'auth:' in raw}",
-                    f"has_remote={'remote:' in raw}",
-                    f"has_hooks={'hooks:' in raw}",
+                    f"has_gateway={bool(re.search(r'''[\"']?gateway[\"']?\\s*:''', raw))}",
+                    f"has_auth={bool(re.search(r'''[\"']?auth[\"']?\\s*:''', raw))}",
+                    f"has_remote={bool(re.search(r'''[\"']?remote[\"']?\\s*:''', raw))}",
+                    f"has_hooks={bool(re.search(r'''[\"']?hooks[\"']?\\s*:''', raw))}",
                 )
                 next_raw = raw
                 next_raw = re.sub(
-                    r"""(auth\s*:\s*\{[\s\S]*?token\s*:\s*)['"][^'"]*['"]""",
+                    r"""(["']?auth["']?\s*:\s*\{[\s\S]*?["']?token["']?\s*:\s*)['"][^'"]*['"]""",
                     rf'\\1"{token}"',
                     next_raw,
                     count=1,
                 )
                 next_raw = re.sub(
-                    r"""(remote\s*:\s*\{[\s\S]*?token\s*:\s*)['"][^'"]*['"]""",
+                    r"""(["']?remote["']?\s*:\s*\{[\s\S]*?["']?token["']?\s*:\s*)['"][^'"]*['"]""",
                     rf'\\1"{token}"',
                     next_raw,
                     count=1,
                 )
                 next_raw = re.sub(
-                    r"""(hooks\s*:\s*\{[\s\S]*?token\s*:\s*)['"][^'"]*['"]""",
+                    r"""(["']?hooks["']?\s*:\s*\{[\s\S]*?["']?token["']?\s*:\s*)['"][^'"]*['"]""",
                     rf'\\1"{hooks_token}"',
                     next_raw,
                     count=1,
