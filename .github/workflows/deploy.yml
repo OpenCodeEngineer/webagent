@@ -35,6 +35,7 @@ jobs:
             python3 - <<'PY'
             import hashlib
             import re
+            import secrets
             import subprocess
             from pathlib import Path
 
@@ -100,12 +101,17 @@ jobs:
             if not token:
                 raise SystemExit(0)
 
+            hooks_token = env_map.get("OPENCLAW_HOOKS_TOKEN")
+            if not hooks_token or hooks_token == token:
+                hooks_token = f"hooks-{secrets.token_hex(24)}"
+
             print(
                 "Token fingerprints before align:",
                 f"selected={fingerprint(token)}",
                 f"proxy_customer={fingerprint(env_map.get('PROXY_CUSTOMER_API_TOKEN'))}",
                 f"proxy_api={fingerprint(env_map.get('PROXY_API_TOKEN'))}",
                 f"hooks_env={fingerprint(env_map.get('OPENCLAW_HOOKS_TOKEN'))}",
+                f"hooks_selected={fingerprint(hooks_token)}",
                 f"gateway_env={fingerprint(env_map.get('OPENCLAW_GATEWAY_TOKEN'))}",
                 f"running_gateway={fingerprint(running_gateway_token)}",
                 f"running_proxy={fingerprint(running_proxy_token)}",
@@ -114,12 +120,16 @@ jobs:
             cfg_env_path = "/opt/webagent/openclaw/config/openclaw.json5"
             updated = list(raw_lines)
             replaced_gateway = False
+            replaced_hooks = False
             replaced_cfg_path = False
             next_lines = []
             for line in updated:
                 if line.startswith("OPENCLAW_GATEWAY_TOKEN="):
                     next_lines.append(f"OPENCLAW_GATEWAY_TOKEN={token}")
                     replaced_gateway = True
+                elif line.startswith("OPENCLAW_HOOKS_TOKEN="):
+                    next_lines.append(f"OPENCLAW_HOOKS_TOKEN={hooks_token}")
+                    replaced_hooks = True
                 elif line.startswith("OPENCLAW_CONFIG_PATH="):
                     next_lines.append(f"OPENCLAW_CONFIG_PATH={cfg_env_path}")
                     replaced_cfg_path = True
@@ -129,12 +139,13 @@ jobs:
                 if next_lines and next_lines[-1].strip():
                     next_lines.append("")
                 next_lines.append(f"OPENCLAW_GATEWAY_TOKEN={token}")
+            if not replaced_hooks:
+                next_lines.append(f"OPENCLAW_HOOKS_TOKEN={hooks_token}")
             if not replaced_cfg_path:
                 next_lines.append(f"OPENCLAW_CONFIG_PATH={cfg_env_path}")
             updated = next_lines
 
             env_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
-            hooks_token = token
 
             cfg_path = Path("/opt/webagent/openclaw/config/openclaw.json5")
             if cfg_path.exists():

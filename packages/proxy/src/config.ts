@@ -11,6 +11,7 @@ export interface ProxyConfig {
   databaseUrl: string;
   openClawGatewayUrl: string;
   openClawGatewayToken: string;
+  openClawHooksToken: string;
 }
 
 function getRequiredEnv(name: string): string {
@@ -39,6 +40,11 @@ function getGatewayToken(): string {
   return token;
 }
 
+function getHooksToken(gatewayToken: string): string {
+  const hooksToken = process.env.OPENCLAW_HOOKS_TOKEN?.trim();
+  return hooksToken || gatewayToken;
+}
+
 function getGatewayUrl(): string {
   const raw = process.env.OPENCLAW_GATEWAY_URL?.trim();
   if (!raw) {
@@ -56,10 +62,13 @@ export function loadConfig(): ProxyConfig {
     throw new Error('PORT must be a positive integer when provided');
   }
 
+  const gatewayToken = getGatewayToken();
+
   return {
     port: parsedPort,
     databaseUrl: getRequiredEnv('DATABASE_URL'),
     openClawGatewayUrl: getGatewayUrl(),
-    openClawGatewayToken: getGatewayToken()
+    openClawGatewayToken: gatewayToken,
+    openClawHooksToken: getHooksToken(gatewayToken),
   };
 }

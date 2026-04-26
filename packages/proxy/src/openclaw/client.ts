@@ -776,6 +776,7 @@ export class OpenClawClient {
   private gatewayWsUrl: string;
   private hooksWakeUrl: string;
   private token: string;
+  private hooksToken: string;
   private tokenCandidates: string[];
 
   constructor(gatewayUrl?: string, token?: string) {
@@ -795,6 +796,7 @@ export class OpenClawClient {
       process.env.PROXY_API_TOKEN,
     ]);
     this.token = this.tokenCandidates[0] ?? config.openClawGatewayToken;
+    this.hooksToken = process.env.OPENCLAW_HOOKS_TOKEN?.trim() || config.openClawHooksToken;
   }
 
   /**
@@ -904,7 +906,7 @@ export class OpenClawClient {
     const res = await fetch(this.hooksWakeUrl, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${this.token}`,
+        'Authorization': `Bearer ${this.hooksToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ text, mode }),
@@ -917,7 +919,7 @@ export class OpenClawClient {
       const res = await fetch(this.hooksWakeUrl, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${this.token}`,
+          'Authorization': `Bearer ${this.hooksToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ text: 'health-check', mode: 'next-heartbeat' }),
