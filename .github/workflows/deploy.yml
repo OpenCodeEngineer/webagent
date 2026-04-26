@@ -32,7 +32,7 @@ jobs:
 
             echo "→ Aligning gateway auth token..."
             python3 - <<'PY'
-            import re
+            import subprocess
             from pathlib import Path
 
             env_path = Path("/opt/webagent/.env")
@@ -47,68 +47,51 @@ jobs:
                     continue
                 key, value = line.split("=", 1)
                 pairs.append((key.strip(), value))
+            env_map = {key: value.strip() for key, value in pairs if value.strip()}
 
-            token = None
-            for key in ("PROXY_CUSTOMER_API_TOKEN", "PROXY_API_TOKEN"):
-                for existing_key, existing_value in pairs:
-                    if existing_key == key and existing_value.strip():
-                        token = existing_value.strip()
-                        break
-                if token:
-                    break
+            def read_gateway_token_from_process():
+                try:
+                    pid = subprocess.check_output(
+                        ["systemctl", "show", "-p", "MainPID", "--value", "openclaw-gateway"],
+                        text=True,
+                    ).strip()
+                    if not pid or pid == "0":
+                        return None
+                    raw = Path(f"/proc/{pid}/environ").read_bytes()
+                    for chunk in raw.split(b"\x00"):
+                        if chunk.startswith(b"OPENCLAW_GATEWAY_TOKEN="):
+                            token = chunk.split(b"=", 1)[1].decode("utf-8", "ignore").strip()
+                            return token or None
+                except Exception:
+                    return None
+                return None
+
+            token = (
+                read_gateway_token_from_process()
+                or env_map.get("OPENCLAW_GATEWAY_TOKEN")
+                or env_map.get("PROXY_CUSTOMER_API_TOKEN")
+                or env_map.get("PROXY_API_TOKEN")
+            )
 
             if not token:
                 raise SystemExit(0)
 
-            updates = {
-                "OPENCLAW_GATEWAY_TOKEN": token,
-                "OPENCLAW_CONFIG_PATH": "/opt/webagent/openclaw/config/openclaw.json5",
-                "OPENCLAW_GATEWAY_URL": "ws://127.0.0.1:18789",
-            }
-
-            updated = list(raw_lines)
-            for key, value in updates.items():
-                replaced = False
-                next_lines = []
-                for line in updated:
-                    if line.startswith(f"{key}="):
-                        next_lines.append(f"{key}={value}")
-                        replaced = True
-                    else:
-                        next_lines.append(line)
-                if not replaced:
-                    if next_lines and next_lines[-1].strip():
-                        next_lines.append("")
-                    next_lines.append(f"{key}={value}")
-                updated = next_lines
+            updated = [line for line in raw_lines if not line.startswith("OPENCLAW_CONFIG_PATH=")]
+            replaced = False
+            next_lines = []
+            for line in updated:
+                if line.startswith("OPENCLAW_GATEWAY_TOKEN="):
+                    next_lines.append(f"OPENCLAW_GATEWAY_TOKEN={token}")
+                    replaced = True
+                else:
+                    next_lines.append(line)
+            if not replaced:
+                if next_lines and next_lines[-1].strip():
+                    next_lines.append("")
+                next_lines.append(f"OPENCLAW_GATEWAY_TOKEN={token}")
+            updated = next_lines
 
             env_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
-
-            # Keep OpenClaw runtime config aligned when it uses a user-home config file.
-            config_candidates = [
-                Path("/home/openclaw/.openclaw/config/openclaw.json5"),
-                Path("/home/openclaw/openclaw/config/openclaw.json5"),
-                Path("/opt/webagent/openclaw/config/openclaw.json5"),
-            ]
-            for cfg_path in config_candidates:
-                if not cfg_path.exists():
-                    continue
-                raw = cfg_path.read_text(encoding="utf-8")
-                next_raw = raw
-                next_raw = re.sub(
-                    r'(auth\\s*:\\s*\\{[\\s\\S]*?token\\s*:\\s*)"(?:[^"\\\\]|\\\\.)*"',
-                    rf'\\1"{token}"',
-                    next_raw,
-                    count=1,
-                )
-                next_raw = re.sub(
-                    r'(remote\\s*:\\s*\\{[\\s\\S]*?token\\s*:\\s*)"(?:[^"\\\\]|\\\\.)*"',
-                    rf'\\1"{token}"',
-                    next_raw,
-                    count=1,
-                )
-                if next_raw != raw:
-                    cfg_path.write_text(next_raw, encoding="utf-8")
             PY
 
             echo "→ Installing dependencies..."
