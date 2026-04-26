@@ -32,6 +32,7 @@ jobs:
 
             echo "→ Aligning gateway auth token..."
             python3 - <<'PY'
+            import re
             from pathlib import Path
 
             env_path = Path("/opt/webagent/.env")
@@ -74,6 +75,31 @@ jobs:
                 updated.append(f"OPENCLAW_GATEWAY_TOKEN={token}")
 
             env_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+
+            # Keep OpenClaw runtime config aligned when it uses a user-home config file.
+            config_candidates = [
+                Path("/home/openclaw/openclaw/config/openclaw.json5"),
+                Path("/opt/webagent/openclaw/config/openclaw.json5"),
+            ]
+            for cfg_path in config_candidates:
+                if not cfg_path.exists():
+                    continue
+                raw = cfg_path.read_text(encoding="utf-8")
+                next_raw = raw
+                next_raw = re.sub(
+                    r'(auth\\s*:\\s*\\{[\\s\\S]*?token\\s*:\\s*)"(?:[^"\\\\]|\\\\.)*"',
+                    rf'\\1"{token}"',
+                    next_raw,
+                    count=1,
+                )
+                next_raw = re.sub(
+                    r'(remote\\s*:\\s*\\{[\\s\\S]*?token\\s*:\\s*)"(?:[^"\\\\]|\\\\.)*"',
+                    rf'\\1"{token}"',
+                    next_raw,
+                    count=1,
+                )
+                if next_raw != raw:
+                    cfg_path.write_text(next_raw, encoding="utf-8")
             PY
 
             echo "→ Installing dependencies..."
