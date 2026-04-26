@@ -30,6 +30,52 @@ jobs:
             echo "→ Fixing permissions..."
             chown -R openclaw:openclaw . 2>/dev/null || true
 
+            echo "→ Aligning gateway auth token..."
+            python3 - <<'PY'
+            from pathlib import Path
+
+            env_path = Path("/opt/webagent/.env")
+            if not env_path.exists():
+                raise SystemExit(0)
+
+            raw_lines = env_path.read_text(encoding="utf-8").splitlines()
+            pairs = []
+            for line in raw_lines:
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                pairs.append((key.strip(), value))
+
+            token = None
+            for key in ("PROXY_CUSTOMER_API_TOKEN", "PROXY_API_TOKEN"):
+                for existing_key, existing_value in pairs:
+                    if existing_key == key and existing_value.strip():
+                        token = existing_value.strip()
+                        break
+                if token:
+                    break
+
+            if not token:
+                raise SystemExit(0)
+
+            updated = []
+            replaced = False
+            for line in raw_lines:
+                if line.startswith("OPENCLAW_GATEWAY_TOKEN="):
+                    updated.append(f"OPENCLAW_GATEWAY_TOKEN={token}")
+                    replaced = True
+                else:
+                    updated.append(line)
+
+            if not replaced:
+                if updated and updated[-1].strip():
+                    updated.append("")
+                updated.append(f"OPENCLAW_GATEWAY_TOKEN={token}")
+
+            env_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+            PY
+
             echo "→ Installing dependencies..."
             sudo -u openclaw bash -c "cd ${APP_DIR} && CI=1 pnpm install --frozen-lockfile --prod=false --force"
 
