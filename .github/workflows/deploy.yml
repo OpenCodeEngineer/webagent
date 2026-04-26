@@ -25,9 +25,51 @@ jobs:
             cd "${APP_DIR}"
 
             echo "→ Pulling latest code..."
+            # Preserve runtime openclaw config (proxy adds agents at runtime)
+            cp openclaw/config/openclaw.json5 /tmp/openclaw-runtime.json5 2>/dev/null || true
             git checkout -- . 2>/dev/null || true
             git clean -fd openclaw/config/ 2>/dev/null || true
             git pull origin main
+            # Merge runtime-registered agents back into git config
+            if [ -f /tmp/openclaw-runtime.json5 ]; then
+              python3 - <<'MERGE_PY'
+import json, re, sys
+from pathlib import Path
+
+git_path = Path("/opt/webagent/openclaw/config/openclaw.json5")
+runtime_path = Path("/tmp/openclaw-runtime.json5")
+
+def parse_json5(text):
+    """Strip JSON5 features to parse as JSON"""
+    t = re.sub(r'//.*$', '', text, flags=re.MULTILINE)
+    t = re.sub(r'/\*[\s\S]*?\*/', '', t)
+    t = re.sub(r',\s*([\]}])', r'\1', t)
+    t = re.sub(r'(?<=[{,]\s*)([a-zA-Z_]\w*)\s*:', r'"\1":', t)
+    return json.loads(t)
+
+try:
+    git_cfg = parse_json5(git_path.read_text())
+    runtime_cfg = parse_json5(runtime_path.read_text())
+    
+    git_agents = {a["id"] for a in git_cfg.get("agents", {}).get("list", [])}
+    runtime_list = runtime_cfg.get("agents", {}).get("list", [])
+    
+    added = []
+    for agent in runtime_list:
+        if agent["id"] not in git_agents:
+            git_cfg["agents"]["list"].append(agent)
+            added.append(agent["id"])
+    
+    if added:
+        git_path.write_text(json.dumps(git_cfg, indent=2))
+        print(f"Merged {len(added)} runtime agents: {', '.join(added)}")
+    else:
+        print("No runtime agents to merge")
+except Exception as e:
+    print(f"Agent merge skipped: {e}")
+MERGE_PY
+              rm -f /tmp/openclaw-runtime.json5
+            fi
 
             echo "→ Fixing permissions..."
             chown -R openclaw:openclaw . 2>/dev/null || true

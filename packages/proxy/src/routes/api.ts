@@ -6,6 +6,7 @@ import { execFile } from 'node:child_process';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { and, count, eq, ne } from 'drizzle-orm';
 import { z } from 'zod';
+import JSON5 from 'json5';
 import { OpenClawClient } from '../openclaw/client.js';
 import { buildAgentSessionKey } from '../openclaw/sessions.js';
 import { agents, auditLog, customers, widgetEmbeds, widgetSessions } from '../db/schema.js';
@@ -256,13 +257,7 @@ async function registerAgentInOpenClaw(
   try {
     try {
       const raw = await readFile(configPath, 'utf8');
-      // Strip JSON5 features (single-line comments, multi-line comments, trailing commas, unquoted keys)
-      const jsonStr = raw
-        .replace(/\/\/.*$/gm, '')                           // single-line comments
-        .replace(/\/\*[\s\S]*?\*\//g, '')                   // multi-line comments
-        .replace(/,\s*([\]}])/g, '$1')                      // trailing commas
-        .replace(/(?<=[{,]\s*)([a-zA-Z_]\w*)\s*:/g, '"$1":'); // unquoted keys
-      const config = JSON.parse(jsonStr) as {
+      const config = JSON5.parse(raw) as {
         agents?: { list?: Array<{ id: string; [k: string]: unknown }> };
         [k: string]: unknown;
       };

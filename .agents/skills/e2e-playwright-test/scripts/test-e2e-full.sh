@@ -34,9 +34,9 @@ PASSED=0; FAILED=0; SKIPPED=0
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 log()  { echo -e "$*" >&2; }
-pass() { echo -e "${GREEN}✓ PASS${NC}: $1"; ((PASSED++)); }
-fail() { echo -e "${RED}✗ FAIL${NC}: $1 — $2"; ((FAILED++)); }
-skip() { echo -e "${YELLOW}○ SKIP${NC}: $1 — $2"; ((SKIPPED++)); }
+pass() { echo -e "${GREEN}✓ PASS${NC}: $1"; (( ++PASSED )); }
+fail() { echo -e "${RED}✗ FAIL${NC}: $1 — $2"; (( ++FAILED )); }
+skip() { echo -e "${YELLOW}○ SKIP${NC}: $1 — $2"; (( ++SKIPPED )); }
 
 banner() {
   echo ""
@@ -165,9 +165,9 @@ test_widget_js() {
   fi
 }
 
-test_health
-test_health_openclaw
-test_widget_js
+test_health || true
+test_health_openclaw || true
+test_widget_js || true
 
 ###############################################################################
 # PHASE 2 — Agent Creation via Meta-Agent
@@ -351,9 +351,9 @@ test_meta_create() {
   pass "T6: Meta-agent create → agent=$AGENT_SLUG, embedToken=${EMBED_TOKEN:0:12}…"
 }
 
-test_meta_greeting
-test_meta_describe
-test_meta_create
+test_meta_greeting || true
+test_meta_describe || true
+test_meta_create || true
 
 ###############################################################################
 # PHASE 3 — Agent Verification
@@ -458,8 +458,8 @@ test_workspace_files() {
   fi
 }
 
-test_list_agents
-test_workspace_files
+test_list_agents || true
+test_workspace_files || true
 
 ###############################################################################
 # PHASE 4 — Widget Chat (WebSocket)
@@ -632,8 +632,8 @@ ws.on('close', () => process.exit(0));
   fi
 }
 
-test_ws_auth
-test_ws_chat
+test_ws_auth || true
+test_ws_chat || true
 
 ###############################################################################
 # PHASE 5 — Security Gates
@@ -745,9 +745,9 @@ test_unauth_pages() {
   fi
 }
 
-test_unauth_api
-test_ws_invalid_token
-test_unauth_pages
+test_unauth_api || true
+test_ws_invalid_token || true
+test_unauth_pages || true
 
 ###############################################################################
 # PHASE 6 — Website Discovery Verification
@@ -800,7 +800,7 @@ test_meta_discovery() {
   fi
 }
 
-test_meta_discovery
+test_meta_discovery || true
 
 ###############################################################################
 # RESULTS SUMMARY
