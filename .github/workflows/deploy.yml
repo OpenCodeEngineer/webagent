@@ -26,6 +26,7 @@ jobs:
 
             echo "→ Pulling latest code..."
             git pull origin main
+            git checkout -- openclaw/config/openclaw.json5 2>/dev/null || true
 
             echo "→ Fixing permissions..."
             chown -R openclaw:openclaw . 2>/dev/null || true
@@ -148,19 +149,19 @@ jobs:
                 next_raw = raw
                 next_raw = re.sub(
                     r"""(["']?auth["']?\s*:\s*\{[\s\S]*?["']?token["']?\s*:\s*)['"][^'"]*['"]""",
-                    rf'\\1"{token}"',
+                    rf'\1"{token}"',
                     next_raw,
                     count=1,
                 )
                 next_raw = re.sub(
                     r"""(["']?remote["']?\s*:\s*\{[\s\S]*?["']?token["']?\s*:\s*)['"][^'"]*['"]""",
-                    rf'\\1"{token}"',
+                    rf'\1"{token}"',
                     next_raw,
                     count=1,
                 )
                 next_raw = re.sub(
                     r"""(["']?hooks["']?\s*:\s*\{[\s\S]*?["']?token["']?\s*:\s*)['"][^'"]*['"]""",
-                    rf'\\1"{hooks_token}"',
+                    rf'\1"{hooks_token}"',
                     next_raw,
                     count=1,
                 )
