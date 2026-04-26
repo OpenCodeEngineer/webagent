@@ -219,7 +219,7 @@ test_meta_describe() {
   fi
 
   log "  → Describing test business to meta-agent…"
-  local msg="I want to create an AI chat agent for my website vibebrowser.app — it's a browser with built-in AI agent capabilities. Please check it out and create an agent for it."
+  local msg="I want to create a chat agent for vibebrowser.app. Please check the website first and tell me what you find."
   local payload
   payload=$(printf '{"messages":[{"role":"user","content":"%s"}],"sessionId":"%s"}' "$msg" "$SESSION_ID")
 
@@ -251,19 +251,37 @@ test_meta_describe() {
   new_sid=$(json_field "$body" "data.sessionId")
   if [[ -n "$new_sid" ]]; then SESSION_ID="$new_sid"; fi
 
+  # Check if meta-agent eagerly created the agent in this step
+  if [[ "$ai_response" =~ \[AGENT_CREATED::([a-zA-Z0-9_-]+)\] ]]; then
+    AGENT_SLUG="${BASH_REMATCH[1]}"
+    log "    (agent created eagerly in describe step: $AGENT_SLUG)"
+    EMBED_TOKEN=$(json_field "$body" "data.embedToken")
+    local embed_code
+    embed_code=$(json_field "$body" "data.embedCode")
+    if [[ -n "$embed_code" && "$embed_code" != "null" ]]; then
+      PHASE2_OK=true
+    fi
+  fi
+
   pass "T5: Meta-agent describe → ${#ai_response}-char response"
   log "    AI: ${ai_response:0:120}…"
 }
 
 # ── Test 6: Confirm & create agent ───────────────────────────────────────────
 test_meta_create() {
+  # If agent was already created eagerly in T5, skip to validation
+  if [[ "$PHASE2_OK" == "true" && -n "$EMBED_TOKEN" && -n "$AGENT_SLUG" ]]; then
+    pass "T6: Meta-agent create → agent=$AGENT_SLUG (created in describe step), embedToken=${EMBED_TOKEN:0:12}…"
+    return 0
+  fi
+
   if [[ -z "$SESSION_ID" ]]; then
     skip "T6: Meta-agent create" "no sessionId from previous tests"
     return 1
   fi
 
   log "  → Confirming agent creation (this may take 1-2 minutes)…"
-  local msg="Yes, that's correct. Please create the agent."
+  local msg="Yes, that looks correct. Please create the agent now."
   local payload
   payload=$(printf '{"messages":[{"role":"user","content":"%s"}],"sessionId":"%s"}' "$msg" "$SESSION_ID")
 
