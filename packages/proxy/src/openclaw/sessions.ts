@@ -16,16 +16,17 @@ export function buildAgentSessionKey(agentId: string, suffix: string): string {
   return `agent:${normalizeSessionSegment(agentId)}:${normalizeSessionSegment(suffix)}`;
 }
 
-function sessionKey(agentId: string, userId: string): string {
-  return buildAgentSessionKey(agentId, `widget-${agentId}-${userId}`);
+function sessionKey(openclawAgentId: string, userId: string): string {
+  return buildAgentSessionKey(openclawAgentId, `widget-${openclawAgentId}-${userId}`);
 }
 
 export async function getOrCreateSession(
   db: Database,
   agentId: string,
   userId: string,
+  openclawAgentId?: string,
 ): Promise<string> {
-  const openclawSessionKey = sessionKey(agentId, userId);
+  const openclawSessionKey = sessionKey(openclawAgentId || agentId, userId);
 
   await db
     .insert(widgetSessions)

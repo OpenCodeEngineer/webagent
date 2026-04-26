@@ -298,7 +298,7 @@ export function handleConnection(
           state.agentId = tokenData.agentId;
           state.openclawAgentId = tokenData.openclawAgentId;
           try {
-            state.sessionKey = await getOrCreateSession(ctx.db, tokenData.agentId, msg.userId);
+            state.sessionKey = await getOrCreateSession(ctx.db, tokenData.agentId, msg.userId, tokenData.openclawAgentId);
           } catch {
             send(ws, { type: 'auth_error', reason: 'Internal server error' });
             ws.close(1011, 'Internal error');
