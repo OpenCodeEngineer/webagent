@@ -12,17 +12,29 @@
 - Admin: Port 3000  
 - OpenClaw Gateway: Port 18789
 
-### Deploy
-**IMPORTANT:** Commit local changes first, otherwise they will be lost!
-```bash
-git add . && git commit -m "nginx: allow localhost for gateway web fetch"
-./infra/deploy.sh
-```
+### Deploy Workflow (IMPORTANT)
+**NEVER hot-patch the VM directly!** Always modify local files first, commit, then deploy.
+
+1. **Modify local files** in this repo:
+   - Config: `openclaw/config/openclaw.json5` (model settings)
+   - Nginx: `infra/nginx/webagent.conf` (proxy settings)
+
+2. **Commit changes:**
+   ```bash
+   git add . && git commit -m "description of changes"
+   ```
+
+3. **Deploy to VM:**
+   ```bash
+   ./infra/deploy.sh
+   ```
+
+4. **Verify** the changes were applied on VM
 
 ## Azure Models
 - Endpoint: `https://vibe-dev-ai.cognitiveservices.azure.com/openai/v1`
-- Current: `gpt-5.1`
-- Backup: `kimi-k2.5-thinking`
+- Current: `kimi-k2.5-thinking` (better agentic reasoning, cheaper)
+- Backup: `gpt-5.1`
 
 ## Common Issues
 
