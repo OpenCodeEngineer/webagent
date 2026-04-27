@@ -1,4 +1,5 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+import { PassThrough } from 'node:stream';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { OpenClawClient } from '../openclaw/client.js';
@@ -85,8 +86,8 @@ function toAgentId(model: string): string {
   return model === 'meta-agent' ? 'meta' : model;
 }
 
-function writeSseChunk(reply: FastifyReply, payload: unknown): void {
-  reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
+function sseChunk(payload: unknown): string {
+  return `data: ${JSON.stringify(payload)}\n\n`;
 }
 
 export function registerOpenAiCompatRoutes(app: FastifyInstance) {
@@ -114,38 +115,67 @@ export function registerOpenAiCompatRoutes(app: FastifyInstance) {
     const created = Math.floor(Date.now() / 1000);
     const domain = (process.env.AUTH_URL || 'https://dev.lamoom.com').replace(/\/+$/, '');
 
-    let clientDisconnected = false;
-    request.raw.on('close', () => {
-      clientDisconnected = true;
-    });
-
     const openclaw = new OpenClawClient();
     const stream = body.stream === true;
 
-    if (stream) {
-      // Tell Fastify we're taking over the response (SSE)
-      reply.hijack();
-      reply.raw.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      });
+    if (!stream) {
+      // Non-streaming: simple request-response
+      try {
+        const response = await openclaw.sendMessage({
+          message: lastUserMessage,
+          agentId,
+          sessionKey,
+          name: 'openai-compat',
+          timeoutSeconds: 240,
+        });
 
-      if (!clientDisconnected) {
-        writeSseChunk(reply, {
+        if (!response.success) {
+          return sendOpenAiError(reply, 502, response.error || 'Upstream agent error');
+        }
+
+        const finalResponse = response.response ?? '';
+        await detectAgentCreation(finalResponse, customerId, app, domain);
+
+        return reply.send({
           id: completionId,
-          object: 'chat.completion.chunk',
+          object: 'chat.completion',
           created,
           model,
-          choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }],
+          choices: [
+            {
+              index: 0,
+              message: { role: 'assistant', content: finalResponse },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
         });
+      } catch (error) {
+        request.log.error({ error }, 'openai-compat non-stream error');
+        return sendOpenAiError(reply, 503, 'OpenClaw service unavailable');
       }
     }
 
+    // Streaming: use a PassThrough stream piped through Fastify's reply.send()
+    const sse = new PassThrough();
+
+    reply
+      .header('Content-Type', 'text/event-stream')
+      .header('Cache-Control', 'no-cache')
+      .header('Connection', 'keep-alive')
+      .header('X-Accel-Buffering', 'no')
+      .send(sse);
+
+    // Initial role chunk
+    sse.write(sseChunk({
+      id: completionId,
+      object: 'chat.completion.chunk',
+      created,
+      model,
+      choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }],
+    }));
+
     try {
-      // Don't use onDelta — just await the full response and emit as SSE.
-      // OpenClaw's WS event runIds don't match our subscription, so real-time
-      // streaming doesn't work. Buffered response is fine for agent creation.
       const response = await openclaw.sendMessage({
         message: lastUserMessage,
         agentId,
@@ -154,85 +184,34 @@ export function registerOpenAiCompatRoutes(app: FastifyInstance) {
         timeoutSeconds: 240,
       });
 
-      if (!response.success) {
-        if (stream && !clientDisconnected) {
-          writeSseChunk(reply, {
-            id: completionId,
-            object: 'chat.completion.chunk',
-            created,
-            model,
-            choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-          });
-          reply.raw.write('data: [DONE]\n\n');
-          reply.raw.end();
-          return;
-        }
-        return sendOpenAiError(reply, 502, response.error || 'Upstream agent error');
+      const finalResponse = response.success ? (response.response ?? '') : '';
+      if (response.success) {
+        await detectAgentCreation(finalResponse, customerId, app, domain);
       }
 
-      const finalResponse = response.response ?? '';
-      await detectAgentCreation(finalResponse, customerId, app, domain);
-
-      if (stream) {
-        if (!clientDisconnected) {
-          if (finalResponse) {
-            writeSseChunk(reply, {
-              id: completionId,
-              object: 'chat.completion.chunk',
-              created,
-              model,
-              choices: [{ index: 0, delta: { content: finalResponse }, finish_reason: null }],
-            });
-          }
-          writeSseChunk(reply, {
-            id: completionId,
-            object: 'chat.completion.chunk',
-            created,
-            model,
-            choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-          });
-          reply.raw.write('data: [DONE]\n\n');
-          reply.raw.end();
-        }
-        return;
+      if (finalResponse) {
+        sse.write(sseChunk({
+          id: completionId,
+          object: 'chat.completion.chunk',
+          created,
+          model,
+          choices: [{ index: 0, delta: { content: finalResponse }, finish_reason: null }],
+        }));
       }
-
-      return reply.send({
-        id: completionId,
-        object: 'chat.completion',
-        created,
-        model,
-        choices: [
-          {
-            index: 0,
-            message: { role: 'assistant', content: finalResponse },
-            finish_reason: 'stop',
-          },
-        ],
-        usage: {
-          prompt_tokens: 0,
-          completion_tokens: 0,
-          total_tokens: 0,
-        },
-      });
     } catch (error) {
-      request.log.error({ error }, 'openai compatibility route failed');
-      if (stream) {
-        if (!clientDisconnected) {
-          writeSseChunk(reply, {
-            id: completionId,
-            object: 'chat.completion.chunk',
-            created,
-            model,
-            choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-          });
-          reply.raw.write('data: [DONE]\n\n');
-          reply.raw.end();
-        }
-        return;
-      }
-      return sendOpenAiError(reply, 503, 'OpenClaw service unavailable');
+      request.log.error({ error }, 'openai-compat stream error');
     }
+
+    // Finish
+    sse.write(sseChunk({
+      id: completionId,
+      object: 'chat.completion.chunk',
+      created,
+      model,
+      choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+    }));
+    sse.write('data: [DONE]\n\n');
+    sse.end();
   });
 
   app.get('/v1/models', async () => {
