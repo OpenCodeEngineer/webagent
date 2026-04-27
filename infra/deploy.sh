@@ -194,6 +194,27 @@ if "location /api/auth/" not in "\n".join(lines):
             break
     lines[insert_pos:insert_pos] = auth_block
 
+if "location /sso/" not in "\n".join(lines):
+    proxy_upstream = "proxy_upstream"
+    sso_block = [
+        "    # SSO / identity routes (inserted by infra/deploy.sh)",
+        "    location /sso/ {",
+        f"        proxy_pass http://{proxy_upstream};",
+        "        proxy_read_timeout 300s;",
+        "        proxy_send_timeout 300s;",
+        "        proxy_buffering on;",
+        "        limit_req zone=api_limit burst=60 nodelay;",
+        "        limit_req_status 429;",
+        "    }",
+        "",
+    ]
+    insert_pos = len(lines)
+    for i, line in enumerate(lines):
+        if re.search(r'^\s*location\s+/\s*\{', line):
+            insert_pos = i
+            break
+    lines[insert_pos:insert_pos] = sso_block
+
 new_text = "\n".join(lines) + "\n"
 if new_text != text:
     path.write_text(new_text, encoding="utf-8")
