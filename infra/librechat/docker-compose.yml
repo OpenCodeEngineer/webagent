@@ -1,0 +1,42 @@
+# LibreChat + MongoDB for Lamoom Admin Chat UI
+# Runs alongside our Fastify proxy on the same VM.
+# LibreChat connects to our proxy via custom endpoint (host.docker.internal:3001/v1).
+
+services:
+  api:
+    image: registry.librechat.ai/danny-avila/librechat:latest
+    container_name: lamoom-librechat
+    restart: unless-stopped
+    ports:
+      - "3080:3080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - mongodb
+    env_file:
+      - .env
+    volumes:
+      - type: bind
+        source: ./librechat.yaml
+        target: /app/librechat.yaml
+      - ./uploads:/app/uploads
+      - ./logs:/app/logs
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  mongodb:
+    image: mongo:8.0
+    container_name: lamoom-mongodb
+    restart: unless-stopped
+    volumes:
+      - mongodb_data:/data/db
+    command: mongod --noauth
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+volumes:
+  mongodb_data:

@@ -7,6 +7,7 @@ import { dbPlugin } from './db/plugin.js';
 import { registerApiRoutes } from './routes/api.js';
 import { registerAdminApiRoutes } from './routes/admin-api.js';
 import { registerHealthRoutes } from './routes/health.js';
+import { registerOpenAiCompatRoutes } from './routes/openai-compat.js';
 import { registerWidgetRoutes } from './routes/widget.js';
 import { handleConnection } from './ws/handler.js';
 import { DEFAULT_WS_PATH } from '@webagent/shared/constants';
@@ -30,6 +31,7 @@ registerHealthRoutes(app);
 registerWidgetRoutes(app);
 registerApiRoutes(app);
 registerAdminApiRoutes(app);
+registerOpenAiCompatRoutes(app);
 
 app.get(DEFAULT_WS_PATH, { websocket: true }, (socket, request) => {
   const ip = request.ip;
