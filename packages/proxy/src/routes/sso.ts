@@ -9,7 +9,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
  *   2. Next.js API route calls POST /sso/librechat/code (this file) → returns signed code
  *   3. Admin loads iframe src="/sso/librechat?code=xxx"
  *   4. This endpoint validates code, provisions+logs in LibreChat user, returns HTML bridge
- *   5. Bridge sets localStorage token and redirects to /chat/c/new (LibreChat)
+ *   5. Bridge sets localStorage token and redirects to /c/new (LibreChat)
  */
 
 type SsoCodePayload = {
@@ -174,8 +174,9 @@ export function registerSsoRoutes(app: FastifyInstance) {
       request.log.warn({ err }, 'LibreChat register call failed (user may already exist)');
     }
 
-    // Login
+    // Login — capture response cookies for HttpOnly auth (LibreChat ≥ 0.7)
     let librechatToken = '';
+    const setCookieHeaders: string[] = [];
     try {
       const loginRes = await fetch(`${librechatUrl}/api/auth/login`, {
         method: 'POST',
@@ -185,6 +186,11 @@ export function registerSsoRoutes(app: FastifyInstance) {
       if (!loginRes.ok) {
         request.log.error({ status: loginRes.status }, 'LibreChat login failed');
         return reply.status(502).type('text/html').send(errorPage('Chat service authentication failed'));
+      }
+      // Forward Set-Cookie headers from LibreChat (refreshToken, token_provider)
+      const rawCookies = loginRes.headers.getSetCookie?.() ?? [];
+      for (const cookie of rawCookies) {
+        setCookieHeaders.push(cookie);
       }
       const loginData = (await loginRes.json()) as { token?: string };
       librechatToken = typeof loginData.token === 'string' ? loginData.token : '';
@@ -197,7 +203,12 @@ export function registerSsoRoutes(app: FastifyInstance) {
       return reply.status(502).type('text/html').send(errorPage('Chat service returned no token'));
     }
 
-    // Return HTML bridge: sets localStorage, redirects to LibreChat
+    // Forward LibreChat's auth cookies to the browser
+    for (const cookie of setCookieHeaders) {
+      void reply.header('Set-Cookie', cookie);
+    }
+
+    // Return HTML bridge: sets localStorage token + redirects to LibreChat
     const tokenJson = JSON.stringify(librechatToken);
     return reply.type('text/html').send(`<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Loading chat...</title>
@@ -209,7 +220,7 @@ export function registerSsoRoutes(app: FastifyInstance) {
 <script>
 try{localStorage.setItem("token",${tokenJson});
 }catch(e){console.error("SSO bridge:",e)}
-window.location.replace("/chat/c/new");
+window.location.replace("/c/new");
 </script></body></html>`);
   });
 }
