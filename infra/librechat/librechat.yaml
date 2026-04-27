@@ -11,8 +11,6 @@ endpoints:
     disabled: true
   assistants:
     disabled: true
-  gptPlugins:
-    disabled: true
   custom:
     - name: "Lamoom Agent Builder"
       apiKey: "${LIBRECHAT_API_KEY}"

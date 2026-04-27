@@ -122,6 +122,9 @@ chown -R openclaw:openclaw "${APP_DIR}" 2>/dev/null || true
 echo "→ Installing dependencies..."
 sudo -u openclaw bash -lc "cd '${APP_DIR}' && CI=1 pnpm install --frozen-lockfile --prod=false"
 
+echo "→ Cleaning stale tsbuildinfo caches..."
+find "${APP_DIR}/packages" -name 'tsconfig.tsbuildinfo' -delete 2>/dev/null || true
+
 echo "→ Building packages..."
 sudo -u openclaw bash -lc "cd '${APP_DIR}' && pnpm build"
 
