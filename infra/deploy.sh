@@ -128,14 +128,7 @@ find "${APP_DIR}/packages" -name 'tsconfig.tsbuildinfo' -delete 2>/dev/null || t
 echo "→ Building packages..."
 sudo -u openclaw bash -lc "cd '${APP_DIR}' && pnpm build"
 
-echo "→ Copying Next.js static assets into standalone bundle..."
-STATIC_SRC="${APP_DIR}/packages/admin/.next/static"
-STATIC_DST="${APP_DIR}/packages/admin/.next/standalone/packages/admin/.next/static"
-if [[ -d "${STATIC_SRC}" ]]; then
-  rm -rf "${STATIC_DST}"
-  mkdir -p "${STATIC_DST}"
-  cp -R "${STATIC_SRC}/." "${STATIC_DST}/"
-fi
+bash "${APP_DIR}/infra/admin-static-sync.sh" sync "${APP_DIR}"
 
 echo "→ Running DB migrations..."
 sudo -u openclaw bash -lc "cd '${APP_DIR}' && pnpm --filter @webagent/proxy db:migrate" || true
@@ -235,6 +228,9 @@ sleep 4
 echo "→ Health checks..."
 curl -sf http://127.0.0.1:3001/health >/dev/null
 curl -sf http://127.0.0.1:3000/ >/dev/null
+
+echo "→ Blocking static asset smoke check..."
+bash "${APP_DIR}/infra/admin-static-sync.sh" check http://127.0.0.1:3000
 
 OPENCLAW_HEALTH=""
 for _ in $(seq 1 30); do

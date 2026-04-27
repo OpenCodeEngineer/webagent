@@ -10,6 +10,7 @@ REPO_URL="${REPO_URL:-https://github.com/OpenCodeEngineer/webagent.git}"
 DOMAIN="${DOMAIN:-webagent.example.com}"
 APP_USER="openclaw"
 APP_DIR="/home/${APP_USER}/webagent"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ── 1. System packages ────────────────────────────────────────────────────────
 apt-get update -y
@@ -56,14 +57,12 @@ sudo -u "${APP_USER}" bash -c "cd ${APP_DIR} && pnpm build"
 
 # ── 7b2. Copy Next.js static assets into standalone output ───────────────────
 # Next.js standalone mode does NOT include _next/static — must be copied manually
-cp -r "${APP_DIR}/packages/admin/.next/static" \
-      "${APP_DIR}/packages/admin/.next/standalone/packages/admin/.next/static"
+bash "${SCRIPT_DIR}/admin-static-sync.sh" sync "${APP_DIR}"
 
 # ── 7c. Run database migrations ───────────────────────────────────────────────
 sudo -u "${APP_USER}" bash -c "cd ${APP_DIR} && pnpm --filter @webagent/proxy db:migrate"
 
 # ── 8. Nginx configuration ────────────────────────────────────────────────────
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cp "${SCRIPT_DIR}/nginx/webagent.conf" /etc/nginx/sites-available/webagent.conf
 sed -i "s/\${DOMAIN}/${DOMAIN}/g" /etc/nginx/sites-available/webagent.conf
 ln -sf /etc/nginx/sites-available/webagent.conf /etc/nginx/sites-enabled/webagent.conf
