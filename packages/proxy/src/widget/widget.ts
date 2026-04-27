@@ -66,8 +66,18 @@
       .lamoom-title { font-size: 14px; font-weight: 600; color: #f9fafb; }
       .lamoom-close { border: 0; background: transparent; color: #94a3b8; font-size: 20px; line-height: 1; cursor: pointer; }
       .lamoom-messages { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; background: #020617; }
-      .lamoom-message { max-width: 82%; padding: 10px 12px; border-radius: 14px; font-size: 14px; line-height: 1.35; white-space: pre-wrap; }
+      .lamoom-message { max-width: 82%; padding: 10px 12px; border-radius: 14px; font-size: 14px; line-height: 1.35; word-wrap: break-word; }
       .lamoom-assistant { align-self: flex-start; background: #1f2937; color: #e5e7eb; border-bottom-left-radius: 4px; }
+      .lamoom-assistant a { color: #60a5fa; text-decoration: underline; }
+      .lamoom-assistant a:hover { color: #93c5fd; }
+      .lamoom-inline-code { background: #374151; padding: 1px 5px; border-radius: 4px; font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 0.9em; }
+      .lamoom-code-block { background: #111827; border: 1px solid #1f2937; border-radius: 8px; padding: 10px 12px; overflow-x: auto; font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 0.85em; margin: 6px 0; white-space: pre-wrap; }
+      .lamoom-code-block code { background: none; padding: 0; }
+      .lamoom-assistant ul, .lamoom-assistant ol { margin: 4px 0; padding-left: 20px; }
+      .lamoom-assistant li { margin: 2px 0; }
+      .lamoom-assistant strong { color: #f9fafb; }
+      .lamoom-heading { display: block; margin: 8px 0 4px; font-size: 1.05em; }
+      .lamoom-assistant p { margin: 4px 0; }
       .lamoom-user { align-self: flex-end; background: #2563eb; color: #fff; border-bottom-right-radius: 4px; }
       .lamoom-error { background: #7f1d1d; color: #fee2e2; }
       .lamoom-input { display: flex; gap: 8px; padding: 12px; border-top: 1px solid #1f2937; background: #1a1a2e; }
@@ -128,26 +138,139 @@
   let panelOpen = false;
   let manualClose = false;
   let typingNode: { remove: () => void } | null = null;
-  let streamingAssistantNode: { textContent: string | null } | null = null;
+  type MessageNode = { textContent: string | null; innerHTML: string };
+  let streamingAssistantNode: MessageNode | null = null;
+  let streamingRawText = '';
   const pendingMessages: string[] = [];
 
   const scrollToBottom = (): void => {
     messages.scrollTop = messages.scrollHeight;
   };
 
+  const renderMarkdown = (raw: string): string => {
+    const escapeHtml = (input: string): string =>
+      input
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    const applyTokens = (input: string, replacements: Array<{ token: string; html: string }>): string =>
+      replacements.reduce((output, replacement) => output.split(replacement.token).join(replacement.html), input);
+
+    let escaped = escapeHtml(raw);
+    const codeBlocks: Array<{ token: string; html: string }> = [];
+    escaped = escaped.replace(/```([\s\S]*?)(?:```|$)/g, (_match, code: string) => {
+      const token = `@@LAMOOM_CODE_BLOCK_${codeBlocks.length}@@`;
+      codeBlocks.push({
+        token,
+        html: `<pre class="lamoom-code-block"><code>${code}</code></pre>`,
+      });
+      return token;
+    });
+
+    const inlineCodes: Array<{ token: string; html: string }> = [];
+    escaped = escaped.replace(/`([^`\n]+?)`/g, (_match, code: string) => {
+      const token = `@@LAMOOM_INLINE_CODE_${inlineCodes.length}@@`;
+      inlineCodes.push({
+        token,
+        html: `<code class="lamoom-inline-code">${code}</code>`,
+      });
+      return token;
+    });
+
+    escaped = escaped.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (_match, text: string, url: string) => {
+      if (!/^(https?:\/\/|mailto:)/i.test(url)) return text;
+      return `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+    });
+    escaped = escaped.replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, '<strong>$2</strong>');
+    escaped = escaped.replace(/(\*|_)(?=\S)([\s\S]*?\S)\1/g, '<em>$2</em>');
+
+    const paragraphHtml = escaped
+      .split(/\n{2,}/)
+      .map((paragraph) => {
+        const lines = paragraph.split('\n');
+        const parts: string[] = [];
+        const textLines: string[] = [];
+        let listType: 'ul' | 'ol' | null = null;
+        let listItems: string[] = [];
+        const flushText = (): void => {
+          if (textLines.length === 0) return;
+          parts.push(`<p>${textLines.join('<br>')}</p>`);
+          textLines.length = 0;
+        };
+        const flushList = (): void => {
+          if (!listType || listItems.length === 0) return;
+          parts.push(`<${listType}>${listItems.map((item) => `<li>${item}</li>`).join('')}</${listType}>`);
+          listType = null;
+          listItems = [];
+        };
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) {
+            flushText();
+            flushList();
+            continue;
+          }
+          if (/^@@LAMOOM_CODE_BLOCK_\d+@@$/.test(trimmed)) {
+            flushText();
+            flushList();
+            parts.push(trimmed);
+            continue;
+          }
+          const headingMatch = trimmed.match(/^###\s+(.+)$/);
+          if (headingMatch) {
+            flushText();
+            flushList();
+            parts.push(`<strong class="lamoom-heading">${headingMatch[1]}</strong>`);
+            continue;
+          }
+          const unorderedMatch = trimmed.match(/^[-*]\s+(.+)$/);
+          if (unorderedMatch) {
+            flushText();
+            if (listType === 'ol') flushList();
+            listType = 'ul';
+            listItems.push(unorderedMatch[1] ?? '');
+            continue;
+          }
+          const orderedMatch = trimmed.match(/^\d+\.\s+(.+)$/);
+          if (orderedMatch) {
+            flushText();
+            if (listType === 'ul') flushList();
+            listType = 'ol';
+            listItems.push(orderedMatch[1] ?? '');
+            continue;
+          }
+          flushList();
+          textLines.push(line);
+        }
+        flushText();
+        flushList();
+        return parts.join('');
+      })
+      .join('');
+
+    return applyTokens(applyTokens(paragraphHtml, inlineCodes), codeBlocks);
+  };
+
   const createMessage = (
     text: string,
     role: 'assistant' | 'user',
     isError = false,
-  ): { textContent: string | null } => {
+  ): MessageNode => {
     const node = doc.createElement('div');
     node.className = `lamoom-message ${role === 'user' ? 'lamoom-user' : 'lamoom-assistant'}${
       isError ? ' lamoom-error' : ''
     }`;
-    node.textContent = text;
+    if (role === 'assistant') {
+      node.innerHTML = renderMarkdown(text);
+    } else {
+      node.textContent = text;
+    }
     messages.appendChild(node);
     scrollToBottom();
-    return node as { textContent: string | null };
+    return node as MessageNode;
   };
 
   const appendAssistantStream = (delta: string): void => {
@@ -155,29 +278,32 @@
     if (!streamingAssistantNode) {
       streamingAssistantNode = createMessage('', 'assistant');
     }
-    streamingAssistantNode.textContent = `${streamingAssistantNode.textContent ?? ''}${delta}`;
+    streamingRawText += delta;
+    streamingAssistantNode.innerHTML = renderMarkdown(streamingRawText);
     scrollToBottom();
   };
 
   const finishAssistantStream = (finalText: string): void => {
     const normalizedFinal = finalText.trim();
     if (streamingAssistantNode) {
-      if (normalizedFinal) {
-        const existing = (streamingAssistantNode.textContent ?? '').trim();
-        if (!existing || (existing !== normalizedFinal && !normalizedFinal.startsWith(existing))) {
-          streamingAssistantNode.textContent = finalText;
-        }
-      }
+      const resolvedText = normalizedFinal ? finalText : streamingRawText;
+      if (resolvedText) streamingAssistantNode.innerHTML = renderMarkdown(resolvedText);
       streamingAssistantNode = null;
+      streamingRawText = '';
       return;
     }
     if (normalizedFinal) {
       createMessage(finalText, 'assistant');
     }
+    streamingRawText = '';
   };
 
   const resetAssistantStream = (): void => {
+    if (streamingAssistantNode) {
+      streamingAssistantNode.innerHTML = '';
+    }
     streamingAssistantNode = null;
+    streamingRawText = '';
   };
 
   const flushPendingMessages = (): void => {
