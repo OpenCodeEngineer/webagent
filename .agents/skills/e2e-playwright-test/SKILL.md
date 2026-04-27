@@ -1,7 +1,7 @@
 ---
 name: e2e-test
 description: >
-  Browser-based E2E QA for the Lamoom platform. Triggers on "run tests",
+  Browser-based E2E QA for the OpenClaw platform. Triggers on "run tests",
   "run e2e", "test the system", "test end to end", "verify the flow", "smoke test",
   "does it work", "qa check", "test ui", "check the ui".
   Uses vibebrowser/playwright MCP tools to test the real product in a real browser.
@@ -87,7 +87,7 @@ Common cause: DrizzleAdapter table name mismatch (adapter expects singular `acco
    - **CHECK**: Agent list visible (may be empty or have existing agents)
    - **SCREENSHOT**: Take screenshot, verify professional dark theme
 
-### Phase 2: Create Agent Chat — LibreChat Integration
+### Phase 2: Create Agent Chat — Native Chat Integration
 
 1. **Navigate** to `https://dev.lamoom.com/create`
 2. **CHECK**: Page loads with dark background (#171717), header bar shows "Create Agent"
@@ -96,26 +96,26 @@ Common cause: DrizzleAdapter table name mismatch (adapter expects singular `acco
 5. **CHECK**: LibreChat interface visible inside iframe:
    - ✅ Dark theme matching the overall app
    - ✅ Chat input field visible at the bottom
-   - ✅ "Lamoom Agent Builder" or custom endpoint label visible
-   - ❌ FAIL if: LibreChat login/register page shown (SSO bridge failed)
-   - ❌ FAIL if: White/light background (LibreChat theme mismatch)
+   - ✅ Agent builder header or endpoint label visible
+   - ❌ FAIL if: legacy external login/register page is shown (SSO/session bridge failed)
+   - ❌ FAIL if: White/light background (theme mismatch)
    - ❌ FAIL if: "Unable to open AI Chat" error (SSO endpoint failed)
 6. **SCREENSHOT**: Full page with LibreChat loaded in iframe
 7. **Bonus**: Toggle "Legacy chat" button visible — clicking it switches to the old custom chat UI
 
-### Phase 3: Agent Creation Conversation (via LibreChat)
+### Phase 3: Agent Creation Conversation (via native chat)
 
 1. **Click** into the LibreChat message input inside the iframe
 2. **Type** a real website description:
-   > "I want to create an AI chat agent for vibebrowser.app — it's a browser with built-in AI capabilities."
+   > "I want to create an AI chat agent for openclaw.vibebrowser.app/console — it's the OpenClaw Console for managing AI agents with tenant management, agent creation, and admin features."
 3. **Press Enter** to send
 4. **CHECK**: Message appears in LibreChat conversation (markdown rendered)
-5. **Wait** for meta-agent response (up to 180s) — LibreChat shows streaming indicator
-6. **CHECK — CRITICAL (Website Discovery)**: The response MUST prove the meta-agent fetched vibebrowser.app:
-   - Mentions specific details about the product (browser, AI, automation, etc.)
+5. **Wait** for meta-agent response (up to 180s) — native chat shows streaming indicator
+6. **CHECK — CRITICAL (Website Discovery)**: The response MUST prove the meta-agent fetched openclaw.vibebrowser.app/console:
+   - Mentions specific details about the product (console, tenant management, admin, agent creation)
    - NOT just generic "I'll help you create an agent" without site-specific info
    - This is the core product promise — if the agent doesn't proactively discover, it FAILS
-7. **CHECK — Markdown**: Response renders with proper markdown formatting (headings, bold, lists, code blocks) — this is a key benefit of LibreChat over the old custom chat
+7. **CHECK — Markdown**: Response renders with proper markdown formatting (headings, bold, lists, code blocks)
 8. **SCREENSHOT**: Chat with both messages visible
 
 9. If the meta-agent asks for confirmation, **type**: "Yes, that's correct. Please create the agent now."
@@ -123,10 +123,24 @@ Common cause: DrizzleAdapter table name mismatch (adapter expects singular `acco
 11. **CHECK**: Look for embed code in the response (may contain code blocks with `<script>` tag)
 12. **SCREENSHOT**: After agent creation response
 
+### Phase 3b: Test Internal API (Create/Delete Tenant)
+
+The meta-agent should be able to call OpenClaw Console internal APIs. Verify:
+
+1. **Check** the agent's response for API calls or mentions of:
+   - Tenant creation (POST /api/tenants)
+   - Tenant deletion (DELETE /api/tenants/:id)
+2. **If** the agent mentions it created a tenant via API:
+   - Navigate to `https://openclaw.vibebrowser.app/console/admin/tenants`
+   - **CHECK**: New tenant appears in the list
+3. **If** the agent mentions it deleted a tenant:
+   - **CHECK**: Tenant no longer appears in list
+4. **SCREENSHOT**: Admin panel showing tenant state after agent operations
+
 ### Phase 4: Verify Created Agent
 
 1. **Navigate** to `https://dev.lamoom.com/dashboard`
-2. **CHECK**: New agent (vibebrowser or similar) appears in the agent list
+2. **CHECK**: New agent (openclaw or similar) appears in the agent list
 3. **CHECK**: Agent shows "active" status
 4. **CHECK**: "View" link works → agent detail page shows embed code
 
