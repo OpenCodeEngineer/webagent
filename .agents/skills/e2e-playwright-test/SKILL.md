@@ -31,6 +31,8 @@ Run these checks IN ORDER using vibebrowser tools. Take a screenshot after each 
 curl -sk https://dev.lamoom.com/health → 200 {"status":"ok"}
 curl -sk https://dev.lamoom.com/health/openclaw → 200 {"status":"ok"}  
 curl -sk https://dev.lamoom.com/widget.js → 200, non-empty JS
+curl -sk https://dev.lamoom.com/v1/models → 200 {"data":[...]} (OpenAI-compat endpoint)
+ssh root@78.47.152.177 "docker ps --format '{{.Names}} {{.Status}}' | grep libre" → lamoom-librechat Up
 ```
 
 ### Phase 0b: Static Assets — BLOCKING (curl, not browser)
@@ -85,39 +87,41 @@ Common cause: DrizzleAdapter table name mismatch (adapter expects singular `acco
    - **CHECK**: Agent list visible (may be empty or have existing agents)
    - **SCREENSHOT**: Take screenshot, verify professional dark theme
 
-### Phase 2: Create Agent Chat — UI/UX Quality
+### Phase 2: Create Agent Chat — LibreChat Integration
 
 1. **Navigate** to `https://dev.lamoom.com/create`
-2. **CHECK UI — CRITICAL**: This must look like a ChatGPT-style chat interface:
-   - ✅ Full-screen dark background, no white areas
-   - ✅ Input bar at the bottom, centered, rounded container
-   - ✅ NO heading like "Create Agent" or "Follow each stage" (the page IS the chat)
-   - ✅ Empty state: centered icon/text, subtle, not a form
-   - ❌ FAIL if: light background, form-like layout, headings above chat, bordered card container
-3. **Wait for greeting** (up to 60s):
-   - **CHECK**: Meta-agent greeting appears as a chat message
-   - **CHECK**: Message is conversational AI text, not error or placeholder
-   - **CHECK**: Typing indicator (dots) shows while loading
-4. **SCREENSHOT**: Full page after greeting loads
+2. **CHECK**: Page loads with dark background (#171717), header bar shows "Create Agent"
+3. **CHECK**: SSO loading indicator appears briefly ("·" bouncing dots)
+4. **CHECK**: LibreChat iframe loads successfully (no "Unable to open AI Chat" error)
+5. **CHECK**: LibreChat interface visible inside iframe:
+   - ✅ Dark theme matching the overall app
+   - ✅ Chat input field visible at the bottom
+   - ✅ "Lamoom Agent Builder" or custom endpoint label visible
+   - ❌ FAIL if: LibreChat login/register page shown (SSO bridge failed)
+   - ❌ FAIL if: White/light background (LibreChat theme mismatch)
+   - ❌ FAIL if: "Unable to open AI Chat" error (SSO endpoint failed)
+6. **SCREENSHOT**: Full page with LibreChat loaded in iframe
+7. **Bonus**: Toggle "Legacy chat" button visible — clicking it switches to the old custom chat UI
 
-### Phase 3: Agent Creation Conversation
+### Phase 3: Agent Creation Conversation (via LibreChat)
 
-1. **Type** a real website description in the input:
+1. **Click** into the LibreChat message input inside the iframe
+2. **Type** a real website description:
    > "I want to create an AI chat agent for vibebrowser.app — it's a browser with built-in AI capabilities."
-2. **Press Enter** to send
-3. **CHECK**: User message appears as a right-aligned chat bubble
-4. **CHECK**: Typing indicator shows
-5. **Wait** for meta-agent response (up to 180s)
+3. **Press Enter** to send
+4. **CHECK**: Message appears in LibreChat conversation (markdown rendered)
+5. **Wait** for meta-agent response (up to 180s) — LibreChat shows streaming indicator
 6. **CHECK — CRITICAL (Website Discovery)**: The response MUST prove the meta-agent fetched vibebrowser.app:
    - Mentions specific details about the product (browser, AI, automation, etc.)
    - NOT just generic "I'll help you create an agent" without site-specific info
    - This is the core product promise — if the agent doesn't proactively discover, it FAILS
-7. **SCREENSHOT**: Chat with both messages visible
+7. **CHECK — Markdown**: Response renders with proper markdown formatting (headings, bold, lists, code blocks) — this is a key benefit of LibreChat over the old custom chat
+8. **SCREENSHOT**: Chat with both messages visible
 
-8. If the meta-agent asks for confirmation, **type**: "Yes, that's correct. Please create the agent now."
-9. **Press Enter**, wait up to 180s (agent creation involves file writes)
-10. **CHECK**: Look for embed code card in the chat OR `[AGENT_CREATED::` marker in response
-11. **SCREENSHOT**: After agent creation response
+9. If the meta-agent asks for confirmation, **type**: "Yes, that's correct. Please create the agent now."
+10. **Press Enter**, wait up to 180s (agent creation involves file writes)
+11. **CHECK**: Look for embed code in the response (may contain code blocks with `<script>` tag)
+12. **SCREENSHOT**: After agent creation response
 
 ### Phase 4: Verify Created Agent
 
@@ -233,11 +237,11 @@ Run these checks on every page you visit. Any failure = QA FAIL.
 |---|-------|---------------|
 | 1 | Dark theme everywhere | No white/light backgrounds. bg should be #171717 or similar |
 | 2 | No broken layouts | No overlapping elements, no horizontal scroll |
-| 3 | Chat looks like ChatGPT | Full-screen chat, messages as text blocks, input at bottom |
-| 4 | No "student project" feel | No default shadcn cards/borders around chat, no form-like layout |
-| 5 | Responsive input | Textarea grows with content, send button aligned |
-| 6 | Loading states | Typing indicator shows during API calls |
-| 7 | Error handling | If API fails, error message appears in chat (not silent) |
+| 3 | /create loads LibreChat | Iframe loads, SSO works, no login page shown |
+| 4 | Markdown rendering | LibreChat renders markdown (bold, code, lists) in responses |
+| 5 | No "student project" feel | No default shadcn cards/borders, professional look |
+| 6 | Loading states | SSO loading dots on /create, typing indicator in chat |
+| 7 | Error handling | If SSO or API fails, error message + retry button shown |
 | 8 | Professional typography | Consistent font sizes, proper spacing, readable text |
 
 ## Reporting
@@ -249,12 +253,12 @@ After running all phases, report a summary table:
 
 | Phase | Status | Notes |
 |-------|--------|-------|
-| 0. Infrastructure | ✅/❌ | health, openclaw health, widget.js |
+| 0. Infrastructure | ✅/❌ | health, openclaw health, widget.js, /v1/models, LibreChat docker |
 | 0b. Static Assets | ✅/❌ | CSS 200+size>1KB, JS chunks 200 — BLOCKING |
 | 0c. OAuth Providers | ✅/❌ | /api/auth/providers returns google+credentials — BLOCKING |
 | 1. Login & Dashboard | ✅/❌ | auth works, dark theme |
-| 2. Chat UI Quality | ✅/❌ | ChatGPT-like, no regressions |
-| 3. Agent Creation | ✅/❌ | full conversation, embed code |
+| 2. LibreChat Integration | ✅/❌ | SSO works, iframe loads, dark theme, no login page |
+| 3. Agent Creation | ✅/❌ | full conversation via LibreChat, markdown rendered, embed code |
 | 4. Agent Verification | ✅/❌ | appears in dashboard |
 | 5. Widget Preview | ✅/❌ | live chat on dashboard works |
 | 6. Sign Out Flow    | ✅/❌ | logout + session cleared |
@@ -278,3 +282,8 @@ After any deploy, verify these common failure modes:
 4. OpenClaw gateway not restarted after config change → `systemctl restart openclaw-gateway`
 5. Widget.js stale → clear browser cache, check `/widget.js` returns fresh content
 6. Google OAuth callback fails → DrizzleAdapter not passed custom table schemas (singular vs plural table names)
+7. LibreChat not running → `cd /opt/librechat && docker compose up -d`
+8. SSO bridge returns 429 → LibreChat rate limited registration, restart: `docker compose restart api`
+9. SSO bridge "no token" → user not created in LibreChat (email verification issue), check `ALLOW_UNVERIFIED_EMAIL_LOGIN=true` in `/opt/librechat/.env`
+10. LibreChat iframe shows login page → SSO flow failed, check proxy logs: `journalctl -u webagent-proxy -n 20 --output=cat | grep sso`
+11. tsbuildinfo stale on VM → `find /opt/webagent/packages -name 'tsconfig.tsbuildinfo' -delete` then rebuild
