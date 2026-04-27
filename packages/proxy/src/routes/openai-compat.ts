@@ -184,6 +184,17 @@ export function registerOpenAiCompatRoutes(app: FastifyInstance) {
 
       if (stream) {
         if (!clientDisconnected) {
+          // If no deltas were streamed (agent doesn't support streaming),
+          // emit the full response as a single chunk so LibreChat receives it
+          if (!accumulatedResponse && finalResponse) {
+            writeSseChunk(reply, {
+              id: completionId,
+              object: 'chat.completion.chunk',
+              created,
+              model,
+              choices: [{ index: 0, delta: { content: finalResponse }, finish_reason: null }],
+            });
+          }
           writeSseChunk(reply, {
             id: completionId,
             object: 'chat.completion.chunk',
