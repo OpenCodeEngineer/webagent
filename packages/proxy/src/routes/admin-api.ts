@@ -63,7 +63,7 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
   const sessionCountByAgentQuery = app.db
     .select({
       agentId: widgetSessions.agentId,
-      sessionCount: count(widgetSessions.id),
+      sessionCount: count(widgetSessions.id).as('session_count'),
     })
     .from(widgetSessions)
     .groupBy(widgetSessions.agentId)
