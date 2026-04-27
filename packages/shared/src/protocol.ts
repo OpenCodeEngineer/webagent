@@ -1,3 +1,9 @@
+export interface MessageAttachment {
+  name: string;
+  type: string;
+  data: string;
+}
+
 // Client → Server messages
 export type ClientMessage =
   | {
@@ -24,7 +30,7 @@ export type ClientMessage =
     token?: string;
     agentToken?: string;
   }
-  | { type: 'message'; content: string }
+  | { type: 'message'; content: string; attachments?: MessageAttachment[] }
   | { type: 'ping' };
 
 // Server → Client messages

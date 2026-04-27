@@ -23,8 +23,9 @@ const app = Fastify({ logger: true, bodyLimit: 1048576 });
 const activeSockets = new Set<ManagedSocket>();
 const connectionsPerIp = new Map<string, number>();
 const MAX_WS_PER_IP = 20;
+const WS_MAX_PAYLOAD_BYTES = 12 * 1024 * 1024;
 
-await app.register(websocket, { options: { maxPayload: 65536 } });
+await app.register(websocket, { options: { maxPayload: WS_MAX_PAYLOAD_BYTES } });
 await app.register(rateLimit, { max: 100, timeWindow: '1 minute' });
 await app.register(dbPlugin);
 

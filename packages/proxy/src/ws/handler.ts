@@ -1,4 +1,6 @@
 import * as crypto from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import * as path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { ClientMessage, ServerMessage } from '@webagent/shared/protocol';
 import { and, eq } from 'drizzle-orm';
@@ -42,6 +44,11 @@ interface TokenCacheEntry {
 
 const openclawClient = new OpenClawClient();
 const TOKEN_CACHE_TTL_MS = 60_000;
+const MAX_FILES = 5;
+const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024;
+const MAX_TOTAL_FILE_SIZE_BYTES = 8 * 1024 * 1024;
+const MAX_FILENAME_LENGTH = 120;
+const ADMIN_UPLOADS_ROOT = '/opt/webagent/openclaw/workspaces/meta/uploads';
 const tokenCache = new Map<string, TokenCacheEntry>();
 
 function timingSafeBufferEqual(a: string, b: string): boolean {
@@ -151,6 +158,163 @@ function getCachedTokenLookup(embedToken: string): TokenLookup | null {
 
 function setCachedTokenLookup(embedToken: string, value: TokenLookup): void {
   tokenCache.set(embedToken, { value, expiresAt: Date.now() + TOKEN_CACHE_TTL_MS });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isStrictBase64(value: string): boolean {
+  return /^[A-Za-z0-9+/]+={0,2}$/.test(value) && value.length % 4 === 0;
+}
+
+function sanitizeSessionId(sessionKey: string): string {
+  const safe = sessionKey
+    .replace(/[^a-zA-Z0-9_-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return safe || 'session';
+}
+
+function sanitizeFileName(name: string): string {
+  const baseName = path.basename(name).normalize('NFKC').trim();
+  const stripped = baseName
+    .replace(/[^a-zA-Z0-9._ -]/g, '_')
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^\.+/, '')
+    .replace(/\.\.+/g, '.');
+  return stripped.slice(0, MAX_FILENAME_LENGTH);
+}
+
+interface ValidatedAttachment {
+  originalName: string;
+  mimeType: string;
+  data: Buffer;
+  safeName: string;
+}
+
+function validateAttachments(raw: unknown): { valid: true; attachments: ValidatedAttachment[] } | { valid: false; error: string } {
+  if (raw === undefined) {
+    return { valid: true, attachments: [] };
+  }
+
+  if (!Array.isArray(raw)) {
+    return { valid: false, error: 'Attachments must be an array' };
+  }
+
+  if (raw.length > MAX_FILES) {
+    return { valid: false, error: `Too many attachments (max ${MAX_FILES})` };
+  }
+
+  const validated: ValidatedAttachment[] = [];
+  let totalSize = 0;
+
+  for (const item of raw) {
+    if (!isRecord(item)) {
+      return { valid: false, error: 'Each attachment must be an object' };
+    }
+
+    const name = typeof item.name === 'string' ? item.name.trim() : '';
+    const mimeType = typeof item.type === 'string' ? item.type.trim() : '';
+    const base64 = typeof item.data === 'string' ? item.data.trim() : '';
+
+    if (!name) {
+      return { valid: false, error: 'Attachment name is required' };
+    }
+
+    if (name.length > MAX_FILENAME_LENGTH) {
+      return { valid: false, error: `Attachment name too long (max ${MAX_FILENAME_LENGTH} characters)` };
+    }
+
+    if (!mimeType) {
+      return { valid: false, error: 'Attachment MIME type is required' };
+    }
+
+    if (!base64) {
+      return { valid: false, error: 'Attachment data must be a non-empty base64 string' };
+    }
+
+    if (!isStrictBase64(base64)) {
+      return { valid: false, error: `Invalid base64 payload for attachment ${name}` };
+    }
+
+    let decoded: Buffer;
+    try {
+      decoded = Buffer.from(base64, 'base64');
+    } catch {
+      return { valid: false, error: `Unable to decode attachment ${name}` };
+    }
+
+    if (decoded.length === 0) {
+      return { valid: false, error: `Attachment ${name} decoded to empty content` };
+    }
+
+    if (decoded.length > MAX_FILE_SIZE_BYTES) {
+      return { valid: false, error: `Attachment ${name} exceeds max size of ${MAX_FILE_SIZE_BYTES} bytes` };
+    }
+
+    totalSize += decoded.length;
+    if (totalSize > MAX_TOTAL_FILE_SIZE_BYTES) {
+      return { valid: false, error: `Total attachment size exceeds ${MAX_TOTAL_FILE_SIZE_BYTES} bytes` };
+    }
+
+    const safeName = sanitizeFileName(name);
+    if (!safeName) {
+      return { valid: false, error: `Attachment ${name} has an invalid filename` };
+    }
+
+    validated.push({ originalName: name, mimeType, data: decoded, safeName });
+  }
+
+  return { valid: true, attachments: validated };
+}
+
+async function persistAdminAttachments(sessionKey: string, attachments: ValidatedAttachment[]): Promise<string[]> {
+  if (attachments.length === 0) {
+    return [];
+  }
+
+  const sessionSafeId = sanitizeSessionId(sessionKey);
+  const uploadDir = path.join(ADMIN_UPLOADS_ROOT, sessionSafeId);
+
+  try {
+    await mkdir(uploadDir, { recursive: true });
+  } catch (err) {
+    console.error('Failed to create attachment upload directory:', { uploadDir, sessionSafeId, err });
+    throw new Error('Unable to prepare attachment upload directory');
+  }
+
+  const relativePaths: string[] = [];
+  for (const [index, attachment] of attachments.entries()) {
+    const timestamp = new Date(Date.now() + index).toISOString().replace(/[:.]/g, '-');
+    const fileName = `${timestamp}-${attachment.safeName}`;
+    const absolutePath = path.join(uploadDir, fileName);
+    const relativePath = `uploads/${sessionSafeId}/${fileName}`;
+
+    try {
+      await writeFile(absolutePath, attachment.data);
+    } catch (err) {
+      console.error('Failed to write attachment file:', {
+        absolutePath,
+        sessionSafeId,
+        originalName: attachment.originalName,
+        mimeType: attachment.mimeType,
+        err,
+      });
+      throw new Error(`Unable to save attachment ${attachment.originalName}`);
+    }
+
+    relativePaths.push(relativePath);
+  }
+
+  return relativePaths;
+}
+
+function buildAttachmentContext(relativePaths: string[]): string {
+  return `Attached files saved in workspace:
+${relativePaths.map((relativePath) => `- ${relativePath}`).join('\n')}
+Use these files as source context.`;
 }
 
 async function lookupEmbedToken(db: Database, embedToken: string): Promise<TokenLookup | null> {
@@ -331,9 +495,44 @@ export function handleConnection(
 
           try {
             const domain = (process.env.AUTH_URL || 'https://dev.lamoom.com').replace(/\/+$/, '');
+            let customerContent = msg.content;
+
+            const messageWithAttachments = msg as { attachments?: unknown };
+            if (!state.isAdmin && messageWithAttachments.attachments !== undefined) {
+              send(ws, { type: 'error', message: 'Attachments are only supported in admin mode' });
+              return;
+            }
+
+            if (state.isAdmin) {
+              const adminMessage = msg as { attachments?: unknown };
+              const rawAttachments = adminMessage.attachments;
+              const validated = validateAttachments(rawAttachments);
+              if (!validated.valid) {
+                send(ws, { type: 'error', message: validated.error });
+                return;
+              }
+
+              if (validated.attachments.length > 0) {
+                let relativePaths: string[];
+                try {
+                  relativePaths = await persistAdminAttachments(state.sessionKey, validated.attachments);
+                } catch (err) {
+                  console.error('Failed to persist admin attachments:', {
+                    sessionKey: state.sessionKey,
+                    userId: state.userId,
+                    err,
+                  });
+                  send(ws, { type: 'error', message: 'Failed to save attachments' });
+                  return;
+                }
+
+                customerContent = `${buildAttachmentContext(relativePaths)}\n\n${msg.content}`;
+              }
+            }
+
             const prefixedAdminMessage
-              = `[Lamoom Platform — Agent Creation Session]\nCustomer ID: ${state.userId}\nPlatform domain: ${domain}\n\nCustomer: ${msg.content}`;
-            const outboundMessage = state.isAdmin && state.firstMessage ? prefixedAdminMessage : msg.content;
+              = `[Lamoom Platform — Agent Creation Session]\nCustomer ID: ${state.userId}\nPlatform domain: ${domain}\n\nCustomer: ${customerContent}`;
+            const outboundMessage = state.isAdmin && state.firstMessage ? prefixedAdminMessage : customerContent;
             let streamed = false;
             const result = await openclawClient.sendMessage({
               message: outboundMessage,

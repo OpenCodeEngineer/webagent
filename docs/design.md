@@ -584,9 +584,12 @@ Sandbox approach: WORKSPACE-SCOPED TOOL ACCESS (no Docker)
 ### Client → Server
 ```typescript
 { type: "auth", userId: string, mode?: "widget" | "admin", token: string, agentToken?: string, ticket?: string } | { type: "auth", userId: string, mode?: "widget" | "admin", agentToken: string, token?: string, ticket?: string } // First message within 30s; one of token or agentToken required, mode optional
-{ type: "message", content: string }                    // Chat message
+{ type: "message", content: string, attachments?: { name: string, type: string, data: string }[] } // Chat message; attachments optional (admin mode)
 { type: "ping" }                                        // Keepalive
 ```
+
+Admin attachment limits (admin mode only): max 5 files, max 2 MiB decoded per file, max 8 MiB decoded total, filename length max 120 chars.
+Proxy websocket `maxPayload` is configured to 12 MiB so base64-encoded attachment envelopes plus JSON framing fit within transport limits.
 
 ### Server → Client
 ```typescript
