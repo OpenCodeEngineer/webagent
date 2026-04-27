@@ -18,7 +18,7 @@
 ### Azure Models
 - Endpoint: `${AZURE_DEV_AI_BASE_URL}` → `https://vibe-dev-ai.cognitiveservices.azure.com/openai/v1`
 - API Key: `${AZURE_DEV_AI_API_KEY}`
-- Current model: `gpt-5.1` (working)
+- Current model: `kimi-k2.5-thinking` (working)
 - Also available: `kimi-k2.5-thinking` (backup)
 
 ### Default Model
