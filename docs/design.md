@@ -679,6 +679,123 @@ openclaw agents list                   # List configured agents
 
 ---
 
+## v0.0.1 Milestone (tagged 2026-04-26)
+
+Widget shipped with:
+- Markdown rendering (bold, italic, code blocks, links, lists, headings) — XSS-safe
+- Streaming re-render on each delta (`innerHTML` for assistant, `textContent` for user)
+- Monochrome redesign — LibreChat-inspired gray palette (`#0d0d0d`→`#ececec`), zero color
+- Round send button with arrow SVG icon
+
+Full E2E verified: signup → meta-agent discovery → agent creation → embed code → widget chat.
+
+---
+
+## Phase Next: LibreChat Integration (Admin UI)
+
+### Why
+
+Our custom Next.js admin chat (`/create`) works but lacks markdown rendering, voice I/O,
+file uploads, conversation persistence, and mobile UX. LibreChat (MIT license) provides
+all of these battle-tested. Rather than re-implementing, deploy LibreChat as the admin
+chat UI and point it at our proxy via a custom endpoint.
+
+### What stays / what changes
+
+| Component | Before | After |
+|---|---|---|
+| Admin chat UI | Next.js `/create` page | **LibreChat** (custom endpoint → our proxy) |
+| Dashboard / agent mgmt | Next.js `/dashboard` | Keep Next.js (or migrate later) |
+| Embeddable widget | Custom IIFE (`widget.ts`) | **No change** — LibreChat has no embed mode |
+| Proxy gateway | Fastify + WS | Add `/v1/chat/completions` (OpenAI-compat) |
+| Database | Neon PostgreSQL | Add **MongoDB** (LibreChat requirement) |
+| Auth | NextAuth v5 | LibreChat's own auth (separate system) |
+
+### Architecture with LibreChat
+
+```
+┌──────────────────┐     ┌──────────────────────────────────┐
+│  Customer Admin   │────▶│  LibreChat (React + Express)      │
+│  (browser)        │     │  - Markdown, voice, file uploads  │
+│                   │     │  - Custom endpoint → our proxy    │
+└──────────────────┘     └──────────┬───────────────────────┘
+                                    │ POST /v1/chat/completions
+┌──────────────────┐     ┌──────────▼───────────────────────┐
+│  Website Visitor  │────▶│  Proxy Gateway (Fastify)          │
+│  (widget)         │ WS  │  - /v1/chat/completions (new)     │
+└──────────────────┘     │  - /ws (widget)                   │
+                         │  - /widget.js                     │
+                         └──────────┬───────────────────────┘
+                                    │ WS
+                         ┌──────────▼───────────────────────┐
+                         │  OpenClaw Gateway (:18789)         │
+                         └────────────────────────────────────┘
+```
+
+### LibreChat custom endpoint config (`librechat.yaml`)
+
+```yaml
+version: 1.2.1
+cache: true
+endpoints:
+  custom:
+    - name: "Lamoom Agent Builder"
+      apiKey: "${PROXY_LIBRECHAT_KEY}"
+      baseURL: "http://localhost:3001/v1"
+      models:
+        default: ["meta-agent"]
+      titleConvo: true
+      dropParams: ["stop", "frequency_penalty", "presence_penalty"]
+```
+
+### New proxy endpoint: `/v1/chat/completions`
+
+OpenAI-compatible wrapper that routes to the meta-agent:
+
+```
+POST /v1/chat/completions
+Authorization: Bearer <PROXY_LIBRECHAT_KEY>
+Content-Type: application/json
+
+{
+  "model": "meta-agent",
+  "messages": [{ "role": "user", "content": "Create an agent for mysite.com" }],
+  "stream": true
+}
+```
+
+Proxy maps this to the existing OpenClaw WS transport (same as admin chat flow).
+Response is SSE with `data: {"choices":[{"delta":{"content":"..."}}]}` chunks.
+
+### New dependencies on VM
+
+| Service | Purpose | RAM estimate |
+|---|---|---|
+| MongoDB | LibreChat data store | ~200MB |
+| LibreChat API | Express backend | ~150MB |
+| LibreChat Client | Served by Express | 0 (static) |
+| **Total new** | | **~350MB** |
+
+Current VM usage ~1.5GB → total ~1.85GB on 4GB CAX11. Feasible.
+
+### Migration steps
+
+1. Add `/v1/chat/completions` endpoint to proxy (OpenAI-compat SSE)
+2. Deploy MongoDB on VM (Docker or apt)
+3. Deploy LibreChat (Docker Compose or bare)
+4. Configure `librechat.yaml` with custom endpoint
+5. Update nginx: route `/chat` → LibreChat, keep `/api` → proxy, `/*` → admin
+6. Optional: Write MCP server for OpenClaw agent management (list/delete/edit agents)
+7. Optional: Deprecate Next.js `/create` page (keep dashboard)
+
+### Voice I/O (free with LibreChat)
+
+- **STT**: OpenAI Whisper API or local Whisper model
+- **TTS**: OpenAI TTS, Azure Speech, ElevenLabs, or browser Web Speech API
+- Configured in LibreChat admin panel, no proxy changes needed
+
+---
+
 ## Production Gaps (updated 2026-04-25)
 
 ### ✅ Done & Working
