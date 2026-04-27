@@ -28,16 +28,15 @@ git add . && git commit -m "nginx: allow localhost for gateway web fetch"
 
 ### OpenClaw gateway can't fetch dev.lamoom.com
 - **Symptom:** Meta-agent responds but says "can't fetch dev.lamoom.com"
-- **Cause:** Nginx blocks localhost requests (gateway uses public URL)
-- **Fix:** Add localhost allow rule in `infra/nginx/webagent.conf`:
-  ```
+- **Cause:** Nginx blocks requests when using "deny all" directive
+- **Fix:** Add localhost allow WITHOUT deny all in `infra/nginx/webagent.conf`:
+  ```nginx
   location / {
       allow 127.0.0.1;
-      allow ::1;
-      deny all;
       proxy_pass http://admin_upstream;
   }
   ```
+  Note: Do NOT add "deny all" - it will block all users!
 
 ### Azure 500 errors
 - Try different model (kimi-k2.5-thinking)
