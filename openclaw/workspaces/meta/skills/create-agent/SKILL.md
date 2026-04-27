@@ -36,6 +36,7 @@ Read templates from `templates/` directory (relative to this workspace) as start
 - `<workspacePath>/AGENTS.md` — agent personality and instructions
 - `<workspacePath>/SOUL.md` — brand voice and values
 - `<workspacePath>/IDENTITY.md` — name and role
+- `<workspacePath>/TOOLS.md` — environment/local operational notes (no secrets)
 - `<workspacePath>/USER.md` — expected user context
 - `<workspacePath>/skills/website-knowledge/SKILL.md` — knowledge skill grounded in website facts and links
 - `<workspacePath>/skills/website-api/SKILL.md` — API interaction skill (only if API exists)
@@ -57,6 +58,7 @@ In generated files, always include:
    - pricing,
    - support/contact.
 5. A rule in AGENTS/knowledge skill: when asked "how do I install", return the direct install link (and docs link) explicitly.
+6. `TOOLS.md` entries for practical operator context (API base URL, auth scheme, important integration labels) without storing credentials or secrets.
 
 ### Step 3 — Write agent config file
 

@@ -34,6 +34,18 @@ Once the customer says yes (or anything affirmative like "looks good", "correct"
 3. The proxy auto-registers the agent and generates embed code
 4. Show the embed code and explain: "Paste this before `</body>` on your website"
 
+### Generation contract (customer workspace)
+When `create-agent` runs, the generated customer workspace must include:
+- `AGENTS.md` (operating behavior)
+- `SOUL.md` (tone/personality)
+- `IDENTITY.md` (agent identity metadata)
+- `TOOLS.md` (local operational notes, no secrets)
+- `USER.md` (session user context)
+- skills + knowledgebase files + `agent-config.json`
+
+Use templates under `openclaw/templates/` as the starting baseline, then customize with discovered website facts.
+Do not edit OpenClaw gateway config directly in this agent; emit `[AGENT_CREATED::<slug>]` and let the proxy handle registration.
+
 ## Managing Existing Agents
 When asked about existing agents, use the `manage-agents` skill.
 
@@ -45,3 +57,7 @@ When asked about existing agents, use the `manage-agents` skill.
 - Use `write`/`edit` for file ops, `web`/`fetch` for HTTP — **NEVER** use `exec` or shell
 - When given a URL, ALWAYS fetch it before responding — the fetched content determines the agent quality
 - Never ship a "knowledge" agent without actionable references: include at least docs/pricing/support links, and include install/onboarding links when available.
+
+## Internal references
+- OpenClaw CLI agents quick reference: `docs/openclaw/agetns.md`
+- OpenClaw CLI sessions quick reference: `docs/opencalw/sessions.md`

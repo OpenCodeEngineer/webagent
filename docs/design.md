@@ -7,9 +7,11 @@
 
 SaaS platform where business owners create AI chat agents for their websites.
 Customers describe their site/API in natural language to a **meta-agent**, which
-provisions a dedicated OpenClaw agent, generates workspace files and an API skill,
+provisions a dedicated OpenClaw agent, generates workspace files (`AGENTS.md`,
+`SOUL.md`, `IDENTITY.md`, `TOOLS.md`, `USER.md`) plus skills/knowledgebase files,
 and outputs an embeddable widget `<script>` tag. Website visitors chat through the
-widget; a proxy gateway maps each visitor to an isolated OpenClaw session.
+widget; the proxy maps each `(agent, visitor)` pair to a deterministic OpenClaw
+session key.
 
 **Repo:** `OpenCodeEngineer/webagent` (pnpm monorepo + Turborepo)
 
@@ -26,24 +28,35 @@ Customer signs up / logs in
 Opens "Create Agent" (chat UI)
         │
         ▼
-Meta-agent asks:
-  • What is your website / product?
-  • What API does it expose? (endpoints, auth, base URL)
-  • What should the agent's personality be?
+Meta-agent Phase 1 (discovery, mandatory):
+  • Fetches website + key pages
+  • Builds due-diligence packet (product summary, intents, canonical links, API status)
+  • Asks one confirmation ("Should I create your agent now?")
         │
         ▼
-Meta-agent generates:
+Customer confirms
+        │
+        ▼
+Meta-agent runs create-agent skill and writes:
   ├─ AGENTS.md   (operating instructions)
   ├─ SOUL.md     (persona & tone)
   ├─ IDENTITY.md (name, emoji, vibe)
+  ├─ TOOLS.md    (workspace-local operational notes; no secrets)
   ├─ USER.md     (visitor context template)
-  └─ skills/website-api/SKILL.md  (how to call customer's API)
+  ├─ skills/website-knowledge/SKILL.md
+  ├─ skills/website-api/SKILL.md   (only when API exists)
+  ├─ knowledgebase/{overview.md,key-links.md,use-cases.md}
+  └─ agent-config.json
         │
         ▼
-Meta-agent registers new agent in OpenClaw config
+Meta-agent response includes marker: [AGENT_CREATED::<slug>]
         │
         ▼
-Meta-agent calls proxy internal API → DB records + embed token
+Proxy detects marker and:
+  • Reads <workspace>/agent-config.json
+  • Upserts DB rows (agents + widget_embeds)
+  • Registers agent in OpenClaw config and reloads gateway
+  • Appends widget <script> snippet
         │
         ▼
 Customer copies widget code → pastes into their site
@@ -53,18 +66,21 @@ Customer copies widget code → pastes into their site
 
 ```
 Widget (browser)
-  │ WS: { type: "message", content: "..." }
+  │ WS auth: { type: "auth", agentToken, userId }
   ▼
 Proxy WS handler (ws/handler.ts)
-  │ 1. Validate auth (embed token → agentId lookup via DB)
-  │ 2. Build sessionKey: "agent:<agentId>:<suffix>"
-  │ 3. Look up or create widget_session in DB
+  │ 1. Validate embed token → DB lookup:
+  │    - agents.id (internal UUID)
+  │    - agents.openclawAgentId (OpenClaw slug)
+  │ 2. Upsert widget_sessions on UNIQUE(agentId, externalUserId)
+  │ 3. Build/reuse openclawSessionKey:
+  │    "agent:<openclawAgentId>:widget-<openclawAgentId>-<userId>"
   ▼
 Proxy → OpenClaw Gateway (shared WS connection)
-  │ Same WS used for admin + widget traffic, multiplexed by sessionKey
-  │ Model: "openclaw/<agentId>" — routes to correct customer agent
-  │ Agent processes message, may call customer API via skill
-  │ Streamed response via WS `agent` events (token-by-token)
+  │ Model: "openclaw/<openclawAgentId>"
+  │ Same WS transport used for admin + widget traffic, isolated by sessionKey
+  │ Agent processes message with customer workspace + skills
+  │ Streamed response via gateway `agent` events (token-by-token)
   ▼
 Proxy relays back over WS: { type: "message", content, done: boolean }
   │ Streams tokens as they arrive (done: false → ... → done: true)
@@ -73,26 +89,26 @@ Proxy relays back over WS: { type: "message", content, done: boolean }
 ### Flow 3 — Customer creates an agent (code-level trace)
 
 ```
-Admin UI /create page
-  │ Chat interface (WS to proxy)
+Admin UI /create page (WS) or POST /api/agents/create-via-meta (REST)
+  │ Sends latest customer message
   ▼
-Proxy WS — routes to OpenClaw gateway WS (model: "openclaw/meta")
-  │ sessionKey: "agent:meta:<suffix>"
+Proxy routes to OpenClaw (model: "openclaw/meta")
+  │ sessionKey:
+  │ - REST path: "agent:meta:admin-<customerId>-<sessionId>"
+  │ - WS path:   "agent:meta:admin-<customerId>-<randomUUID>"
   ▼
 OpenClaw meta-agent (workspace: openclaw/workspaces/meta/)
-  │ Follows create-agent skill (SKILL.md):
-  │ 1. Ask about website, API, personality
-  │ 2. Generate AGENTS.md, SOUL.md, IDENTITY.md, USER.md, skill
-  │ 3. Create workspace dir on filesystem (read/write tools)
-  │ 4. Write agent-config.json to workspace (slug, name, url, api details)
-  │ 5. Emit [AGENT_CREATED::<slug>] marker in response
+  │ Phase 1: fetch + due diligence packet + one confirmation
+  │ Phase 2: create-agent skill writes customer workspace from templates:
+  │    AGENTS.md, SOUL.md, IDENTITY.md, TOOLS.md, USER.md
+  │    + skills + knowledgebase + agent-config.json
+  │ Emits [AGENT_CREATED::<slug>] marker in response
   ▼
 Proxy detects [AGENT_CREATED::<slug>] marker in response
   │ Reads <workspace>/agent-config.json
-  │ Registers agent in ~/.openclaw/openclaw.json
+  │ Registers slug in OpenClaw config (configured path precedence)
   │ Reloads openclaw-gateway (SIGHUP, systemctl fallback)
-  │ Creates DB records (agent + widget_embed)
-  │ Generates embed token
+  │ Upserts DB records (agent + widget_embed) and embed token
   │ Appends embed snippet to response
   ▼
 Customer sees agent confirmation + widget <script> snippet
@@ -108,6 +124,50 @@ Customer logs in → Dashboard
         ├─ Chat with meta-agent to update agent config
         └─ Pause / delete agent
 ```
+
+## Agent & Session Mapping (runtime contract)
+
+| Product concept | Persistent key(s) | Runtime mapping |
+|---|---|---|
+| Business owner (tenant) | `customers.id` (UUID) | Used for admin auth, audit, and meta session scoping |
+| Customer agent | `agents.id` + `agents.openclawAgentId` | `openclawAgentId` is the OpenClaw model slug (`openclaw/<openclawAgentId>`) |
+| Widget embed identity | `widget_embeds.embedToken` | Script token resolves to one active `agents` row |
+| Website visitor identity | `widget_sessions.externalUserId` | Provided by widget auth payload (`userId`) |
+| Widget chat session | `widget_sessions` row keyed by `(agentId, externalUserId)` | `openclawSessionKey = agent:<openclawAgentId>:widget-<openclawAgentId>-<externalUserId>` |
+| Admin create/manage session | Session key only | `agent:meta:admin-<customerId>-<sessionId-or-uuid>` |
+
+Deterministic mapping in proxy:
+- `getOrCreateSession(agentId, externalUserId, openclawAgentId)` upserts one `widget_sessions` row per `(agentId, externalUserId)`.
+- Reconnecting with same `agentToken + userId` reuses the same OpenClaw conversation context.
+- Changing `userId` creates a different OpenClaw session key and isolated thread.
+
+## Meta-agent template generation process
+
+`openclaw/workspaces/meta/skills/create-agent/SKILL.md` is the source-of-truth workflow for generation.
+After discovery is confirmed, the meta-agent derives customer-specific values and writes files into:
+`/opt/webagent/openclaw/workspaces/<agentSlug>/`.
+
+Template roles used for each customer agent:
+- `AGENTS.md` — operating instructions, scope boundaries, and behavior rules.
+- `SOUL.md` — persona/tone profile for response style.
+- `IDENTITY.md` — identity metadata (name, creature, vibe, emoji, optional avatar).
+- `TOOLS.md` — local operational notes (API base URL/auth scheme/integration labels); never secrets.
+- `USER.md` — per-session visitor context assumptions.
+
+Generation inputs come from meta-agent due diligence:
+- verified website facts and product summary,
+- canonical links (install/docs/pricing/support),
+- API capabilities/auth/base URL (when available),
+- brand voice cues.
+
+The meta-agent then writes skills + knowledgebase files, emits `[AGENT_CREATED::<slug>]`,
+and the proxy completes registration + embed issuance.
+
+OpenClaw template references:
+- `https://docs.openclaw.ai/reference/templates/AGENTS`
+- `https://docs.openclaw.ai/reference/templates/SOUL`
+- `https://docs.openclaw.ai/reference/templates/IDENTITY`
+- `https://docs.openclaw.ai/reference/templates/TOOLS`
 
 ---
 
@@ -227,7 +287,7 @@ webagent/
 │
 ├── openclaw/
 │   ├── config/openclaw.json5         Multi-agent config (hooks, sandbox, cron, session)
-│   ├── templates/                    Base templates for new customer agents (AGENTS/SOUL/IDENTITY/USER.md)
+│   ├── templates/                    Base templates for new customer agents (AGENTS/SOUL/IDENTITY/TOOLS/USER.md)
 │   └── workspaces/
 │       └── meta/                     Meta-agent workspace + create-agent skill
 │
@@ -247,7 +307,10 @@ webagent/
 - Proxy maintains ONE persistent WebSocket to OpenClaw gateway (`:18789`)
 - Both admin (meta-agent) and widget (customer agent) traffic multiplexed on same WS
 - Agent selected via `model: "openclaw/<agentId>"` in each request
-- Sessions identified by `sessionKey` — runtime format: `"agent:<agentId>:<suffix>"`
+- Widget session key format:
+  `agent:<openclawAgentId>:widget-<openclawAgentId>-<externalUserId>`
+- Admin/meta session key format:
+  `agent:meta:admin-<customerId>-<sessionId-or-uuid>`
 - Streaming: gateway sends `agent` events token-by-token; proxy relays to client
 - Fallback: `/v1/responses` HTTP endpoint available for simple request-response
 - Hooks API (`/hooks/agent`) kept only for fire-and-forget (wake, cron triggers)
@@ -256,6 +319,7 @@ webagent/
 - Each `sessionKey` maintains isolated multi-turn conversation state
 - `hooks.allowRequestSessionKey: true` in config
 - Constrained with `allowedSessionKeyPrefixes: ["agent:", "widget-", "admin-", "hook:"]`
+- Widget session mapping is persisted in DB (`widget_sessions.openclawSessionKey`)
 
 ### Sandbox Model (NO Docker)
 - `sandbox.mode: "off"` — no containers
@@ -263,17 +327,21 @@ webagent/
 - Agent read/write/edit tools are workspace-scoped by default in OpenClaw
 - Each agent can only access files within its own workspace directory
 - Meta-agent is the exception: `sandbox: { mode: "off" }` with minimal deny list
-  (it needs fs access to create workspaces and edit openclaw.json5)
+  (it needs filesystem access to create customer workspaces and generated files)
 
 ### Agent Creation: No Callback Required
-- Meta-agent writes workspace files + `agent-config.json` to filesystem
+- Meta-agent writes workspace files from templates:
+  `AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `TOOLS.md`, `USER.md`
+  plus customer skills/knowledgebase and `agent-config.json`
 - Proxy detects agent creation in meta-agent's response
 - Proxy reads the config file, creates DB records, generates embed token
 - Proxy appends embed snippet to the response before sending to customer
 - Meta-agent never needs to POST anywhere — it just writes files and talks
 
 ### OpenClaw Config Registration
-- Proxy writes to `~/.openclaw/openclaw.json` (standard JSON, NOT json5)
+- Proxy config path precedence:
+  `OPENCLAW_CONFIG_PATH` → `<repo>/openclaw/config/openclaw.json5` → `~/.openclaw/openclaw.json`
+- Proxy parses JSON5, appends agent entry when missing, then writes back config JSON
 - Gateway is reloaded via SIGHUP (no root needed); falls back to `sudo systemctl restart openclaw-gateway`
 - Note: design originally planned `hybrid` hot-reload, but gateway requires restart
   for new agent entries — this is acceptable for MVP scale
@@ -310,7 +378,7 @@ widget_sessions
   id                UUID PK
   agentId           UUID FK → agents.id (CASCADE)
   externalUserId    TEXT NOT NULL          ← visitor's userId from widget
-  openclawSessionKey TEXT NOT NULL         ← "agent:<agentId>:<suffix>"
+  openclawSessionKey TEXT NOT NULL         ← "agent:<openclawAgentId>:widget-<openclawAgentId>-<externalUserId>"
   lastActiveAt      TIMESTAMP
   createdAt         TIMESTAMP
   UNIQUE(agentId, externalUserId)
@@ -385,11 +453,11 @@ Sandbox approach: WORKSPACE-SCOPED TOOL ACCESS (no Docker)
 • tools.deny: ["exec", "process", "browser", "canvas", ...] — no shell/system
 • read/write/edit are workspace-scoped by default in OpenClaw
   → each agent can only access files within its own workspace dir
-• Each visitor = unique sessionKey ("agent:<agentId>:<suffix>")
+• Each visitor = unique sessionKey ("agent:<openclawAgentId>:widget-<openclawAgentId>-<externalUserId>")
   → OpenClaw isolates conversation state per sessionKey
 • Cron/heartbeat scoped per agent, never touches other agents' sessions
 • Meta-agent is the only agent with sandbox: "off" + elevated access
-  (it needs to create workspaces and update config for new agents)
+  (it creates workspaces/files; proxy owns OpenClaw config registration)
 ```
 
 ---
@@ -521,7 +589,7 @@ openclaw agents list                   # List configured agents
 - Widget: Vite IIFE bundle + esbuild standalone, served from proxy at `/widget.js`
 - Shared: Types, protocol (standardized `token` field + admin mode), constants
 - OpenClaw: Multi-agent config, meta-agent workspace + create-agent skill (4-step flow)
-- OpenClaw: Workspace templates populated (AGENTS, SOUL, IDENTITY, USER, website-api skill)
+- OpenClaw: Workspace templates populated (AGENTS, SOUL, IDENTITY, TOOLS, USER, website-api skill)
 - Infra: Full setup.sh, production nginx (rate limiting, SSL), systemd units
 - CORS: Widget embed origin validation enforced in WS auth handshake
 - Graceful shutdown: SIGTERM/SIGINT handlers with WS drain

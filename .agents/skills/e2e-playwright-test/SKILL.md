@@ -24,6 +24,8 @@ Test the Lamoom platform end-to-end using browser tools. NOT scripts — use vib
 
 Run these checks IN ORDER using vibebrowser tools. Take a screenshot after each phase. Report PASS/FAIL for each check.
 
+**Protocol of record:** This QA skill is browser-tool driven. Do **not** rely on `test-e2e-full.sh` (or other shell scripts) as the primary end-to-end verdict.
+
 ### Phase 0: Infrastructure (curl, not browser)
 ```
 curl -sk https://dev.lamoom.com/health → 200 {"status":"ok"}
@@ -156,20 +158,29 @@ If the widget preview shows an error, debug via WebSocket directly:
 
 ### Phase 5c: Real Widget Demo (standalone page)
 
+Required validation sequence for this phase:
+1. Create a `vibebrowser.app` agent via meta-agent flow.
+2. Confirm meta-agent did exploration and generated **knowledgebase + skills** artifacts.
+3. Inject widget on `https://vibebrowser.app` using eval-style browser execution (`evaluate_script` / `page.evaluate`).
+4. Chat with widget using the two eval questions and score both answers with G-Eval rubric.
+
 Test the widget as an actual customer would embed it:
 1. From the agent detail page, copy the full `<script>` embed code
-2. Open a minimal standalone HTML page (simple `index.html`) served over local `http://127.0.0.1`
-3. Paste or inject the exact embed `<script>` into that page and load it in the browser
+2. Open `https://vibebrowser.app`
+3. Inject the embed script using eval-style browser execution (equivalent to `evaluate_script` / `page.evaluate`)
 4. **CHECK**: Widget bubble appears (bottom-right floating button)
 5. **Click** the widget bubble to open the chat panel
 6. **CHECK**: Chat panel slides up, shows "Connected" or ready state
-7. **Type** "I am evaluating Vibe Browser. How do I install the extension? Please include the direct install link and docs link." and send
-8. **Wait** up to 120s for response
-9. **CHECK**: Bot responds with relevant information and includes direct install/docs URL(s)
-10. **CHECK**: Close/reopen bubble — chat history preserved
-11. **SCREENSHOT**: Widget demo working on standalone page
+7. Ask question #1: **"what is the product about"**
+8. Ask question #2: **"how to install it?"**
+9. **CHECK**: Bot responds to both prompts with relevant content (install answer should include direct link(s))
+10. Score both answers with a G-Eval style rubric (1-5); require both to meet the configured threshold (default: ≥3)
+    - Q1 ("what is the product about"): reward product identity + capabilities + clarity.
+    - Q2 ("how to install it?"): reward actionable install guidance + direct link(s) + docs/support references.
+11. **CHECK**: Close/reopen bubble — chat history preserved
+12. **SCREENSHOT**: Widget demo working on standalone page
 
-**Automation requirement:** `scripts/test-e2e-full.sh` must execute this as a blocking check (current test ID: `T10b`) by writing a temporary standalone HTML file with the real embed `<script>`, opening it in a browser runtime, sending a message, and failing on auth errors (e.g., `Invalid agent token`).
+**Execution rule:** run this phase directly in the browser session (vibebrowser/playwright tools), not via shell-script shortcuts.
 
 ### Phase 6: Sign Out Flow
 
