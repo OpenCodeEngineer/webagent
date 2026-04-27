@@ -17,6 +17,123 @@ session key.
 
 ---
 
+## Agent Generation Flow (sequence diagram)
+
+```
+  CUSTOMER                 PROXY                META-AGENT            OPENCLAW
+  (Browser)             (Node.js)           (OpenClaw Agent)         (Gateway)
+     │                     │                      │                      │
+     │  1. Sign up/login   │                      │                      │
+     ├────────────────────►│                      │                      │
+     │  ◄── customerId ────┤                      │                      │
+     │      (UUID v4)      │                      │                      │
+     │                     │                      │                      │
+═══════════════════════════╪══════════════════════╪══════════════════════╪═══
+  PHASE 1 — DISCOVERY      │                      │                      │
+═══════════════════════════╪══════════════════════╪══════════════════════╪═══
+     │                     │                      │                      │
+     │  2. "Create agent   │                      │                      │
+     │   for mysite.com"   │                      │                      │
+     ├────────────────────►│  3. Forward to meta  │                      │
+     │  POST /api/agents/  ├─────────────────────►│                      │
+     │  create-via-meta    │  (WS + session key)  │                      │
+     │                     │                      │  4. Fetch website    │
+     │                     │                      ├──── GET mysite.com   │
+     │                     │                      │     GET /docs        │
+     │                     │                      │     GET /pricing     │
+     │                     │                      │     GET /api         │
+     │                     │                      │                      │
+     │                     │  5. Due-diligence    │                      │
+     │  ◄─────────────────────────────────────────┤                      │
+     │  "Here's what I     │  packet: summary,    │                      │
+     │   found..."         │  links, use cases    │                      │
+     │                     │                      │                      │
+     │  6. "Yes, create    │                      │                      │
+     │      the agent"     │                      │                      │
+     ├────────────────────►├─────────────────────►│                      │
+     │                     │                      │                      │
+═══════════════════════════╪══════════════════════╪══════════════════════╪═══
+  PHASE 2 — GENERATION     │                      │                      │
+═══════════════════════════╪══════════════════════╪══════════════════════╪═══
+     │                     │                      │                      │
+     │                     │                      │  7. create-agent     │
+     │                     │                      │     skill runs       │
+     │                     │                      │         │            │
+     │                     │                      │    ┌────▼──────────┐ │
+     │                     │                      │    │ WRITE FILES:  │ │
+     │                     │                      │    │               │ │
+     │                     │                      │    │ AGENTS.md     │ │
+     │                     │                      │    │ SOUL.md       │ │
+     │                     │                      │    │ IDENTITY.md   │ │
+     │                     │                      │    │ TOOLS.md      │ │
+     │                     │                      │    │ USER.md       │ │
+     │                     │                      │    │ skills/       │ │
+     │                     │                      │    │ knowledgebase/│ │
+     │                     │                      │    │ agent-config  │ │
+     │                     │                      │    │   .json       │ │
+     │                     │                      │    └───────────────┘ │
+     │                     │                      │         │            │
+     │                     │  8. Response with     │         │            │
+     │                     │◄─────────────────────┤         │            │
+     │                     │  [AGENT_CREATED::     │    writes to:       │
+     │                     │   mysite-<id>]        │    /opt/webagent/   │
+     │                     │                      │    openclaw/         │
+     │                     │                      │    workspaces/       │
+     │                     │                      │    <slug>/           │
+═══════════════════════════╪══════════════════════╪══════════════════════╪═══
+  PHASE 3 — REGISTRATION   │                      │                      │
+═══════════════════════════╪══════════════════════╪══════════════════════╪═══
+     │                     │                      │                      │
+     │                     │  9. detectAgentCreation()                   │
+     │                     │  ┌──────────────────────────┐               │
+     │                     │  │ • Read agent-config.json │               │
+     │                     │  │ • Add to openclaw.json5  │──────────────►│
+     │                     │  │ • INSERT into Postgres   │  SIGHUP       │
+     │                     │  │   (agents, widget_embeds)│  reload       │
+     │                     │  │ • Generate embedToken    │               │
+     │                     │  └──────────────────────────┘               │
+     │                     │                      │                      │
+═══════════════════════════╪══════════════════════╪══════════════════════╪═══
+  PHASE 4 — DELIVERY       │                      │                      │
+═══════════════════════════╪══════════════════════╪══════════════════════╪═══
+     │                     │                      │                      │
+     │  10. Embed code     │                      │                      │
+     │◄────────────────────┤                      │                      │
+     │                     │                      │                      │
+     │  <script src="https://dev.lamoom.com/widget.js"                   │
+     │    data-agent-token="<embedToken>" async></script>                │
+     │                     │                      │                      │
+     │  Customer pastes    │                      │                      │
+     │  before </body>     │                      │                      │
+     │                     │                      │                      │
+═══════════════════════════╪══════════════════════╪══════════════════════╪═══
+  RUNTIME — VISITOR CHAT   │                      │                      │
+═══════════════════════════╪══════════════════════╪══════════════════════╪═══
+     │                     │                      │                      │
+  VISITOR                  │                      │                      │
+     │  11. Open widget    │                      │                      │
+     ├─── WS connect ─────►│                      │                      │
+     │  {type:"auth",      │                      │                      │
+     │   token, userId}    │  12. Lookup token    │                      │
+     │                     │  Map to session key: │                      │
+     │                     │  agent:<id>:widget-  │                      │
+     │                     │    <id>-<visitorId>  │                      │
+     │                     │         │            │                      │
+     │  13. "How do I      │         │            │                      │
+     │    install?"        │         │            │                      │
+     ├────────────────────►├─────────┼───────────────────────────────────►│
+     │                     │         │            │   Forward to agent   │
+     │                     │         │            │   session (isolated) │
+     │                     │         │            │         │            │
+     │  14. Streamed       │◄────────┼───────────────────────────────────┤
+     │      response       │         │            │   Agent response     │
+     │◄────────────────────┤         │            │                      │
+     │                     │         │            │                      │
+     ▼                     ▼         ▼            ▼                      ▼
+```
+
+---
+
 ## User Flows
 
 ### Flow 1 — Customer creates an agent
