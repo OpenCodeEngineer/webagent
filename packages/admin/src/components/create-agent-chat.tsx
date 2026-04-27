@@ -1,16 +1,46 @@
 "use client";
 
 import { useRef, useEffect, useState, useCallback } from "react";
-import { Bot, SendHorizontal, Copy, Check } from "lucide-react";
+import { Bot, SendHorizontal, Copy, Check, Paperclip, X } from "lucide-react";
 import { type MetaAgentMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const EMBED_CODE_RE = /<script[^>]*data-agent-token[^>]*><\/script>/;
 const BASE_RECONNECT_MS = 1000;
 const MAX_RECONNECT_MS = 30000;
+const MAX_FILES = 5;
+const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024;
+const MAX_TOTAL_SIZE_BYTES = 8 * 1024 * 1024;
 
 interface CreateAgentChatProps {
   customerId?: string;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${bytes} B`;
+}
+
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== "string") {
+        reject(new Error("Unexpected file read result"));
+        return;
+      }
+      const base64 = result.split(",")[1];
+      if (!base64) {
+        reject(new Error("Failed to parse base64 file content"));
+        return;
+      }
+      resolve(base64);
+    };
+    reader.onerror = () => reject(new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
 }
 
 export function CreateAgentChat({ customerId }: CreateAgentChatProps) {
@@ -20,9 +50,11 @@ export function CreateAgentChat({ customerId }: CreateAgentChatProps) {
   const [embedCode, setEmbedCode] = useState("");
   const [copied, setCopied] = useState(false);
   const [isAuthed, setIsAuthed] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttempt = useRef(0);
@@ -173,9 +205,73 @@ export function CreateAgentChat({ customerId }: CreateAgentChatProps) {
   }, [customerId]);
 
   // --- Send handler ---
-  const onSend = useCallback(() => {
+  const pushErrorMessage = useCallback((error: string) => {
+    setMessages((prev) => [...prev, { role: "assistant", content: `⚠️ ${error}` }]);
+  }, []);
+
+  const onFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const incoming = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (incoming.length === 0) return;
+
+    setSelectedFiles((prev) => {
+      const next = [...prev];
+      const existingKeys = new Set(prev.map((file) => `${file.name}-${file.size}-${file.lastModified}`));
+      let exceededCount = false;
+      let exceededTotal = false;
+      let exceededPerFile = false;
+
+      for (const file of incoming) {
+        const fileKey = `${file.name}-${file.size}-${file.lastModified}`;
+        if (existingKeys.has(fileKey)) continue;
+
+        if (file.size > MAX_FILE_SIZE_BYTES) {
+          exceededPerFile = true;
+          continue;
+        }
+        if (next.length >= MAX_FILES) {
+          exceededCount = true;
+          continue;
+        }
+        const totalIfAdded = next.reduce((sum, item) => sum + item.size, 0) + file.size;
+        if (totalIfAdded > MAX_TOTAL_SIZE_BYTES) {
+          exceededTotal = true;
+          continue;
+        }
+
+        next.push(file);
+        existingKeys.add(fileKey);
+      }
+
+      if (exceededCount) pushErrorMessage(`You can attach up to ${MAX_FILES} files per message.`);
+      if (exceededPerFile) pushErrorMessage("Each attachment must be 2 MB or smaller.");
+      if (exceededTotal) pushErrorMessage("Total attachment size must be 8 MB or smaller.");
+
+      return next;
+    });
+  }, [pushErrorMessage]);
+
+  const onRemoveFile = useCallback((index: number) => {
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const onSend = useCallback(async () => {
     const text = input.trim();
     if (!text || loading || !isAuthed || !socketRef.current) return;
+
+    if (selectedFiles.length > MAX_FILES) {
+      pushErrorMessage(`You can attach up to ${MAX_FILES} files per message.`);
+      return;
+    }
+    if (selectedFiles.some((file) => file.size > MAX_FILE_SIZE_BYTES)) {
+      pushErrorMessage("Each attachment must be 2 MB or smaller.");
+      return;
+    }
+    const totalSelectedBytes = selectedFiles.reduce((sum, file) => sum + file.size, 0);
+    if (totalSelectedBytes > MAX_TOTAL_SIZE_BYTES) {
+      pushErrorMessage("Total attachment size must be 8 MB or smaller.");
+      return;
+    }
 
     setCopied(false);
     const userMessage: MetaAgentMessage = { role: "user", content: text };
@@ -183,8 +279,19 @@ export function CreateAgentChat({ customerId }: CreateAgentChatProps) {
     setInput("");
     setLoading(true);
 
-    socketRef.current.send(JSON.stringify({ type: "message", content: text }));
-  }, [input, loading, isAuthed]);
+    try {
+      const files = await Promise.all(selectedFiles.map(async (file) => ({
+        name: file.name,
+        type: file.type || "application/octet-stream",
+        data: await readFileAsBase64(file),
+      })));
+      socketRef.current.send(JSON.stringify({ type: "message", content: text, files }));
+      setSelectedFiles([]);
+    } catch {
+      setLoading(false);
+      pushErrorMessage("Unable to process attachments. Please remove them and try again.");
+    }
+  }, [input, loading, isAuthed, pushErrorMessage, selectedFiles]);
 
   const onCopyEmbedCode = async () => {
     if (!embedCode) return;
@@ -280,7 +387,55 @@ export function CreateAgentChat({ customerId }: CreateAgentChatProps) {
       {/* Input area */}
       <div>
         <div className="mx-auto max-w-3xl px-4 pb-6 pt-2">
+          {selectedFiles.length > 0 && (
+            <div className="mb-3 rounded-xl border border-zinc-700 bg-zinc-900 p-3">
+              <div className="mb-2 text-xs text-zinc-400">
+                Attachments ({selectedFiles.length}/{MAX_FILES}) · {formatFileSize(selectedFiles.reduce((sum, file) => sum + file.size, 0))} / {formatFileSize(MAX_TOTAL_SIZE_BYTES)}
+              </div>
+              <div className="space-y-2">
+                {selectedFiles.map((file, index) => (
+                  <div key={`${file.name}-${file.size}-${file.lastModified}-${index}`} className="flex items-center justify-between gap-3 rounded-lg bg-zinc-800 px-3 py-2 text-xs">
+                    <div className="min-w-0 text-zinc-200">
+                      <div className="truncate">{file.name}</div>
+                      <div className="text-zinc-500">{formatFileSize(file.size)}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onRemoveFile(index)}
+                      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-700 hover:text-zinc-200"
+                      aria-label={`Remove ${file.name}`}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex items-end gap-3 rounded-2xl border border-zinc-700 bg-zinc-800 px-4 py-3 focus-within:border-zinc-500 transition-colors">
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              multiple
+              onChange={onFileSelect}
+              disabled={loading || !isAuthed}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={loading || !isAuthed}
+              className={cn(
+                "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-colors",
+                loading || !isAuthed
+                  ? "bg-zinc-600 text-zinc-400"
+                  : "bg-zinc-700 text-zinc-200 hover:bg-zinc-600"
+              )}
+              aria-label="Attach files"
+            >
+              <Paperclip className="h-4 w-4" />
+            </button>
             <textarea
               ref={textareaRef}
               value={input}
