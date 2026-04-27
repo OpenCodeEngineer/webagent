@@ -280,12 +280,12 @@ export function CreateAgentChat({ customerId }: CreateAgentChatProps) {
     setLoading(true);
 
     try {
-      const files = await Promise.all(selectedFiles.map(async (file) => ({
+      const attachments = await Promise.all(selectedFiles.map(async (file) => ({
         name: file.name,
         type: file.type || "application/octet-stream",
         data: await readFileAsBase64(file),
       })));
-      socketRef.current.send(JSON.stringify({ type: "message", content: text, files }));
+      socketRef.current.send(JSON.stringify({ type: "message", content: text, attachments }));
       setSelectedFiles([]);
     } catch {
       setLoading(false);
