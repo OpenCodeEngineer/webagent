@@ -176,6 +176,7 @@ export function registerSsoRoutes(app: FastifyInstance) {
 
     // Login
     let librechatToken = '';
+    const setCookieHeaders: string[] = [];
     try {
       const loginRes = await fetch(`${librechatUrl}/api/auth/login`, {
         method: 'POST',
@@ -186,6 +187,9 @@ export function registerSsoRoutes(app: FastifyInstance) {
         request.log.error({ status: loginRes.status }, 'LibreChat login failed');
         return reply.status(502).type('text/html').send(errorPage('Chat service authentication failed'));
       }
+      // Capture Set-Cookie headers for HttpOnly cookie auth (LibreChat ≥0.7)
+      const rawCookies = loginRes.headers.getSetCookie?.() ?? [];
+      setCookieHeaders.push(...rawCookies);
       const loginData = (await loginRes.json()) as { token?: string };
       librechatToken = typeof loginData.token === 'string' ? loginData.token : '';
     } catch (err) {
@@ -195,6 +199,11 @@ export function registerSsoRoutes(app: FastifyInstance) {
 
     if (!librechatToken) {
       return reply.status(502).type('text/html').send(errorPage('Chat service returned no token'));
+    }
+
+    // Forward LibreChat's HttpOnly cookies (refreshToken, token_provider)
+    for (const cookie of setCookieHeaders) {
+      reply.header('Set-Cookie', cookie);
     }
 
     // Return HTML bridge: sets localStorage, redirects to LibreChat

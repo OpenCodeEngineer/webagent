@@ -213,7 +213,8 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
         })),
       });
     } catch (error) {
-      request.log.error({ error }, 'failed to list admin agents');
+      const errMsg = error instanceof Error ? error.message : String(error);
+      request.log.error({ error: errMsg, stack: error instanceof Error ? error.stack : undefined }, 'failed to list admin agents');
       return sendError(reply, 500, 'internal_error', 'Failed to list agents');
     }
   });
