@@ -123,6 +123,8 @@ export function registerOpenAiCompatRoutes(app: FastifyInstance) {
     const stream = body.stream === true;
 
     if (stream) {
+      // Tell Fastify we're taking over the response (SSE)
+      reply.hijack();
       reply.raw.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
