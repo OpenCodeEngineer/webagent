@@ -120,7 +120,6 @@ export function registerOpenAiCompatRoutes(app: FastifyInstance) {
     });
 
     const openclaw = new OpenClawClient();
-    let accumulatedResponse = '';
     const stream = body.stream === true;
 
     if (stream) {
@@ -142,25 +141,15 @@ export function registerOpenAiCompatRoutes(app: FastifyInstance) {
     }
 
     try {
+      // Don't use onDelta — just await the full response and emit as SSE.
+      // OpenClaw's WS event runIds don't match our subscription, so real-time
+      // streaming doesn't work. Buffered response is fine for agent creation.
       const response = await openclaw.sendMessage({
         message: lastUserMessage,
         agentId,
         sessionKey,
         name: 'openai-compat',
         timeoutSeconds: 240,
-        onDelta: (delta: string) => {
-          accumulatedResponse += delta;
-          if (!stream || clientDisconnected) {
-            return;
-          }
-          writeSseChunk(reply, {
-            id: completionId,
-            object: 'chat.completion.chunk',
-            created,
-            model,
-            choices: [{ index: 0, delta: { content: delta }, finish_reason: null }],
-          });
-        },
       });
 
       if (!response.success) {
@@ -179,14 +168,12 @@ export function registerOpenAiCompatRoutes(app: FastifyInstance) {
         return sendOpenAiError(reply, 502, response.error || 'Upstream agent error');
       }
 
-      const finalResponse = response.response ?? accumulatedResponse;
+      const finalResponse = response.response ?? '';
       await detectAgentCreation(finalResponse, customerId, app, domain);
 
       if (stream) {
         if (!clientDisconnected) {
-          // If no deltas were streamed (agent doesn't support streaming),
-          // emit the full response as a single chunk so LibreChat receives it
-          if (!accumulatedResponse && finalResponse) {
+          if (finalResponse) {
             writeSseChunk(reply, {
               id: completionId,
               object: 'chat.completion.chunk',
