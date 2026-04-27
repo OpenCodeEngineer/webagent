@@ -1,4 +1,4 @@
-import LibreChatIframe from "@/components/librechat-iframe";
+import { CreateAgentChat } from "@/components/create-agent-chat";
 import { auth } from "@/lib/auth";
 import { normalizeCustomerIdToUuid } from "@/lib/customer-id";
 import { redirect } from "next/navigation";
@@ -9,7 +9,7 @@ export default async function CreatePage() {
   const customerId = normalizeCustomerIdToUuid(session.user.id, session.user.email);
   return (
     <div className="h-screen bg-[#171717] overflow-hidden">
-      <LibreChatIframe customerId={customerId} />
+      <CreateAgentChat customerId={customerId} />
     </div>
   );
 }
