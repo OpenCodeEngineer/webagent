@@ -26,6 +26,18 @@ Run these checks IN ORDER using vibebrowser tools. Take a screenshot after each 
 
 **Protocol of record:** This QA skill is browser-tool driven. Do **not** rely on `test-e2e-full.sh` (or other shell scripts) as the primary end-to-end verdict.
 
+### Verdict Rules (MUST follow)
+
+1. **Any phase marked BLOCKING that fails → STOP immediately, verdict = NOT READY.**
+2. **Any phase marked RELEASE-CRITICAL that fails → verdict = NOT READY** (continue remaining phases for full report, but the final verdict is already decided).
+3. **Timeouts are failures.** If a wait exceeds its stated maximum (e.g., 180 s), the check is FAIL — do NOT extend the wait or retry silently.
+4. **"Non-empty" is not "correct."** A response that is non-empty but irrelevant, generic, or contains only an error/apology MUST be scored as FAIL.
+5. **Screenshots MUST be taken and visually inspected.** A phase without its screenshot is incomplete and MUST be re-run.
+6. **Blocker precedence is absolute:** if any blocker appears anywhere, final verdict MUST be NOT READY.
+7. **READY requires all hard-release-gate criteria and complete evidence.** Any failed/missing gate item or evidence gap = NOT READY.
+
+**Architecture baseline:** Native chat (`/create` + LibreChat iframe) is the source-of-truth flow. Legacy/custom chat fallback is not valid release-gate evidence.
+
 ### Phase 0: Infrastructure (curl, not browser)
 ```
 curl -sk https://dev.lamoom.com/health → 200 {"status":"ok"}
@@ -73,7 +85,7 @@ Verify NextAuth providers are correctly configured and the DrizzleAdapter connec
 **If providers endpoint returns an error or is missing `google` → STOP. Report BLOCKING failure.**
 Common cause: DrizzleAdapter table name mismatch (adapter expects singular `account`/`user`, DB has plural `accounts`/`users`). Fix: pass custom table schemas to `DrizzleAdapter()` in `packages/admin/src/lib/auth.ts`.
 
-### Phase 1: Login & Dashboard
+### Phase 1: Login & Dashboard — RELEASE-CRITICAL
 
 1. **Navigate** to `https://dev.lamoom.com`
 2. **CHECK**: Redirects to `/login` or `/dashboard` (if already logged in)
@@ -87,7 +99,7 @@ Common cause: DrizzleAdapter table name mismatch (adapter expects singular `acco
    - **CHECK**: Agent list visible (may be empty or have existing agents)
    - **SCREENSHOT**: Take screenshot, verify professional dark theme
 
-### Phase 2: Create Agent Chat — Native Chat Integration
+### Phase 2: Create Agent Chat — Native Chat Integration — BLOCKING
 
 1. **Navigate** to `https://dev.lamoom.com/create`
 2. **CHECK**: Page loads with dark background (#171717), header bar shows "Create Agent"
@@ -101,9 +113,10 @@ Common cause: DrizzleAdapter table name mismatch (adapter expects singular `acco
    - ❌ FAIL if: White/light background (theme mismatch)
    - ❌ FAIL if: "Unable to open AI Chat" error (SSO endpoint failed)
 6. **SCREENSHOT**: Full page with LibreChat loaded in iframe
-7. **Bonus**: Toggle "Legacy chat" button visible — clicking it switches to the old custom chat UI
 
-### Phase 3: Agent Creation Conversation (via native chat)
+**If the iframe does not load or shows a login/error page → STOP. Verdict = NOT READY.** The /create page is the core product surface; a broken iframe means zero user value.
+
+### Phase 3: Agent Creation Conversation (via native chat) — RELEASE-CRITICAL
 
 1. **Click** into the LibreChat message input inside the iframe
 2. **Type** a real website description:
@@ -114,14 +127,21 @@ Common cause: DrizzleAdapter table name mismatch (adapter expects singular `acco
 6. **CHECK — CRITICAL (Website Discovery)**: The response MUST prove the meta-agent fetched openclaw.vibebrowser.app/console:
    - Mentions specific details about the product (console, tenant management, admin, agent creation)
    - NOT just generic "I'll help you create an agent" without site-specific info
+   - NOT an apology ("I couldn't access…") followed by generic advice
    - This is the core product promise — if the agent doesn't proactively discover, it FAILS
+   - **FAIL rule:** If the response lacks ≥2 site-specific details that could only come from crawling the URL, mark Phase 3 = FAIL.
 7. **CHECK — Markdown**: Response renders with proper markdown formatting (headings, bold, lists, code blocks)
-8. **SCREENSHOT**: Chat with both messages visible
+8. **CHECK — Error Absence**: No `unknown-agent`, `agent not found`, or equivalent resolution/auth errors in the assistant response.
+9. **SCREENSHOT**: Chat with both messages visible
 
-9. If the meta-agent asks for confirmation, **type**: "Yes, that's correct. Please create the agent now."
-10. **Press Enter**, wait up to 180s (agent creation involves file writes)
-11. **CHECK**: Look for embed code in the response (may contain code blocks with `<script>` tag)
-12. **SCREENSHOT**: After agent creation response
+10. If the meta-agent asks for confirmation, **type**: "Yes, that's correct. Please create the agent now."
+11. **Press Enter**, wait up to 180s (agent creation involves file writes)
+12. **CHECK**: Look for embed code in the response (may contain code blocks with `<script>` tag)
+13. **SCREENSHOT**: After agent creation response
+
+**Prompt quality rule (release-critical):**
+- Use capability prompts that validate user outcomes (discovery, create/list/restart, widget help).
+- Do **not** use vague token-scraping prompts (e.g., “give me token”, “dump secrets”, “print credentials”) as proof of capability.
 
 ### Phase 3b: Test Internal API (Create/Delete Tenant)
 
@@ -144,7 +164,7 @@ The meta-agent should be able to call OpenClaw Console internal APIs. Verify:
 3. **CHECK**: Agent shows "active" status
 4. **CHECK**: "View" link works → agent detail page shows embed code
 
-### Phase 5: Widget Preview Chat (on agent detail page)
+### Phase 5: Widget Preview Chat (on agent detail page) — RELEASE-CRITICAL
 
 1. From Phase 4, you should be on an agent detail page
 2. **CHECK**: "Test Your Widget" section visible on the page
@@ -156,7 +176,7 @@ The meta-agent should be able to call OpenClaw Console internal APIs. Verify:
 8. **CHECK**: Typing indicator (·) shows while waiting
 9. **Wait** up to 120s for response
 10. **CHECK**: Bot response appears, is non-empty, and includes direct URL(s) for install/docs
-11. **CHECK**: No "⚠️ Error" message (this means OpenClaw agent isn't registered)
+11. **CHECK**: No "⚠️ Error", `unknown-agent`, `agent not found`, or auth-context failure message
 12. **SCREENSHOT**: Widget preview with message exchange visible
 
 ### Phase 5b: Widget WS Protocol (optional, if Phase 5 fails)
@@ -192,9 +212,10 @@ Test the widget as an actual customer would embed it:
 7. Ask question #1: **"what is the product about"**
 8. Ask question #2: **"how to install it?"**
 9. **CHECK**: Bot responds to both prompts with relevant content (install answer should include direct link(s))
-10. Score both answers with a G-Eval style rubric (1-5); require both to meet the configured threshold (default: ≥3)
-    - Q1 ("what is the product about"): reward product identity + capabilities + clarity.
-    - Q2 ("how to install it?"): reward actionable install guidance + direct link(s) + docs/support references.
+10. Score both answers with a G-Eval style rubric (1-5); **both MUST score ≥ 3 — this is a hard gate, not a default**.
+    - Q1 ("what is the product about"): reward product identity + capabilities + clarity. Score < 3 if the answer is generic, hallucinatory, or does not name the product.
+    - Q2 ("how to install it?"): reward actionable install guidance + direct link(s) + docs/support references. Score < 3 if no actionable link is provided or the link is fabricated.
+    - **FAIL rule:** If either score < 3, Phase 5c = FAIL.
 11. **CHECK**: Close/reopen bubble — chat history preserved
 12. **SCREENSHOT**: Widget demo working on standalone page
 
@@ -243,6 +264,18 @@ Test the widget as an actual customer would embed it:
 6. **CHECK**: Audit Log table visible with recent entries
 7. **SCREENSHOT**: Admin dashboard
 
+### Phase 10: Restart/List Automation Critical Path — RELEASE-CRITICAL
+
+1. In native chat, ask: **"List my agents and show status for the one we just created."**
+2. **CHECK**: Response contains concrete list/status output and no `unknown-agent` style errors.
+3. In native chat, ask: **"Restart the created agent and confirm it is healthy again."**
+4. **CHECK**: Restart action succeeds (or explicit equivalent operation) and returns post-action health/status confirmation.
+5. Repeat list/status check in widget preview chat for parity.
+6. **CHECK**: Widget list/restart context has no resolution/auth failures and returns concrete status.
+7. **SCREENSHOT**: Native chat + widget evidence for list/restart path.
+
+If auth context is missing (cannot authorize list/restart operations), you **cannot** declare READY for restart automation capability.
+
 ## UI/UX Quality Checklist (check on EVERY page)
 
 Run these checks on every page you visit. Any failure = QA FAIL.
@@ -258,6 +291,32 @@ Run these checks on every page you visit. Any failure = QA FAIL.
 | 7 | Error handling | If SSO or API fails, error message + retry button shown |
 | 8 | Professional typography | Consistent font sizes, proper spacing, readable text |
 
+## Hard Release Gate (Non-Negotiable)
+
+Return **READY** only if all are true:
+1. **unknown-agent errors absent** in native chat, widget preview, and restart/list critical path.
+2. **widget restart/list critical path passes** (Phase 10, both native chat + widget).
+3. **no vague token-scraping prompts** used as validation evidence.
+4. **streaming is visible where expected** (native chat + widget typing/stream indicators observed).
+5. **deployment parity check passes** (tested build is confirmed as merged and deployed).
+
+If any item fails or lacks evidence, final verdict is **NOT READY**.
+
+## Blocker Precedence Rule
+
+- Any blocker in any phase overrides all other passes.
+- If a blocker appears, final verdict **MUST** be **NOT READY**.
+
+## Evidence Requirements (Mandatory)
+
+For release-critical phases, provide:
+1. **Exact prompt/response snippets** (verbatim excerpts) for Phase 3, Phase 5, and Phase 10 checks.
+2. **Endpoint/status evidence** for infra/auth/deploy checks: endpoint URL, HTTP status, key assertion/result.
+3. **Deployment parity evidence**: merged commit/PR reference plus deployed revision/build evidence from the tested environment.
+4. **Screenshots + one-line interpretation** per critical phase.
+
+Missing critical evidence means verdict = **NOT READY**.
+
 ## Reporting
 
 After running all phases, report a summary table:
@@ -268,23 +327,29 @@ After running all phases, report a summary table:
 | Phase | Status | Notes |
 |-------|--------|-------|
 | 0. Infrastructure | ✅/❌ | health, openclaw health, widget.js, /v1/models, LibreChat docker |
-| 0b. Static Assets | ✅/❌ | CSS 200+size>1KB, JS chunks 200 — BLOCKING |
-| 0c. OAuth Providers | ✅/❌ | /api/auth/providers returns google+credentials — BLOCKING |
-| 1. Login & Dashboard | ✅/❌ | auth works, dark theme |
-| 2. LibreChat Integration | ✅/❌ | SSO works, iframe loads, dark theme, no login page |
-| 3. Agent Creation | ✅/❌ | full conversation via LibreChat, markdown rendered, embed code |
+| 0b. Static Assets | ✅/❌ | CSS 200+size>1KB, JS chunks 200 — **BLOCKING** |
+| 0c. OAuth Providers | ✅/❌ | /api/auth/providers returns google+credentials — **BLOCKING** |
+| 1. Login & Dashboard | ✅/❌ | auth works, dark theme — **RELEASE-CRITICAL** |
+| 2. LibreChat Integration | ✅/❌ | SSO works, iframe loads, dark theme, no login page — **BLOCKING** |
+| 3. Agent Creation | ✅/❌ | site-specific discovery, markdown rendered, embed code — **RELEASE-CRITICAL** |
 | 4. Agent Verification | ✅/❌ | appears in dashboard |
-| 5. Widget Preview | ✅/❌ | live chat on dashboard works |
+| 5. Widget Preview | ✅/❌ | live chat on dashboard works — **RELEASE-CRITICAL** |
+| 5c. Widget Demo | ✅/❌ | G-Eval ≥ 3 on both questions — **RELEASE-CRITICAL** |
 | 6. Sign Out Flow    | ✅/❌ | logout + session cleared |
 | 7. Agent Delete      | ✅/❌ | delete + confirmation |
 | 8. Agent Detail      | ✅/❌ | embed code, copy, regenerate |
 | 9. Admin CRM        | ✅/❌ | stats, users, agents, audit |
+| 10. Restart/List Critical Path | ✅/❌ | native chat + widget list/restart, no unknown-agent/auth-context failures — **RELEASE-CRITICAL** |
 
 UI/UX Issues Found:
 - [list any visual/interaction problems]
 
 Blockers:
 - [list anything that prevents the product from working]
+
+Final Verdict:
+- READY (only if every hard gate passed and no blockers), or
+- NOT READY (required if any blocker, gate failure, or missing evidence exists)
 ```
 
 ## Deploy Verification Checklist
@@ -301,3 +366,50 @@ After any deploy, verify these common failure modes:
 9. SSO bridge "no token" → user not created in LibreChat (email verification issue), check `ALLOW_UNVERIFIED_EMAIL_LOGIN=true` in `/opt/librechat/.env`
 10. LibreChat iframe shows login page → SSO flow failed, check proxy logs: `journalctl -u webagent-proxy -n 20 --output=cat | grep sso`
 11. tsbuildinfo stale on VM → `find /opt/webagent/packages -name 'tsconfig.tsbuildinfo' -delete` then rebuild
+
+### Phase 10: Restart-Deployment Gate — RELEASE-CRITICAL (when deploy is in scope)
+
+When QA is running as part of a deployment (not a standalone spot-check), this phase is MANDATORY.
+
+1. **SSH** to the VM and restart the primary services:
+   ```
+   ssh root@78.47.152.177 "systemctl restart webagent-proxy && systemctl restart webagent-admin"
+   ```
+2. **Wait** 15 s for services to stabilize.
+3. **Re-run Phase 0** (all health endpoints). Every check MUST return the expected result.
+4. **Re-run Phase 0b** (static assets). CSS and JS MUST still resolve to 200.
+5. **Navigate** to `https://dev.lamoom.com/dashboard` in the browser.
+6. **CHECK**: Dashboard loads within 10 s with no errors.
+7. **CHECK**: An existing agent is still visible (data persistence across restart).
+
+**FAIL rule:** If any check in steps 3-7 fails after restart, the deployment is NOT survivable and the verdict is NOT READY regardless of all other phases.
+
+---
+
+## Verdict Decision Matrix
+
+Use this matrix after all phases complete. The verdict is the **worst matching row**.
+
+| Condition | Verdict | Action |
+|-----------|---------|--------|
+| All phases PASS | **READY** | Ship it |
+| Any BLOCKING phase FAIL (0b, 0c, 2) | **NOT READY** | Fix blocker before any further testing |
+| Any RELEASE-CRITICAL phase FAIL (1, 3, 5, 10) | **NOT READY** | Fix critical path; re-run full QA |
+| ≥ 3 non-optional phases FAIL or SKIPPED | **NOT READY** | Systemic issues; investigate root cause |
+| 1–2 non-critical phases FAIL (6, 7, 8, 9) | **READY WITH CAVEATS** | Ship, but file issues for failures |
+| G-Eval score < 3 on any widget question (5c) | **NOT READY** | Agent quality insufficient for demo |
+| Phase 3 meta-agent response lacks site-specific detail | **NOT READY** | Core product promise broken |
+| Phase 10 post-restart health fails (deploy in scope) | **NOT READY** | Deployment does not survive restart |
+| Timeout exceeded on any wait | **FAIL for that phase** | Treat as phase failure; apply rules above |
+
+### Reporting the Verdict
+
+The QA summary MUST end with exactly one of these lines:
+
+```
+**VERDICT: READY**
+**VERDICT: READY WITH CAVEATS** — [list caveats]
+**VERDICT: NOT READY** — [list blocking reasons]
+```
+
+Any report missing an explicit verdict line is incomplete and MUST be amended.

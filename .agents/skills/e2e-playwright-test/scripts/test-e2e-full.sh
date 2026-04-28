@@ -2,6 +2,11 @@
 # =============================================================================
 # Lamoom Platform — Full E2E Flow Test
 #
+# IMPORTANT:
+# - Supplemental protocol checker only.
+# - MUST NOT be used as sole MVP/READY release verdict.
+# - Browser protocol in ../SKILL.md remains source of record for pass/fail readiness.
+#
 # Tests the COMPLETE product flow at the protocol level:
 #   Health → Agent Creation via Meta-Agent → Agent Verification → Widget Chat (WS)
 #

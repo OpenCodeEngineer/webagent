@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # E2E AI Liveness Test Suite
+# Supplemental liveness signal only — not a release-readiness verdict source.
 # Verifies the system talks to a real, flexible AI — not hardcoded responses.
 # Run against the live proxy endpoint.
 #
