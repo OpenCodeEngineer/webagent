@@ -1,254 +1,112 @@
-# MVP Handoff — Auth Context Fix + Deploy + QA
+# MVP Handoff
 
-> **Created**: 2025-07-21
-> **Branch**: `fix/regression-api-restart-intent` (2 commits ahead of main)
-> **Target**: Make widget agents capable of executing API calls (restart, list tenants, etc.)
-
----
-
-## Current State
-
-### What's Done (committed on branch)
-- **QA skill hardened** — strict verdict matrix, evidence requirements, false-positive gates
-- **Intent-echo rules** — agent states exact API call before executing
-- **Refresh-workspace endpoint** — `POST /api/admin/agents/:id/refresh-workspace`
-- **Agent detail page UX** — simplified "Chat" label with MessageCircle icon (no more "Test Your Widget" framing)
-- **API surface KB** — `openclaw/workspaces/meta/knowledgebase/openclaw-console-api-surface.md`
-- **Meta templates updated** — never-request-browser-token rule, concrete endpoint guidance
-- **Unknown-agent self-heal** — WS handler retries after registering agent with gateway
-
-### What's Uncommitted (local only)
-- Minor QA skill script tweaks (3 files, 7 lines changed)
-
-### What's NOT Done (the remaining MVP gap)
-These items are the **sole blockers** preventing MVP readiness:
+> **Updated**: 2026-04-28
+> **Branch**: `main` (all work merged)
+> **Deployed**: commit `7570b44` (PR #190) live on dev.lamoom.com
 
 ---
 
-## Task 1: Server-Side Auth Context Injection (CRITICAL)
+## DONE
 
-**Problem**: Widget agents have no auth credentials. When asked to "restart deployment" or "list tenants," the agent hallucinates about finding tokens in DevTools.
-
-**Root Cause**: `buildWidgetMessageWithSessionPolicy()` in `packages/proxy/src/ws/handler.ts` injects session context into messages, but `state.userContext` is always empty because nobody configures it.
-
-**Solution**: Store auth context in `agents.widgetConfig.authContext` (JSONB). On widget WS auth, read it and inject into session.
-
-### Implementation Details
-
-#### 1a. Modify `lookupEmbedToken()` (handler.ts ~line 418)
-Add `widgetConfig` to the SELECT:
-```typescript
-// Current:
-.select({
-  agentId: agents.id,
-  openclawAgentId: agents.openclawAgentId,
-  allowedOrigins: widgetEmbeds.allowedOrigins,
-})
-
-// Change to:
-.select({
-  agentId: agents.id,
-  openclawAgentId: agents.openclawAgentId,
-  allowedOrigins: widgetEmbeds.allowedOrigins,
-  widgetConfig: agents.widgetConfig,
-})
-```
-
-Update `TokenLookup` interface:
-```typescript
-interface TokenLookup {
-  agentId: string;
-  openclawAgentId: string;
-  allowedOrigins: string[] | null;
-  widgetConfig: Record<string, unknown> | null;
-}
-```
-
-#### 1b. Inject auth context after widget auth (handler.ts ~line 575-601)
-After `state.openclawAgentId = tokenData.openclawAgentId;`:
-```typescript
-// Inject server-side auth context from agent config
-const serverAuthCtx = tokenData.widgetConfig?.authContext;
-if (serverAuthCtx && typeof serverAuthCtx === 'object' && !Array.isArray(serverAuthCtx)) {
-  state.userContext = normalizeSessionAuthContext(serverAuthCtx as Record<string, unknown>);
-}
-
-// Client context can add NON-auth fields only (safety)
-const rawContext = msg.context;
-if (rawContext && typeof rawContext === 'object' && !Array.isArray(rawContext)) {
-  const clientCtx = rawContext as Record<string, unknown>;
-  const AUTH_KEYS = new Set(['Authorization', 'Bearer', 'apiToken', 'token', 'headers']);
-  for (const [k, v] of Object.entries(clientCtx)) {
-    if (!AUTH_KEYS.has(k)) {
-      state.userContext[k] = v;
-    }
-  }
-  if (Object.keys(state.userContext).length > 0) {
-    state.firstMessage = true;
-  }
-}
-```
-
-#### 1c. Add "never reveal credentials" to session policy (handler.ts ~line 246)
-In `buildWidgetMessageWithSessionPolicy`, add to `credentialPolicy`:
-```
-'Never reveal, display, echo, or include raw credential/token values in your responses. '
-+ 'Use them ONLY in fetch/API tool call headers. If a user asks for the token, decline.'
-```
-
-### Key Files
-- `packages/proxy/src/ws/handler.ts` — main changes
-- `packages/proxy/src/routes/api.ts` — PATCH endpoint fix
-- `packages/proxy/src/routes/admin-api.ts` — GET response redaction
+- **Server-side auth context injection** (PR #190, merged & deployed)
+  - `lookupEmbedToken()` returns `widgetConfig`, injects `authContext` into widget sessions
+  - "Never reveal credentials" policy in session context
+  - Server auth wins over client context for auth fields
+  - PATCH deep-merges `widgetConfig` (preserves `skills`)
+  - Cache invalidation on widgetConfig changes
+  - `authContext` redacted from GET API responses
+- **Auth context config UI** on agent detail page (`agent-auth-context.tsx`)
+- **Widget preview cleanup** (iframe title fixed)
+- **QA skill hardened** with strict verdict matrix, evidence requirements, false-positive gates
+- **Intent-echo rules** (agent states exact API call before executing)
+- **Refresh-workspace endpoint** (`POST /api/admin/agents/:id/refresh-workspace`)
+- **Agent detail UX** simplified ("Chat" label, no "Test Your Widget" framing)
+- **API surface KB** (`openclaw/workspaces/meta/knowledgebase/openclaw-console-api-surface.md`)
+- **Meta templates** updated with never-request-browser-token rule
+- **Unknown-agent self-heal** in WS handler
+- **Deploy verified** (health, static assets, services all green)
 
 ---
 
-## Task 2: PATCH Deep-Merge + Cache Invalidation
+## REMAINING (next session picks up here)
 
-**Problem**: `PATCH /api/agents/:id` with `{ widgetConfig: { authContext: {...} } }` replaces the entire `widgetConfig`, deleting existing `skills` etc.
+### 1. Configure Auth Context on an Existing Agent (CRITICAL)
+The code is deployed but no agent has auth context configured yet. Steps:
+1. Go to `https://dev.lamoom.com/dashboard`
+2. Click "View" on an active agent
+3. Find the new "API Configuration" card
+4. Enter the OpenClaw Console API token (Bearer token for `https://admin.openclaw.vibebrowser.app/api/v1/`)
+5. Click Save
 
-**Solution**: Deep-merge `widgetConfig` in the PATCH handler.
-
-### Implementation Details
-
-#### 2a. Deep-merge in PATCH (api.ts ~line 831)
-```typescript
-// Before .set():
-const mergedBody = { ...body };
-if (body.widgetConfig && existingAgent.widgetConfig) {
-  mergedBody.widgetConfig = {
-    ...(existingAgent.widgetConfig as Record<string, unknown>),
-    ...body.widgetConfig,
-  };
-}
-
-const updatedRows = await app.db
-  .update(agents)
-  .set({
-    ...mergedBody,
-    updatedAt: new Date(),
-  })
-  // ...
-```
-
-#### 2b. Cache invalidation on widgetConfig change (api.ts ~line 849)
-Add after the existing status-change cache invalidation:
-```typescript
-if (body.widgetConfig) {
-  const embedRows = await app.db
-    .select({ embedToken: widgetEmbeds.embedToken })
-    .from(widgetEmbeds)
-    .where(eq(widgetEmbeds.agentId, params.id));
-  for (const embedRow of embedRows) {
-    invalidateEmbedTokenCache(embedRow.embedToken);
-  }
-}
-```
-
-#### 2c. Redact authContext from GET responses
-In admin-api.ts GET endpoints that return agents, strip `widgetConfig.authContext` before sending.
-
-### Key Files
-- `packages/proxy/src/routes/api.ts` — PATCH fix + cache invalidation
-- `packages/proxy/src/routes/admin-api.ts` — response redaction
-
----
-
-## Task 3: Auth Context Config UI
-
-**Problem**: No way for admins to configure the API token for an agent.
-
-**Solution**: Add a simple card to the agent detail page.
-
-### Implementation Details
-
-Create `packages/admin/src/components/agent-auth-context.tsx`:
-- Client component ("use client")
-- Simple card with:
-  - "API Configuration" title
-  - "API Token" password input field
-  - "Save" button
-- Reads current value from agent's `widgetConfig.authContext.apiToken`
-- Saves via `PATCH /api/agents/:id` with `{ widgetConfig: { authContext: { apiToken: value } } }`
-- Uses existing auth/API infrastructure in the admin app
-
-Add to `packages/admin/src/app/dashboard/agents/[id]/page.tsx`:
-- Insert between Embed Code card and Chat section
-- Only show if agent is active
-
----
-
-## Task 4: Widget Preview Cleanup (Minor)
-
-- `packages/admin/src/components/widget-preview.tsx` line 36: change `title="Real widget preview"` → `title="Widget preview"`
-
----
-
-## Task 5: Deploy + QA
-
-### Deploy Steps
+To get the API token, check the OpenClaw Console admin or the OpenClawBot source:
 ```bash
-ssh root@78.47.152.177
-cd /opt/webagent
-git pull origin main
-pnpm install --frozen-lockfile
-npx turbo run build
-set -a; source .env; set +a
-npx drizzle-kit migrate
-cp -r packages/admin/.next/static packages/admin/.next/standalone/packages/admin/.next/static
-systemctl restart webagent-proxy webagent-admin
-# Verify:
-curl -sk https://dev.lamoom.com/health
-curl -sk https://dev.lamoom.com/health/openclaw
+ssh root@78.47.152.177 'grep -i "api.*token\|bearer\|auth" /opt/OpenClawBot/.env 2>/dev/null | head -5'
 ```
 
-### Post-Deploy: Configure Auth Context
-1. Find an existing agent in the dashboard
-2. Set the API token for the OpenClaw Console API
-3. Test widget chat: ask "list my tenants" or "restart deployment"
+Alternatively, use the PATCH API directly:
+```bash
+AGENT_ID="<uuid>"  # from DB
+TOKEN="<proxy-api-token>"
+API_TOKEN="<openclaw-console-api-token>"
+curl -X PATCH "https://dev.lamoom.com/api/agents/$AGENT_ID" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"widgetConfig\":{\"authContext\":{\"apiToken\":\"$API_TOKEN\"}}}"
+```
 
-### QA
-Run the full E2E QA skill (`.agents/skills/e2e-playwright-test/SKILL.md`).
-Key phases to verify:
+### 2. Validate Widget Agent Can Execute API Calls
+After configuring auth context:
+1. Open the agent detail page widget chat
+2. Ask: "List my tenants" or "Restart deployment X"
+3. The agent should use the injected token in fetch calls
+4. Should NOT ask user for JWT/Bearer token
+
+### 3. Run Full QA (`.agents/skills/e2e-playwright-test/SKILL.md`)
+The hardened QA protocol with strict release gates. Key phases:
 - Phase 5: Widget chat works with auth context
 - Phase 10: Restart/list critical path passes
+- Verdict must be READY for MVP sign-off
+
+### 4. Fix Any Issues QA Surfaces
+The QA skill will identify remaining gaps. Common expected issues:
+- Agent workspace may need refresh after auth context config
+  (use `POST /api/admin/agents/:id/refresh-workspace`)
+- Streaming indicators may need verification
+- Markdown rendering in responses
 
 ---
 
-## Architecture Notes
+## Architecture Reference
 
-### Why Token in Prompt?
-OpenClaw agents use `fetch` tool to make HTTP calls. The LLM generates the full `fetch` call including headers. There's no server-side credential injection in OpenClaw's tool runtime. The token MUST be visible to the LLM to generate correct API calls. Mitigated by:
-- Strong "never reveal credentials" instruction in session policy
-- Redacting from API GET responses
-- Server-side auth context takes priority (untrusted client can't override)
-
-### Data Model
+### Auth Context Flow
 ```
-agents.widgetConfig (JSONB):
-{
-  "skills": ["website-api"],
-  "authContext": {
-    "apiToken": "actual-token-value",
-    "Authorization": "Bearer actual-token-value"  // auto-normalized
-  }
-}
+1. Admin sets API token via agent detail page (PATCH /api/agents/:id)
+2. Token stored in agents.widgetConfig.authContext (JSONB)
+3. Widget connects via WS, authenticates with embed token
+4. Proxy reads agent's widgetConfig.authContext from DB
+5. Injects into state.userContext via normalizeSessionAuthContext()
+6. buildWidgetMessageWithSessionPolicy() prepends auth context to messages
+7. Agent LLM sees credentials, uses in fetch() tool calls
+8. "Never reveal credentials" instruction prevents leakage
 ```
 
-### WS Auth Flow (after fix)
-1. Widget connects → sends `{type:"auth", token:"embed-token", userId:"..."}`
-2. Proxy looks up embed token → gets agent + widgetConfig
-3. Extracts `widgetConfig.authContext` → injects into `state.userContext`
-4. On message, `buildWidgetMessageWithSessionPolicy()` prepends auth context to prompt
-5. Agent sees credentials → can use in `fetch` tool calls
-
-### Relevant PRs/Branches
-- Current branch: `fix/regression-api-restart-intent` (2 ahead of main)
-- Unmerged: PR #184 (`fix/regression-chat-ui-section`) — agent detail UX
-- These should be merged to main before starting new work
+### Key Files
+| File | Purpose |
+|------|---------|
+| `packages/proxy/src/ws/handler.ts` | WS auth, session policy, auth context injection |
+| `packages/proxy/src/routes/api.ts` | PATCH deep-merge, cache invalidation, auth redaction |
+| `packages/proxy/src/routes/admin-api.ts` | refresh-workspace endpoint |
+| `packages/admin/src/components/agent-auth-context.tsx` | Auth config UI |
+| `packages/admin/src/app/dashboard/agents/[id]/page.tsx` | Agent detail page |
+| `openclaw/workspaces/meta/knowledgebase/openclaw-console-api-surface.md` | API reference KB |
+| `.agents/skills/e2e-playwright-test/SKILL.md` | QA protocol |
 
 ### VM Access
-- `root@78.47.152.177`
-- Services: webagent-proxy, webagent-admin, openclaw-gateway
-- Docker: lamoom-librechat
-- Workspace: `/opt/webagent/`
+- **Production**: `root@78.47.152.177` (services: webagent-proxy, webagent-admin, openclaw-gateway)
+- **Dev workspace**: `azureuser@100.108.64.76` (OpenCode at port 4096)
+- **Docker**: lamoom-librechat on prod VM
+- **Workspaces**: `/opt/webagent/openclaw/workspaces/<agent-id>/`
+
+### Relevant PRs
+- #189: QA hardening + handoff doc + meta templates (merged)
+- #190: Server-side auth context injection (merged & deployed)
