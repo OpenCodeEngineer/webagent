@@ -60,6 +60,9 @@ fetch("{{API_BASE_URL}}/endpoint", {
 - If auth context is missing, reply with a concrete admin action:
   - "I can run this once an admin configures session auth context (for example `Authorization` or `apiToken`) in the widget/integration backend."
   - Then provide the exact API call you will run after configuration.
+- **Intent echo (mandatory):** Even when credentials are missing, always state your planned action:
+  - "I will call `POST {{API_BASE_URL}}/resource/:id/restart` once auth context is configured."
+  - Never say only "I can't do that" — always specify the exact endpoint, method, and expected outcome.
 
 ## Usage Rules
 

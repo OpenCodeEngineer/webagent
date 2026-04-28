@@ -31,7 +31,13 @@ If links are missing, infer from fetched content and include only verified URLs.
 Before generating, scan the `templates/` directory (relative to this workspace) for **specialized templates** that match the target website. Specialized templates have a site-specific suffix — for example:
 - `AGENTS-openclaw-console-navigation.md` → use for openclaw console agents instead of generic `AGENTS.md`
 - `skills/openclaw-console-navigation/SKILL.md` → include as an extra skill
-- `knowledgebase/openclaw-console-navigation.md` → include as the API reference knowledgebase
+- `knowledgebase/openclaw-console-navigation.md` → fallback specialized knowledgebase template
+
+For OpenClaw Console targets (`openclaw.vibebrowser.app/console`), deterministically prefer the canonical KB at:
+- `openclaw/workspaces/meta/knowledgebase/openclaw-console-api-surface.md`
+
+Copy this canonical KB into `<workspacePath>/knowledgebase/api-reference.md` as the primary API reference, then layer customer-specific naming/context only if needed without changing endpoint/auth contract semantics.
+Do not synthesize or rewrite OpenClaw `/api/v1` contracts from memory when this KB is available.
 
 **Selection rule:** if a specialized template matches the website being onboarded, prefer it over the generic template. Copy its content as-is (filling only genuinely dynamic values like names/URLs), because specialized templates already contain verified endpoint tables, auth flows, and canonical links.
 
@@ -53,7 +59,7 @@ Read templates from `templates/` directory as starting point (using specialized 
 - `<workspacePath>/knowledgebase/overview.md` — product summary + capabilities
 - `<workspacePath>/knowledgebase/key-links.md` — canonical visitor links
 - `<workspacePath>/knowledgebase/use-cases.md` — concrete role/use-case examples
-- `<workspacePath>/knowledgebase/api-reference.md` — **required when API exists**: full endpoint table with method, path, request body, response shape, and auth requirements. Use specialized knowledgebase template if found.
+- `<workspacePath>/knowledgebase/api-reference.md` — **required when API exists**: full endpoint table with method, path, request body, response shape, and auth requirements. For OpenClaw Console targets, use `openclaw/workspaces/meta/knowledgebase/openclaw-console-api-surface.md` first; otherwise use specialized template if found.
 
 Fill all files with customer-specific values (website name, product, API details, tone, links).
 
@@ -77,7 +83,12 @@ In generated files, always include:
 9. The `website-api` skill must include `fetch` tool usage examples specific to the API (correct base URL, auth header format, content type).
 10. For mutating endpoints (POST, PUT, DELETE, PATCH), the skill must include the exact request body shape.
 11. Credential source policy must be explicit: use platform-provided session auth context; never instruct end users to scrape DevTools/localStorage/cookies for tokens.
-12. Missing-credential fallback must be concrete and safe: ask admin/integrator to configure backend session auth context keys (`Authorization`/`apiToken`), then retry the named API call.
+12. Missing-credential fallback must be concrete and safe: ask admin/integrator to configure backend session auth context keys in this exact order (`Authorization`, `Bearer`, `apiToken`, `headers`), then retry the named API call.
+13. For OpenClaw Console targets, `website-api/SKILL.md` must explicitly include:
+   - `GET /api/v1/tenants` (list) and
+   - `POST /api/v1/tenants/:id/restart` (restart, no body required; `{}` accepted),
+   plus exact auth context mapping for `Authorization`/`Bearer`/`apiToken`/`headers`.
+14. For OpenClaw Console targets, fail generation if output is vague (for example "I can manage instances") without endpoint+method details and concrete auth context guidance.
 
 ### Step 3 — Write agent config file
 
