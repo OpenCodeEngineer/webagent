@@ -179,7 +179,7 @@
     const codeBlocks: Array<{ token: string; html: string }> = [];
     // Strip optional language label (e.g. ```json) from the code content
     escaped = escaped.replace(/```([a-zA-Z0-9_-]*)\n?([\s\S]*?)(?:```|$)/g, (_match, _lang: string, code: string) => {
-      const token = `@@LAMOOM_CODE_BLOCK_${codeBlocks.length}@@`;
+      const token = `@@LAMBLK${codeBlocks.length}@@`;
       codeBlocks.push({
         token,
         html: `<pre class="lamoom-code-block"><code>${code.replace(/\n$/, '')}</code></pre>`,
@@ -190,7 +190,7 @@
     // --- Inline code ---
     const inlineCodes: Array<{ token: string; html: string }> = [];
     escaped = escaped.replace(/`([^`\n]+?)`/g, (_match, code: string) => {
-      const token = `@@LAMOOM_INLINE_CODE_${inlineCodes.length}@@`;
+      const token = `@@LAMINC${inlineCodes.length}@@`;
       inlineCodes.push({
         token,
         html: `<code class="lamoom-inline-code">${code}</code>`,
@@ -239,7 +239,7 @@
           }
 
           // Code block token (pass through)
-          if (/^@@LAMOOM_CODE_BLOCK_\d+@@$/.test(trimmed)) {
+          if (/^@@LAMBLK\d+@@$/.test(trimmed)) {
             flushText();
             flushList();
             parts.push(trimmed);
