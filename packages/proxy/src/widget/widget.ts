@@ -39,10 +39,12 @@
   const agentToken = activeScript?.getAttribute('data-agent-token')?.trim();
   if (!agentToken) return;
 
-  // Read optional user-token-key: tells the widget which localStorage key holds the API token.
-  // The embedding page sets  data-user-token-key="oc_access_token"  (or any key name).
+  // Read optional user token:
+  // 1. data-user-token — direct token value (e.g. server-rendered JWT)
+  // 2. data-user-token-key — localStorage key that holds the token
+  const userTokenDirect = activeScript?.getAttribute('data-user-token')?.trim();
   const userTokenKey = activeScript?.getAttribute('data-user-token-key')?.trim();
-  const userToken = userTokenKey ? (win.localStorage?.getItem(userTokenKey)?.trim() ?? '') : '';
+  const userToken = userTokenDirect || (userTokenKey ? (win.localStorage?.getItem(userTokenKey)?.trim() ?? '') : '');
 
   const userId = (() => {
     const existing = win.localStorage?.getItem('lamoom_uid')?.trim();

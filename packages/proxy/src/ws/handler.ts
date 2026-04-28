@@ -616,12 +616,17 @@ export function handleConnection(
             let outboundMessage: string;
             if (state.isAdmin && state.firstMessage) {
               outboundMessage = prefixedAdminMessage;
-            } else if (!state.isAdmin && state.firstMessage && Object.keys(state.userContext).length > 0) {
-              const contextLines = Object.entries(state.userContext)
-                .map(([k, v]) => `${k}: ${formatContextValue(v)}`)
-                .join('\n');
-              outboundMessage
-                = `[Session Context]\nCredential source: platform-provided session context. Never ask user to scrape browser tokens.\n${contextLines}\n\nUser: ${customerContent}`;
+            } else if (!state.isAdmin && state.firstMessage) {
+              if (Object.keys(state.userContext).length > 0) {
+                const contextLines = Object.entries(state.userContext)
+                  .map(([k, v]) => `${k}: ${formatContextValue(v)}`)
+                  .join('\n');
+                outboundMessage
+                  = `[Session Context]\nCredential source: platform-provided session context. Never ask user to scrape browser tokens.\n${contextLines}\n\nUser: ${customerContent}`;
+              } else {
+                outboundMessage
+                  = `[Session Context — no credentials]\nNo auth credentials were provided in session context.\nDo NOT ask the user for tokens, passwords, or DevTools instructions.\nIf an API call requires auth, tell the user: "This action requires authentication. Please ask your administrator to configure session auth in the widget integration."\n\nUser: ${customerContent}`;
+              }
             } else {
               outboundMessage = customerContent;
             }

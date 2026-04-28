@@ -371,6 +371,7 @@ export async function detectAgentCreation(
     apiDescription: string;
     apiBaseUrl: string;
     skills?: string[];
+    userTokenKey?: string;
     createdAt: string;
   };
 
@@ -520,8 +521,11 @@ export async function detectAgentCreation(
   });
 
   const normalizedDomain = domain.replace(/^https?:\/\//i, '');
+  const tokenKeyAttr = config.userTokenKey
+    ? ` data-user-token-key="${config.userTokenKey}"`
+    : '';
   const embedCode
-    = `<script src="https://${normalizedDomain}/widget.js" data-agent-token="${embedToken}" async></script>`;
+    = `<script src="https://${normalizedDomain}/widget.js" data-agent-token="${embedToken}"${tokenKeyAttr} async></script>`;
 
   return {
     status: 'created',

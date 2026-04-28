@@ -91,9 +91,12 @@ In generated files, always include:
   "apiDescription": "<short description of API capabilities>",
   "apiBaseUrl": "<API base URL if provided>",
   "skills": ["website-api", "website-knowledge"],
+  "userTokenKey": "<localStorage key holding user JWT, if discoverable — e.g. 'access_token'>",
   "createdAt": "<ISO timestamp>"
 }
 ```
+
+The `userTokenKey` field is **optional but recommended** when the target website stores authentication tokens in `localStorage`. If discovered during website analysis (look for keys like `access_token`, `token`, `jwt`, `auth_token`, `oc_access_token` in the site's JavaScript), include it so the widget can automatically pass the user's token to the agent as session context. If the site uses httpOnly cookies or server-side sessions instead, omit this field.
 
 The `skills` array **must list every skill directory name** created in the workspace. Always include `"website-api"` when an API exists and `"website-knowledge"` for all agents. Add any specialized skills created in Step 1 (e.g., `"openclaw-console-navigation"`). The proxy reads this array to register skills in the gateway config.
 
