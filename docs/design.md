@@ -210,23 +210,34 @@ Admin UI /create page (WS) or POST /api/agents/create-via-meta (REST)
   │ Sends latest customer message
   ▼
 Proxy routes to OpenClaw (model: "openclaw/meta")
-  │ sessionKey:
-  │ - REST path: "agent:meta:admin-<customerId>-<sessionId>"
-  │ - WS path:   "agent:meta:admin-<customerId>-<randomUUID>"
+  │ sessionKey: stable per-customer from DB
+  │ - "agent:meta:admin-<customerId>"
+  │   (stored in meta_agent_sessions; one row per customer;
+  │    reused on every reconnect for conversation continuity)
+  ▼
+WS auth flow:
+  │ 1. proxy calls getMetaHistory(customerId)
+  │ 2. sends { type: "history", messages[], embedCode? } to client
+  │ 3. client restores chat state from history
   ▼
 OpenClaw meta-agent (workspace: openclaw/workspaces/meta/)
   │ Phase 1: fetch + due diligence packet + one confirmation
-  │ Phase 2: create-agent skill writes customer workspace from templates:
+  │ Phase 2: create-agent skill (Step 0: select specialized templates if available)
+  │   writes customer workspace from templates:
   │    AGENTS.md, SOUL.md, IDENTITY.md, TOOLS.md, USER.md
-  │    + skills + knowledgebase + agent-config.json
+  │    + skills (website-knowledge, website-api, any specialized skills)
+  │    + knowledgebase (overview, key-links, use-cases, api-reference)
+  │    + agent-config.json  ← includes skills[] array
   │ Emits [AGENT_CREATED::<slug>] marker in response
+  │ Streaming: tokens delivered via onDelta → { type:"message", done:false }
   ▼
 Proxy detects [AGENT_CREATED::<slug>] marker in response
   │ Reads <workspace>/agent-config.json
-  │ Registers slug in OpenClaw config (configured path precedence)
+  │ Registers slug + skills[] in OpenClaw config (path precedence)
   │ Reloads openclaw-gateway (SIGHUP, systemctl fallback)
   │ Upserts DB records (agent + widget_embed) and embed token
-  │ Appends embed snippet to response
+  │ Appends embed snippet to done:true message (admin WS)
+  │ Persists user + assistant messages to meta_agent_messages
   ▼
 Customer sees agent confirmation + widget <script> snippet
 ```
@@ -251,12 +262,13 @@ Customer logs in → Dashboard
 | Widget embed identity | `widget_embeds.embedToken` | Script token resolves to one active `agents` row |
 | Website visitor identity | `widget_sessions.externalUserId` | Provided by widget auth payload (`userId`) |
 | Widget chat session | `widget_sessions` row keyed by `(agentId, externalUserId)` | `openclawSessionKey = agent:<openclawAgentId>:widget-<openclawAgentId>-<externalUserId>` |
-| Admin create/manage session | Session key only | `agent:meta:admin-<customerId>-<sessionId-or-uuid>` |
+| Admin create/manage session | `meta_agent_sessions` row keyed by `customerId` | `openclawSessionKey = agent:meta:admin-<customerId>` (stable; one per customer) |
 
 Deterministic mapping in proxy:
 - `getOrCreateSession(agentId, externalUserId, openclawAgentId)` upserts one `widget_sessions` row per `(agentId, externalUserId)`.
 - Reconnecting with same `agentToken + userId` reuses the same OpenClaw conversation context.
 - Changing `userId` creates a different OpenClaw session key and isolated thread.
+- Admin WS auth retrieves the persisted `meta_agent_sessions.openclawSessionKey` and sends the full `history` message before the first response.
 
 ## Meta-agent template generation process
 
@@ -264,12 +276,58 @@ Deterministic mapping in proxy:
 After discovery is confirmed, the meta-agent derives customer-specific values and writes files into:
 `/opt/webagent/openclaw/workspaces/<agentSlug>/`.
 
-Template roles used for each customer agent:
+### Step 0 — Specialized template selection
+
+Before writing any files, the meta-agent scans the `templates/` directory (relative to its workspace)
+for site-specific templates matching the target website. Specialized templates are identified by suffix,
+for example `AGENTS-openclaw-console-navigation.md` or `skills/openclaw-console-navigation/SKILL.md`.
+When a match is found, the specialized template is used **instead of** the generic base template, since
+it already contains verified endpoint tables, auth flows, and canonical links for that site.
+
+### Template roles
+
 - `AGENTS.md` — operating instructions, scope boundaries, and behavior rules.
 - `SOUL.md` — persona/tone profile for response style.
 - `IDENTITY.md` — identity metadata (name, creature, vibe, emoji, optional avatar).
 - `TOOLS.md` — local operational notes (API base URL/auth scheme/integration labels); never secrets.
 - `USER.md` — per-session visitor context assumptions.
+
+### Skills and knowledgebase generation
+
+Always written:
+- `skills/website-knowledge/SKILL.md` — knowledge skill grounded in verified website facts.
+- `knowledgebase/overview.md`, `key-links.md`, `use-cases.md`.
+
+Written when API is detected:
+- `skills/website-api/SKILL.md` — API interaction skill with:
+  - full endpoint table (method, path, description, request body, response shape)
+  - `fetch` tool usage examples with correct base URL, auth header format, content type
+  - exact request body shapes for all mutating endpoints
+- `knowledgebase/api-reference.md` — structured endpoint reference table.
+
+Written for specialized sites (from Step 0):
+- Any specialized skills found in the templates directory (e.g., `skills/openclaw-console-navigation/SKILL.md`).
+
+### `agent-config.json`
+
+`write` at `<workspacePath>/agent-config.json`:
+```json
+{
+  "agentSlug": "<agentSlug>",
+  "agentName": "<agentName>",
+  "websiteName": "<websiteName>",
+  "websiteUrl": "<websiteUrl>",
+  "apiDescription": "<short description of API capabilities>",
+  "apiBaseUrl": "<API base URL if provided>",
+  "skills": ["website-api"],
+  "createdAt": "<ISO timestamp>"
+}
+```
+
+The `skills` array lists **all skill directory names** created in the workspace. The proxy reads this
+array and propagates it into the OpenClaw gateway config entry for the new agent (`agents.list[].skills`).
+This is the mechanism by which generated skills become active on the gateway — without it, the gateway
+registers the agent with no skills.
 
 Generation inputs come from meta-agent due diligence:
 - verified website facts and product summary,
@@ -277,8 +335,8 @@ Generation inputs come from meta-agent due diligence:
 - API capabilities/auth/base URL (when available),
 - brand voice cues.
 
-The meta-agent then writes skills + knowledgebase files, emits `[AGENT_CREATED::<slug>]`,
-and the proxy completes registration + embed issuance.
+The meta-agent emits `[AGENT_CREATED::<slug>]` after writing files; the proxy completes registration
+and embed issuance.
 
 OpenClaw template references:
 - `https://docs.openclaw.ai/reference/templates/AGENTS`
@@ -427,7 +485,7 @@ webagent/
 - Widget session key format:
   `agent:<openclawAgentId>:widget-<openclawAgentId>-<externalUserId>`
 - Admin/meta session key format:
-  `agent:meta:admin-<customerId>-<sessionId-or-uuid>`
+  `agent:meta:admin-<customerId>` (stable; stored in `meta_agent_sessions`; reused on every reconnect)
 - Streaming: gateway sends `agent` events token-by-token; proxy relays to client
 - Fallback: `/v1/responses` HTTP endpoint available for simple request-response
 - Hooks API (`/hooks/agent`) kept only for fire-and-forget (wake, cron triggers)
@@ -513,6 +571,23 @@ audit_log
   action      TEXT NOT NULL
   details     JSONB DEFAULT '{}'
   createdAt   TIMESTAMP
+
+meta_agent_sessions                        ← durable meta-agent session record (one per customer)
+  id                  UUID PK
+  customerId          UUID FK → customers.id (CASCADE)
+  openclawSessionKey  TEXT UNIQUE NOT NULL  ← "agent:meta:admin-<customerId>"
+  lastActiveAt        TIMESTAMP
+  createdAt           TIMESTAMP
+  UNIQUE(customerId)                        ← enforces one active thread per customer
+  INDEX(customerId)
+
+meta_agent_messages                        ← ordered message log for the meta-agent thread
+  id          UUID PK
+  sessionId   UUID FK → meta_agent_sessions.id (CASCADE)
+  role        TEXT NOT NULL                ← 'user' | 'assistant'
+  content     TEXT NOT NULL
+  createdAt   TIMESTAMP
+  INDEX(sessionId, createdAt)              ← efficient ordered retrieval
 ```
 
 ---
@@ -595,6 +670,9 @@ Proxy websocket `maxPayload` is configured to 12 MiB so base64-encoded attachmen
 ```typescript
 { type: "auth_ok", sessionId: string }                  // Auth succeeded
 { type: "auth_error", reason: string }                  // Auth failed
+{ type: "history", sessionId: string, messages: Array<{ role: "user" | "assistant", content: string }>, embedCode?: string }
+                                                         // Sent immediately after auth_ok in admin mode;
+                                                         // delivers persisted conversation history + any prior embed code
 { type: "message", content: string, done: boolean }     // Agent response
 { type: "error", message: string }                      // Error
 { type: "pong" }                                        // Keepalive response
@@ -613,8 +691,14 @@ POST   /api/agents/:id/embed-token   Regenerate embed token
 
 # Meta-agent chat (admin UI WS or REST fallback)
 POST   /api/agents/create-via-meta   Send message to meta-agent, returns response
-                                     Proxy detects agent creation in response,
-                                     auto-creates DB records + embed token
+                                     Proxy uses persisted sessionKey from DB;
+                                     detects agent creation marker in response,
+                                     auto-creates DB records + embed token;
+                                     persists user + assistant messages to DB
+
+GET    /api/agents/meta-history      Retrieve durable meta-agent conversation history
+                                     Returns { sessionId, messages[], embedCode? }
+                                     Used by admin UI to restore chat state on reload
 
 # Health
 GET    /health                       Proxy health
@@ -839,7 +923,162 @@ Current VM usage ~1.5GB → total ~1.85GB on 4GB CAX11. Feasible.
 
 ---
 
-## Production Gaps (updated 2026-04-25)
+---
+
+## Meta-Agent History Persistence (issue #164)
+
+### Why
+
+Before this change, each browser navigation to `/create` started a fresh meta-agent thread.
+OpenClaw retained conversation state server-side as long as the session key was reused, but
+the proxy always generated a new random UUID suffix for the admin session key on each page
+load (`agent:meta:admin-<customerId>-<randomUUID>`). Widget continuity (existing embed codes)
+was also lost because the proxy could not find an earlier response containing the embed code.
+
+### Architecture
+
+Two new DB tables added via migration (`0001_public_electro.sql`):
+
+```
+meta_agent_sessions  — one row per customer; stores the stable OpenClaw session key
+meta_agent_messages  — append-only message log (role + content + createdAt)
+```
+
+The session key is now **deterministic**: `agent:meta:admin-<customerId>` (no random suffix).
+`meta_agent_sessions` enforces a unique index on `customerId` — upsert on conflict so reconnects
+refresh `last_active_at` without creating a second row.
+
+`meta_agent_messages_session_created_idx` (compound index on `sessionId, createdAt`) exists for
+efficient ordered retrieval of message history.
+
+### Retrieval paths
+
+| Path | How |
+|---|---|
+| WS admin auth | After `auth_ok`, proxy calls `getMetaHistory`, sends `{ type: "history", sessionId, messages[], embedCode? }` |
+| REST `GET /api/agents/meta-history` | Returns same shape; used for page-load hydration |
+| REST `POST /api/agents/create-via-meta` | Reads history to reuse `openclawSessionKey`; response includes `sessionId` |
+
+### Persistence guarantee
+
+Messages are written to DB **only after** a successful OpenClaw response. If the OpenClaw send
+fails, neither the user nor the assistant message is persisted — preventing DB state from diverging
+from the agent's in-memory conversation context.
+
+---
+
+## Streaming Behavior (issue #164)
+
+Both the meta/admin (WS) and widget (WS) flows now stream token-by-token using `onDelta` callbacks.
+
+### WS flow (both admin and widget)
+
+```
+OpenClaw gateway                 Proxy WS handler            Client
+      │                                 │                        │
+      │  agent event (delta token)      │                        │
+      ├────────────────────────────────►│  { type:"message",     │
+      │                                 │    content: delta,     │
+      │                                 │    done: false }       │
+      │                                 ├───────────────────────►│
+      │  ...more deltas...              │  ...                   │
+      │  last delta                     │                        │
+      ├────────────────────────────────►│  { type:"message",     │
+      │                                 │    content: embedSuffix│
+      │                                 │    or "",              │
+      │                                 │    done: true }        │
+      │                                 ├───────────────────────►│
+```
+
+If no `onDelta` events arrive (non-streaming model), the full response is delivered as a single
+`{ type: "message", content: fullText, done: true }` message.
+
+For admin sessions where an agent was just created, any embed code suffix is appended as the
+`done: true` message (after streaming chunks have already delivered the main response text).
+
+### REST `create-via-meta`
+
+This endpoint uses a blocking `sendMessage` call (no streaming). The full response is returned
+in a single JSON envelope. Streaming is a WS-only feature for this route.
+
+---
+
+## Markdown Rendering (issue #164)
+
+### Widget (`packages/proxy/src/widget/widget.ts`)
+
+The widget uses a hand-rolled tokenizer that converts Markdown to HTML strings:
+- `renderMarkdown(raw)` → HTML string → assigned via `innerHTML` for assistant messages
+- User messages use `textContent` (no interpretation of any formatting)
+- Supported: bold, italic, inline code, fenced code blocks, ordered/unordered lists, links, headings
+
+**Safety model:** links have their `href` stripped and the `target="_blank" rel="noopener noreferrer"`
+attributes set. No external HTML or script injection is possible because user messages always use
+`textContent`, and the assistant Markdown parser emits only the known node types above.
+
+### Admin chat (`packages/admin/src/lib/markdown.tsx`)
+
+The admin uses a custom parser that returns **React nodes** (not HTML strings), so there is no
+`dangerouslySetInnerHTML` or `innerHTML` path:
+- `renderMarkdownToReactNodes(input)` → `ReactNode[]` rendered by React's reconciler
+- `isSafeHref(href)` validates all link hrefs; only `http:`, `https:`, `mailto:`, `tel:`,
+  and relative paths are allowed — everything else is rendered as plain text.
+- Supported: paragraphs, ordered/unordered lists, inline code, fenced code blocks, links.
+
+---
+
+## Real Widget Embed on Agent Detail Page (issue #164)
+
+### Before
+
+`WidgetPreview` was a fully custom React chat UI that opened its own WebSocket connection to the
+proxy. It looked like the widget but was a simulated facsimile — it did not load or execute the
+actual `widget.js` bundle, so UI regressions in the real widget would not be visible here.
+
+### Now
+
+`WidgetPreview` renders an `<iframe>` whose `srcDoc` contains the real `<script>` embed tag:
+
+```html
+<script src="<widgetHost>/widget.js"
+        data-agent-token="<embedToken>" async></script>
+```
+
+The iframe's `srcDoc` is a minimal HTML document; `widgetHost` is resolved at runtime from
+`window.location.origin` (so it works on both dev and production without hardcoded URLs).
+This means the agent detail page now exercises the exact same code path a website visitor sees.
+
+---
+
+## Operational Notes — Migrations (issue #164)
+
+### Required: run migration after deploy
+
+Two new tables (`meta_agent_sessions`, `meta_agent_messages`) were added via Drizzle migration
+`0001_public_electro.sql`. A second migration `0002_conscious_true_believers.sql` adds the
+performance index on `(session_id, created_at)`.
+
+Run after each deploy that includes these migrations:
+
+```bash
+pnpm --filter @webagent/proxy drizzle-kit push
+```
+
+or using the deploy script which runs `db:migrate` automatically.
+
+### No data loss on rollback
+
+Rolling back to the pre-history code without dropping the new tables is safe — the old code
+simply does not read or write them. The tables can be dropped manually if needed:
+
+```sql
+DROP TABLE IF EXISTS meta_agent_messages;
+DROP TABLE IF EXISTS meta_agent_sessions;
+```
+
+---
+
+## Production Gaps (updated 2026-04-28)
 
 ### ✅ Done & Working
 - Monorepo scaffold (pnpm + Turborepo, all packages build)
@@ -871,6 +1110,12 @@ Current VM usage ~1.5GB → total ~1.85GB on 4GB CAX11. Feasible.
 - CORS: Widget embed origin validation enforced in WS auth handshake
 - Graceful shutdown: SIGTERM/SIGINT handlers with WS drain
 - E2E: Full agent creation flow verified (BookNest: create → register → chat → widget preview)
+- ✅ Meta-agent history persisted to DB (`meta_agent_sessions` + `meta_agent_messages`); restored on WS auth and `GET /api/agents/meta-history` (issue #164)
+- ✅ Admin meta-session key is stable (`agent:meta:admin-<customerId>`); embed code survives page refresh via history retrieval (issue #164)
+- ✅ Generation pipeline: `agent-config.json` `skills` array propagated to gateway config on registration; specialized templates selected at Step 0 (issue #164)
+- ✅ Streaming: WS admin and widget flows deliver token-by-token via `onDelta`; `done:true` sent after last delta (issue #164)
+- ✅ Markdown: widget uses `innerHTML`-based renderer (assistant only); admin chat uses React-node renderer with `isSafeHref` — no raw HTML execution in either path (issue #164)
+- ✅ Agent detail page: `WidgetPreview` loads real `<script>` embed in an iframe instead of a custom WS simulator (issue #164)
 
 ### 🔴 BLOCKING — Must Fix Before Any Production Launch
 
@@ -935,7 +1180,7 @@ Current VM usage ~1.5GB → total ~1.85GB on 4GB CAX11. Feasible.
 31. Magic link form shown even when `EMAIL_SERVER` is unset — will error on click.
 32. Widget preview has no auto-reconnect on disconnect.
 33. No inline agent editing (name, URL, prompt) after creation.
-34. No conversation persistence in create-agent-chat across page refresh.
+34. **(resolved 2026-04-28)** Conversation persistence in create-agent-chat across page refresh — now backed by `meta_agent_sessions` + `meta_agent_messages` (issue #164).
 35. Hardcoded `dev.lamoom.com` fallbacks in proxy and admin code.
 36. Settings page is a non-functional stub.
 37. No migration rollback strategy.
