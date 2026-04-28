@@ -219,6 +219,23 @@ function normalizeSessionAuthContext(rawContext: Record<string, unknown>): Recor
   return normalized;
 }
 
+function buildWidgetMessageWithSessionPolicy(userContext: Record<string, unknown>, customerContent: string): string {
+  const credentialPolicy
+    = 'Credential source: server-side session auth context provided by the widget/integration backend.\n'
+    + 'Never ask end users to fetch or copy JWTs/tokens from DevTools, localStorage, sessionStorage, cookies, or network tabs.';
+  const fallbackGuidance
+    = 'If an API call needs authentication and session context is missing, tell the user: '
+    + '"This action requires authentication. Please ask your workspace administrator or integration owner to configure server-side session auth context keys (`Authorization` or `apiToken`) in the widget/integration backend."';
+  if (Object.keys(userContext).length > 0) {
+    const contextLines = Object.entries(userContext)
+      .map(([k, v]) => `${k}: ${formatContextValue(v)}`)
+      .join('\n');
+    return `[Session Context]\n${credentialPolicy}\n${fallbackGuidance}\n${contextLines}\n\nUser: ${customerContent}`;
+  }
+
+  return `[Session Context — no credentials]\n${credentialPolicy}\nNo auth credentials were provided in session context.\n${fallbackGuidance}\n\nUser: ${customerContent}`;
+}
+
 function isStrictBase64(value: string): boolean {
   return /^[A-Za-z0-9+/]+={0,2}$/.test(value) && value.length % 4 === 0;
 }
@@ -616,17 +633,8 @@ export function handleConnection(
             let outboundMessage: string;
             if (state.isAdmin && state.firstMessage) {
               outboundMessage = prefixedAdminMessage;
-            } else if (!state.isAdmin && state.firstMessage) {
-              if (Object.keys(state.userContext).length > 0) {
-                const contextLines = Object.entries(state.userContext)
-                  .map(([k, v]) => `${k}: ${formatContextValue(v)}`)
-                  .join('\n');
-                outboundMessage
-                  = `[Session Context]\nCredential source: platform-provided session context. Never ask user to scrape browser tokens.\n${contextLines}\n\nUser: ${customerContent}`;
-              } else {
-                outboundMessage
-                  = `[Session Context — no credentials]\nNo auth credentials were provided in session context.\nDo NOT ask the user for tokens, passwords, or DevTools instructions.\nIf an API call requires auth, tell the user: "This action requires authentication. Please ask your administrator to configure session auth in the widget integration."\n\nUser: ${customerContent}`;
-              }
+            } else if (!state.isAdmin) {
+              outboundMessage = buildWidgetMessageWithSessionPolicy(state.userContext, customerContent);
             } else {
               outboundMessage = customerContent;
             }
