@@ -43,23 +43,22 @@ Set in `agents.defaults.model` in openclaw.json5:
 ### Quick redeploy (existing VM)
 
 ```bash
-# Uses defaults: host=78.47.152.177, user=root, app_dir=/opt/webagent
-./infra/vm-deploy.sh deploy
+# Single canonical redeploy script (safe to rerun on every local code update)
+./infra/deploy.sh
 
 # Or target a specific host
-./infra/vm-deploy.sh deploy 78.47.152.177
+./infra/deploy.sh 78.47.152.177
 ```
 
 ### First-time bootstrap on a new VM
 
 ```bash
-# Installs packages, clones repo, nginx, TLS cert, systemd services, then deploys
-DOMAIN=myapp.example.com \
-REPO_URL=git@github.com:OpenCodeEngineer/webagent.git \
-  ./infra/vm-deploy.sh bootstrap-deploy <new-vm-ip>
+# 1) Copy infra scripts to VM and run setup once
+rsync -az ./infra/ root@<new-vm-ip>:/root/webagent-infra/
+ssh root@<new-vm-ip> "DOMAIN=myapp.example.com REPO_URL=git@github.com:OpenCodeEngineer/webagent.git APP_DIR=/opt/webagent APP_USER=openclaw bash /root/webagent-infra/setup.sh"
 
-# Bootstrap only (no code sync yet)
-DOMAIN=myapp.example.com ./infra/vm-deploy.sh bootstrap <new-vm-ip>
+# 2) Deploy current local repo state (repeat this whenever code changes)
+./infra/deploy.sh <new-vm-ip>
 ```
 
 **Env vars for targeting a different VM:**
@@ -69,9 +68,9 @@ DOMAIN=myapp.example.com ./infra/vm-deploy.sh bootstrap <new-vm-ip>
 | `DEPLOY_HOST` | `78.47.152.177` | VM IP or hostname |
 | `DEPLOY_USER` | `root` | SSH user |
 | `APP_DIR` | `/opt/webagent` | App directory on VM |
-| `APP_USER` | `openclaw` | OS user that owns the app |
-| `DOMAIN` | `webagent.example.com` | Public domain (bootstrap / TLS) |
-| `REPO_URL` | GitHub HTTPS URL | Git clone URL (bootstrap only) |
+| `APP_USER` | `openclaw` | OS user that owns the app (setup only) |
+| `DOMAIN` | `webagent.example.com` | Public domain (setup / TLS) |
+| `REPO_URL` | GitHub HTTPS URL | Git clone URL (setup only) |
 
 ### GitHub Actions
 
@@ -82,12 +81,12 @@ The workflow (`.github/workflows/deploy.yml`) runs automatically on push to `mai
 
 To retarget the workflow to a different VM, update the `VM_HOST` secret in the repo settings.
 
-### Low-level scripts (still work unchanged)
+### Scripts
 
 ```bash
-# Direct deploy (original entrypoint, still supported)
+# Canonical redeploy script
 ./infra/deploy.sh [host]
 
-# Manual bootstrap (run directly on the VM as root)
-DOMAIN=myapp.example.com bash /path/to/infra/setup.sh
+# One-time bootstrap script (run on VM as root)
+DOMAIN=myapp.example.com REPO_URL=git@github.com:OpenCodeEngineer/webagent.git bash /path/to/infra/setup.sh
 ```
