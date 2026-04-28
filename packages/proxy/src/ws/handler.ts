@@ -29,6 +29,7 @@ interface AuthenticatedSocket {
   authenticated: boolean;
   isAdmin: boolean;
   firstMessage: boolean;
+  userContext: Record<string, unknown>;
 }
 
 interface TokenLookup {
@@ -363,6 +364,7 @@ export function handleConnection(
     authenticated: false,
     isAdmin: false,
     firstMessage: false,
+    userContext: {},
   };
 
   // 30s auth timeout
@@ -468,9 +470,18 @@ export function handleConnection(
             ws.close(1011, 'Internal error');
             return;
           }
+
+          // Extract optional user context (e.g. API token) passed by the embedding page.
+          const rawContext = msg.context;
+          if (rawContext && typeof rawContext === 'object' && !Array.isArray(rawContext)) {
+            state.userContext = rawContext as Record<string, unknown>;
+            if (Object.keys(state.userContext).length > 0) {
+              state.firstMessage = true;
+            }
+          }
+
           state.authenticated = true;
           state.isAdmin = false;
-          state.firstMessage = false;
           clearTimeout(authTimeout);
 
           send(ws, { type: 'auth_ok', sessionId: state.sessionKey });
@@ -532,7 +543,18 @@ export function handleConnection(
 
             const prefixedAdminMessage
               = `[Lamoom Platform — Agent Creation Session]\nCustomer ID: ${state.userId}\nPlatform domain: ${domain}\n\nCustomer: ${customerContent}`;
-            const outboundMessage = state.isAdmin && state.firstMessage ? prefixedAdminMessage : customerContent;
+
+            let outboundMessage: string;
+            if (state.isAdmin && state.firstMessage) {
+              outboundMessage = prefixedAdminMessage;
+            } else if (!state.isAdmin && state.firstMessage && Object.keys(state.userContext).length > 0) {
+              const contextLines = Object.entries(state.userContext)
+                .map(([k, v]) => `${k}: ${String(v)}`)
+                .join('\n');
+              outboundMessage = `[Session Context]\n${contextLines}\n\nUser: ${customerContent}`;
+            } else {
+              outboundMessage = customerContent;
+            }
             let streamed = false;
             const result = await openclawClient.sendMessage({
               message: outboundMessage,
@@ -568,9 +590,7 @@ export function handleConnection(
               } else {
                 send(ws, { type: 'message', content: responseText, done: true });
               }
-              if (state.isAdmin) {
-                state.firstMessage = false;
-              }
+              state.firstMessage = false;
             } else {
               send(ws, { type: 'error', message: result.error || 'Agent error' });
             }

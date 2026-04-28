@@ -680,6 +680,46 @@ openclaw agents list                   # List configured agents
 - **No Docker** — workspace-scoped tool sandboxing instead
 - **Upgrade path:** CAX21 (4 vCPU, 8GB, ~€7.49/mo) if RAM gets tight
 
+### Deploy Verification Checklist
+
+Every deploy must pass the following blocking checks before it is considered
+successful. `infra/deploy.sh` enforces these automatically; reproduce manually
+with the commands shown.
+
+#### 1. Static asset sync (blocking)
+
+Next.js standalone output does **not** bundle `_next/static`. After every build
+the static directory must be clean-copied into the standalone tree:
+
+```bash
+bash infra/admin-static-sync.sh sync /opt/webagent
+```
+
+Criteria:
+- `packages/admin/.next/static/` exists (build ran successfully).
+- Target `packages/admin/.next/standalone/packages/admin/.next/static/` is
+  removed and recreated from source (no stale files from previous builds).
+
+#### 2. Static asset smoke check (blocking)
+
+After services restart, assert that the admin UI can actually serve its own
+assets end-to-end:
+
+```bash
+bash infra/admin-static-sync.sh check http://127.0.0.1:3000
+```
+
+Criteria (all must pass — non-zero exit on any failure):
+- `GET /login` returns HTTP 200 and non-empty HTML.
+- HTML contains at least one `/_next/static/css/*.css` reference.
+- HTML contains at least one `/_next/static/chunks/*.js` reference.
+- The CSS asset URL returns HTTP 200.
+- The CSS asset download size is **> 1 000 bytes** (guards against empty/truncated file).
+- The JS chunk URL returns HTTP 200.
+
+Remediation hint on failure: re-run `admin-static-sync.sh sync` and restart
+`webagent-admin`, then re-check.
+
 ---
 
 ## v0.0.1 Milestone (tagged 2026-04-26)
