@@ -15,6 +15,7 @@ const MAX_TOTAL_SIZE_BYTES = 8 * 1024 * 1024;
 
 interface CreateAgentChatProps {
   customerId?: string;
+  className?: string;
 }
 
 function formatFileSize(bytes: number): string {
@@ -44,7 +45,7 @@ function readFileAsBase64(file: File): Promise<string> {
   });
 }
 
-export function CreateAgentChat({ customerId }: CreateAgentChatProps) {
+export function CreateAgentChat({ customerId, className }: CreateAgentChatProps) {
   const [messages, setMessages] = useState<MetaAgentMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -364,7 +365,7 @@ export function CreateAgentChat({ customerId }: CreateAgentChatProps) {
   const hasMessages = messages.length > 0 || loading;
 
   return (
-    <div className="flex h-full flex-col bg-[#171717]">
+    <div className={cn("flex h-full flex-col bg-[#171717]", className)}>
       {/* Messages area */}
       <div className="relative flex-1 overflow-y-auto">
         {!hasMessages && (

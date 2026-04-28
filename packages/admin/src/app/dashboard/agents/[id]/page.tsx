@@ -1,9 +1,11 @@
 import { auth } from "@/lib/auth";
 import { serverGetAgent } from "@/lib/actions";
 import { redirect } from "next/navigation";
+import { normalizeCustomerIdToUuid } from "@/lib/customer-id";
 import { AgentDetailActions } from "@/components/agent-detail-actions";
 import { AgentEditForm } from "@/components/agent-edit-form";
 import { WidgetPreview } from "@/components/widget-preview";
+import { CreateAgentChat } from "@/components/create-agent-chat";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -25,6 +27,7 @@ export default async function AgentDetailPage({ params }: Props) {
 
   const { id } = await params;
   const agent = await serverGetAgent(id);
+  const customerId = normalizeCustomerIdToUuid(session.user.id, session.user.email);
 
   if (!agent) {
     return (
@@ -110,6 +113,19 @@ export default async function AgentDetailPage({ params }: Props) {
           </CardContent>
         </Card>
       )}
+
+      {/* Configuration chat */}
+      <Card className="overflow-hidden">
+        <CardHeader>
+          <CardTitle>Configure Agent</CardTitle>
+          <CardDescription>Chat with the meta-agent to modify this agent&apos;s behaviour, knowledge, or settings.</CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="h-[600px] rounded-b-xl overflow-hidden">
+            <CreateAgentChat customerId={customerId ?? undefined} />
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
