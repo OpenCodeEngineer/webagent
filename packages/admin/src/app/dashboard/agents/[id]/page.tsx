@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { normalizeCustomerIdToUuid } from "@/lib/customer-id";
 import { AgentDetailActions } from "@/components/agent-detail-actions";
 import { AgentEditForm } from "@/components/agent-edit-form";
+import { AgentAuthContext } from "@/components/agent-auth-context";
 import { WidgetPreview } from "@/components/widget-preview";
 import { CreateAgentChat } from "@/components/create-agent-chat";
 import { Badge } from "@/components/ui/badge";
@@ -78,6 +79,22 @@ export default async function AgentDetailPage({ params }: Props) {
           <AgentDetailActions agentId={agent.id} embedCode={embedCode} />
         </CardContent>
       </Card>
+
+      {/* API Configuration */}
+      {agent.embedToken && (
+        <Card>
+          <CardContent className="pt-6">
+            <AgentAuthContext
+              agentId={agent.id}
+              initialApiToken={
+                typeof agent.widgetConfig === "object" && agent.widgetConfig !== null
+                  ? (agent.widgetConfig as { authContext?: { apiToken?: string } }).authContext?.apiToken
+                  : undefined
+              }
+            />
+          </CardContent>
+        </Card>
+      )}
 
       {/* Live widget preview */}
       {agent.embedToken && (

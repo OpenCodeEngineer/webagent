@@ -793,6 +793,9 @@ Customer: ${normalizedLatestMessage}`
           embed,
           embedToken: embed?.embedToken ?? null,
           allowedOrigins: embed?.allowedOrigins ?? null,
+          widgetConfig: agent.widgetConfig
+            ? { ...(agent.widgetConfig as Record<string, unknown>), authContext: { configured: true } }
+            : null,
         },
       });
     } catch (error) {
@@ -828,10 +831,19 @@ Customer: ${normalizedLatestMessage}`
         return sendError(reply, 404, 'not_found', 'Agent not found');
       }
 
+      // Deep-merge widgetConfig to preserve existing keys like 'skills'
+      const mergedBody = { ...body };
+      if (body.widgetConfig && existingAgent.widgetConfig) {
+        mergedBody.widgetConfig = {
+          ...(existingAgent.widgetConfig as Record<string, unknown>),
+          ...body.widgetConfig,
+        };
+      }
+
       const updatedRows = await app.db
         .update(agents)
         .set({
-          ...body,
+          ...mergedBody,
           updatedAt: new Date(),
         })
         .where(and(eq(agents.id, params.id), eq(agents.customerId, customerId)))
@@ -847,6 +859,17 @@ Customer: ${normalizedLatestMessage}`
       });
 
       if (body.status && body.status !== existingAgent.status) {
+        const embedRows = await app.db
+          .select({ embedToken: widgetEmbeds.embedToken })
+          .from(widgetEmbeds)
+          .where(eq(widgetEmbeds.agentId, params.id));
+        for (const embedRow of embedRows) {
+          invalidateEmbedTokenCache(embedRow.embedToken);
+        }
+      }
+
+      // Invalidate cache when widgetConfig changes
+      if (body.widgetConfig) {
         const embedRows = await app.db
           .select({ embedToken: widgetEmbeds.embedToken })
           .from(widgetEmbeds)

@@ -34,7 +34,7 @@ export function WidgetPreview({ agentToken, widgetBaseUrl }: { agentToken: strin
   return (
     <div>
       <iframe
-        title="Real widget preview"
+        title="Widget preview"
         srcDoc={srcDoc}
         className="w-full rounded-xl border border-zinc-700 bg-black"
         style={{ height: 540 }}
