@@ -42,6 +42,7 @@ interface TokenLookup {
   agentId: string;
   openclawAgentId: string;
   allowedOrigins: string[] | null;
+  widgetConfig: Record<string, unknown> | null;
 }
 
 interface TokenCacheEntry {
@@ -246,7 +247,9 @@ function normalizeSessionAuthContext(rawContext: Record<string, unknown>): Recor
 function buildWidgetMessageWithSessionPolicy(userContext: Record<string, unknown>, customerContent: string): string {
   const credentialPolicy
     = 'Credential source: server-side session auth context provided by the widget/integration backend.\n'
-    + 'Never ask end users to fetch or copy JWTs/tokens from DevTools, localStorage, sessionStorage, cookies, or network tabs.';
+    + 'Never ask end users to fetch or copy JWTs/tokens from DevTools, localStorage, sessionStorage, cookies, or network tabs.\n'
+    + 'Never reveal, display, echo, or include raw credential/token values in your responses. '
+    + 'Use them ONLY in fetch/API tool call headers. If a user asks for the token, decline.';
   const fallbackGuidance
     = 'If an API call needs authentication and session context is missing:\n'
     + '1. State the exact API call you would make (method, path, body) so the user knows what will happen.\n'
@@ -426,6 +429,7 @@ async function lookupEmbedToken(db: Database, embedToken: string): Promise<Token
       agentId: agents.id,
       openclawAgentId: agents.openclawAgentId,
       allowedOrigins: widgetEmbeds.allowedOrigins,
+      widgetConfig: agents.widgetConfig,
     })
     .from(widgetEmbeds)
     .innerJoin(agents, eq(widgetEmbeds.agentId, agents.id))
@@ -441,6 +445,7 @@ async function lookupEmbedToken(db: Database, embedToken: string): Promise<Token
     agentId: row.agentId,
     openclawAgentId: row.openclawAgentId,
     allowedOrigins: row.allowedOrigins,
+    widgetConfig: row.widgetConfig as Record<string, unknown> | null,
   };
 
   setCachedTokenLookup(embedToken, value);
@@ -584,10 +589,22 @@ export function handleConnection(
             return;
           }
 
-          // Extract optional user context (e.g. API token) passed by the embedding page.
+          // Inject server-side auth context from agent config (takes priority)
+          const serverAuthCtx = tokenData.widgetConfig?.authContext;
+          if (serverAuthCtx && typeof serverAuthCtx === 'object' && !Array.isArray(serverAuthCtx)) {
+            state.userContext = normalizeSessionAuthContext(serverAuthCtx as Record<string, unknown>);
+          }
+
+          // Client context can add NON-auth fields only (safety)
           const rawContext = msg.context;
           if (rawContext && typeof rawContext === 'object' && !Array.isArray(rawContext)) {
-            state.userContext = normalizeSessionAuthContext(rawContext as Record<string, unknown>);
+            const clientCtx = rawContext as Record<string, unknown>;
+            const AUTH_KEYS = new Set(['Authorization', 'Bearer', 'apiToken', 'token', 'headers']);
+            for (const [k, v] of Object.entries(clientCtx)) {
+              if (!AUTH_KEYS.has(k)) {
+                state.userContext[k] = v;
+              }
+            }
             if (Object.keys(state.userContext).length > 0) {
               state.firstMessage = true;
             }
