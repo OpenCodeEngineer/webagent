@@ -248,8 +248,10 @@ function buildWidgetMessageWithSessionPolicy(userContext: Record<string, unknown
     = 'Credential source: server-side session auth context provided by the widget/integration backend.\n'
     + 'Never ask end users to fetch or copy JWTs/tokens from DevTools, localStorage, sessionStorage, cookies, or network tabs.';
   const fallbackGuidance
-    = 'If an API call needs authentication and session context is missing, tell the user: '
-    + '"This action requires authentication. Please ask your workspace administrator or integration owner to configure server-side session auth context keys (`Authorization` or `apiToken`) in the widget/integration backend."';
+    = 'If an API call needs authentication and session context is missing:\n'
+    + '1. State the exact API call you would make (method, path, body) so the user knows what will happen.\n'
+    + '2. Explain: "I need session auth context to execute this. An admin must configure the `Authorization` or `apiToken` field in the widget integration settings (Settings → Integrations → Auth Context)."\n'
+    + '3. Never give a vague refusal — always name the endpoint (e.g., `POST /api/v1/tenants/:id/restart`) and confirm expected outcome + that you will execute it once credentials are available.';
   if (Object.keys(userContext).length > 0) {
     const contextLines = Object.entries(userContext)
       .map(([k, v]) => `${k}: ${formatContextValue(v)}`)

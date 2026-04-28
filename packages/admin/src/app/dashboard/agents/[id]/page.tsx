@@ -8,8 +8,7 @@ import { WidgetPreview } from "@/components/widget-preview";
 import { CreateAgentChat } from "@/components/create-agent-chat";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { CircleHelp } from "lucide-react";
+import { MessageCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const WIDGET_BASE_URL = process.env.NEXT_PUBLIC_APP_URL || process.env.AUTH_URL || "https://dev.lamoom.com";
@@ -83,18 +82,9 @@ export default async function AgentDetailPage({ params }: Props) {
       {/* Live widget preview */}
       {agent.embedToken && (
         <div className="space-y-3">
-          <div className="flex items-center justify-end">
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger
-                  aria-label="Widget test help"
-                  className="text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  <CircleHelp className="h-4 w-4" />
-                </TooltipTrigger>
-                <TooltipContent>Test me!</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+          <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+            <MessageCircle className="h-4 w-4" />
+            <span>Chat</span>
           </div>
           <WidgetPreview agentToken={agent.embedToken} widgetBaseUrl={WIDGET_BASE_URL} />
         </div>
