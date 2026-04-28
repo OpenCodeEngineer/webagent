@@ -1,0 +1,1 @@
+CREATE INDEX "meta_agent_messages_session_created_idx" ON "meta_agent_messages" USING btree ("session_id","created_at");

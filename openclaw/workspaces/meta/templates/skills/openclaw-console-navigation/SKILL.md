@@ -17,3 +17,4 @@ Use this skill for customer prompts like:
 2. Include canonical console links in the same response.
 3. Prefer route-accurate guidance over generic advice.
 4. Keep answers concise and actionable.
+5. For API actions (restart, delete, create), use the `fetch` tool to call the endpoint and report the result.

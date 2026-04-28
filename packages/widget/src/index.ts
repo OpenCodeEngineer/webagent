@@ -1,3 +1,5 @@
+import { renderMarkdownToSafeHtml } from './markdown.js';
+
 interface WidgetConfig {
   agentToken: string;
   userId: string;
@@ -579,13 +581,13 @@ class WebAgentWidget {
 
     this.messagesList.innerHTML = this.messages
       .map((message) => {
-        const escaped = this.escapeHtml(message.content).replace(/\n/g, '<br>');
+        const rendered = renderMarkdownToSafeHtml(message.content);
 
         if (message.role === 'visitor' && message.failed) {
-          return `<div class="wa-message wa-visitor"><button type="button" class="wa-msg wa-failed" data-retry-id="${message.id}" aria-label="Retry sending message">${escaped}<span class="wa-failed-note">Failed to send. Click to retry.</span></button></div>`;
+          return `<div class="wa-message wa-visitor"><button type="button" class="wa-msg wa-failed" data-retry-id="${message.id}" aria-label="Retry sending message">${rendered}<span class="wa-failed-note">Failed to send. Click to retry.</span></button></div>`;
         }
 
-        return `<div class="wa-message ${message.role === 'visitor' ? 'wa-visitor' : 'wa-agent'}"><div class="wa-msg">${escaped}</div></div>`;
+        return `<div class="wa-message ${message.role === 'visitor' ? 'wa-visitor' : 'wa-agent'}"><div class="wa-msg">${rendered}</div></div>`;
       })
       .join('');
 
@@ -774,6 +776,48 @@ class WebAgentWidget {
           color: #0f172a;
         }
 
+        .wa-msg p {
+          margin: 0;
+        }
+
+        .wa-msg p + p,
+        .wa-msg ul,
+        .wa-msg ol,
+        .wa-msg pre {
+          margin-top: 8px;
+        }
+
+        .wa-msg ul,
+        .wa-msg ol {
+          padding-left: 18px;
+        }
+
+        .wa-msg pre {
+          overflow-x: auto;
+          border-radius: 10px;
+          padding: 8px 10px;
+          background: rgba(15, 23, 42, 0.08);
+        }
+
+        .wa-msg code {
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+          font-size: 12px;
+          background: rgba(15, 23, 42, 0.08);
+          padding: 1px 4px;
+          border-radius: 5px;
+        }
+
+        .wa-msg pre code {
+          padding: 0;
+          background: transparent;
+        }
+
+        .wa-msg a {
+          color: inherit;
+          text-decoration: underline;
+          text-underline-offset: 2px;
+        }
+
         .wa-visitor .wa-msg {
           background: #2563eb;
           color: #fff;
@@ -945,6 +989,14 @@ class WebAgentWidget {
           .wa-msg {
             background: #1e293b;
             color: #e2e8f0;
+          }
+
+          .wa-msg code {
+            background: rgba(148, 163, 184, 0.22);
+          }
+
+          .wa-msg pre {
+            background: rgba(15, 23, 42, 0.65);
           }
 
           .wa-visitor .wa-msg {
