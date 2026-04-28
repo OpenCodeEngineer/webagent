@@ -170,6 +170,55 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function formatContextValue(value: unknown): string {
+  if (value !== null && typeof value === 'object') {
+    try {
+      const serialized = JSON.stringify(value);
+      if (typeof serialized === 'string') {
+        return serialized;
+      }
+    } catch {
+      // Fall back below.
+    }
+  }
+  return String(value);
+}
+
+function normalizeSessionAuthContext(rawContext: Record<string, unknown>): Record<string, unknown> {
+  const normalized: Record<string, unknown> = { ...rawContext };
+  const authHeader = typeof normalized.Authorization === 'string' ? normalized.Authorization.trim() : '';
+  const bearer = typeof normalized.Bearer === 'string' ? normalized.Bearer.trim() : '';
+  const apiToken = typeof normalized.apiToken === 'string' ? normalized.apiToken.trim() : '';
+  const legacyToken = typeof normalized.token === 'string' ? normalized.token.trim() : '';
+  const headers = isRecord(normalized.headers) ? normalized.headers : null;
+  const headerAuth = headers && typeof headers.Authorization === 'string'
+    ? headers.Authorization.trim()
+    : '';
+
+  const preferredToken = apiToken || legacyToken;
+  if (!normalized.apiToken && preferredToken) {
+    normalized.apiToken = preferredToken;
+  }
+
+  if (!normalized.Bearer && preferredToken) {
+    normalized.Bearer = preferredToken;
+  }
+
+  if (!authHeader) {
+    if (headerAuth) {
+      normalized.Authorization = headerAuth;
+    } else if (bearer) {
+      normalized.Authorization = bearer.toLowerCase().startsWith('bearer ')
+        ? bearer
+        : `Bearer ${bearer}`;
+    } else if (preferredToken) {
+      normalized.Authorization = `Bearer ${preferredToken}`;
+    }
+  }
+
+  return normalized;
+}
+
 function isStrictBase64(value: string): boolean {
   return /^[A-Za-z0-9+/]+={0,2}$/.test(value) && value.length % 4 === 0;
 }
@@ -494,7 +543,7 @@ export function handleConnection(
           // Extract optional user context (e.g. API token) passed by the embedding page.
           const rawContext = msg.context;
           if (rawContext && typeof rawContext === 'object' && !Array.isArray(rawContext)) {
-            state.userContext = rawContext as Record<string, unknown>;
+            state.userContext = normalizeSessionAuthContext(rawContext as Record<string, unknown>);
             if (Object.keys(state.userContext).length > 0) {
               state.firstMessage = true;
             }
@@ -569,9 +618,10 @@ export function handleConnection(
               outboundMessage = prefixedAdminMessage;
             } else if (!state.isAdmin && state.firstMessage && Object.keys(state.userContext).length > 0) {
               const contextLines = Object.entries(state.userContext)
-                .map(([k, v]) => `${k}: ${String(v)}`)
+                .map(([k, v]) => `${k}: ${formatContextValue(v)}`)
                 .join('\n');
-              outboundMessage = `[Session Context]\n${contextLines}\n\nUser: ${customerContent}`;
+              outboundMessage
+                = `[Session Context]\nCredential source: platform-provided session context. Never ask user to scrape browser tokens.\n${contextLines}\n\nUser: ${customerContent}`;
             } else {
               outboundMessage = customerContent;
             }

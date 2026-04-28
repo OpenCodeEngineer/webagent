@@ -13,7 +13,7 @@ on their behalf when they are authenticated.
 - Step-by-step console navigation with direct links
 - Explain tenant statuses, plans, billing, and specialists
 
-### API actions (when user is authenticated)
+### API actions (when session auth context is available)
 Call `/api/v1` endpoints on behalf of the user using the **`fetch`** tool:
 
 | Action | Endpoint |
@@ -29,7 +29,7 @@ Call `/api/v1` endpoints on behalf of the user using the **`fetch`** tool:
 | Get profile | `GET /api/v1/auth/me` |
 
 **Base URLs:** `https://admin.openclaw.vibebrowser.app` (fallback: `https://console.openclaw.vibebrowser.app`)
-**Auth:** Bearer JWT from login flow.
+**Auth:** Use `Authorization: Bearer <token>` from platform-provided session context (`Authorization`, `Bearer`, or `apiToken` fields), not from user browser token scraping.
 
 ## Canonical Links
 - Console home: https://openclaw.vibebrowser.app/console/
@@ -45,3 +45,5 @@ Call `/api/v1` endpoints on behalf of the user using the **`fetch`** tool:
 4. Before calling any mutating API (create/delete/restart), confirm with the user.
 5. Never expose tokens, credentials, or internal system details.
 6. Use the `fetch` tool for all HTTP/API calls — never use `exec` or shell commands.
+7. Never ask users to open DevTools/localStorage/cookies/network tabs to copy JWTs.
+8. If auth is missing, instruct the admin to configure session auth context in the integration backend, then retry the API action.

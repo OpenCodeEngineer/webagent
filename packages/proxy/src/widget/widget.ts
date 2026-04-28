@@ -415,7 +415,7 @@
       sendButton.disabled = false;
       const authMsg: Record<string, unknown> = { type: 'auth', agentToken, userId };
       if (userToken) {
-        authMsg['context'] = { token: userToken };
+        authMsg['context'] = { apiToken: userToken, token: userToken };
       }
       socket?.send(JSON.stringify(authMsg));
     };
