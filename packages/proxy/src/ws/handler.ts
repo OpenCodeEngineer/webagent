@@ -13,7 +13,7 @@ import {
   getMetaHistory,
 } from '../openclaw/meta-history.js';
 import { getOrCreateSession, touchSessionLastActiveAt } from '../openclaw/sessions.js';
-import { detectAgentCreation } from '../routes/api.js';
+import { detectAgentCreation, registerAgentInOpenClaw } from '../routes/api.js';
 
 interface WebSocket {
   readyState: number;
@@ -35,6 +35,7 @@ interface AuthenticatedSocket {
   isAdmin: boolean;
   firstMessage: boolean;
   userContext: Record<string, unknown>;
+  unknownAgentRepairAttempted: boolean;
 }
 
 interface TokenLookup {
@@ -56,6 +57,29 @@ const MAX_TOTAL_FILE_SIZE_BYTES = 8 * 1024 * 1024;
 const MAX_FILENAME_LENGTH = 120;
 const ADMIN_UPLOADS_ROOT = '/opt/webagent/openclaw/workspaces/meta/uploads';
 const tokenCache = new Map<string, TokenCacheEntry>();
+
+function isUnknownAgentError(message?: string): boolean {
+  if (!message) {
+    return false;
+  }
+
+  const normalized = message.toLowerCase();
+  return normalized.includes('unknown agent') || normalized.includes('invalid agent params');
+}
+
+function getSkillsFromWidgetConfig(widgetConfig: unknown): string[] | undefined {
+  if (!widgetConfig || typeof widgetConfig !== 'object' || Array.isArray(widgetConfig)) {
+    return undefined;
+  }
+
+  const maybeSkills = (widgetConfig as Record<string, unknown>).skills;
+  if (!Array.isArray(maybeSkills)) {
+    return undefined;
+  }
+
+  const skills = maybeSkills.filter((skill): skill is string => typeof skill === 'string' && skill.trim().length > 0);
+  return skills.length > 0 ? skills : undefined;
+}
 
 function timingSafeBufferEqual(a: string, b: string): boolean {
   const left = Buffer.from(a);
@@ -436,6 +460,7 @@ export function handleConnection(
     isAdmin: false,
     firstMessage: false,
     userContext: {},
+    unknownAgentRepairAttempted: false,
   };
 
   // 30s auth timeout
@@ -639,7 +664,7 @@ export function handleConnection(
               outboundMessage = customerContent;
             }
             let streamed = false;
-            const result = await openclawClient.sendMessage({
+            let result = await openclawClient.sendMessage({
               message: outboundMessage,
               agentId: state.openclawAgentId,
               sessionKey: state.sessionKey,
@@ -651,6 +676,57 @@ export function handleConnection(
                 send(ws, { type: 'message', content: delta, done: false });
               },
             });
+
+            if (
+              !result.success
+              && !state.isAdmin
+              && !state.unknownAgentRepairAttempted
+              && isUnknownAgentError(result.error)
+            ) {
+              state.unknownAgentRepairAttempted = true;
+              ctx.app.log.info(
+                { agentId: state.agentId, openclawAgentId: state.openclawAgentId, sessionKey: state.sessionKey },
+                'unknown agent from openclaw; attempting registration self-heal',
+              );
+              try {
+                const rows = await ctx.db
+                  .select({
+                    openclawAgentId: agents.openclawAgentId,
+                    name: agents.name,
+                    widgetConfig: agents.widgetConfig,
+                  })
+                  .from(agents)
+                  .where(eq(agents.id, state.agentId))
+                  .limit(1);
+                const agentRow = rows[0];
+                if (!agentRow) {
+                  ctx.app.log.warn(
+                    { agentId: state.agentId, sessionKey: state.sessionKey },
+                    'self-heal skipped; agent row not found',
+                  );
+                } else {
+                  const skills = getSkillsFromWidgetConfig(agentRow.widgetConfig);
+                  await registerAgentInOpenClaw(agentRow.openclawAgentId, agentRow.name, ctx.app, skills);
+                  result = await openclawClient.sendMessage({
+                    message: outboundMessage,
+                    agentId: state.openclawAgentId,
+                    sessionKey: state.sessionKey,
+                    onDelta: (delta) => {
+                      if (!delta) {
+                        return;
+                      }
+                      streamed = true;
+                      send(ws, { type: 'message', content: delta, done: false });
+                    },
+                  });
+                }
+              } catch (err) {
+                ctx.app.log.error(
+                  { err, agentId: state.agentId, openclawAgentId: state.openclawAgentId, sessionKey: state.sessionKey },
+                  'self-heal registration attempt failed',
+                );
+              }
+            }
 
             if (result.success) {
               let responseText = result.response || '';
