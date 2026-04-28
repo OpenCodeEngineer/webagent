@@ -218,7 +218,7 @@ async function insertAuditLog(
  * Register a newly created agent in the OpenClaw gateway config (~/.openclaw/openclaw.json)
  * and restart the gateway so it picks up the new agent.
  */
-async function registerAgentInOpenClaw(
+export async function registerAgentInOpenClaw(
   slug: string,
   name: string,
   app: FastifyInstance,
