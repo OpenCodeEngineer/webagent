@@ -39,6 +39,54 @@ Set in `agents.defaults.model` in openclaw.json5:
    ```
 
 ## Deploy
+
+### Quick redeploy (existing VM)
+
 ```bash
+# Single canonical redeploy script (safe to rerun on every local code update)
 ./infra/deploy.sh
+
+# Or target a specific host
+./infra/deploy.sh 78.47.152.177
+```
+
+### First-time bootstrap on a new VM
+
+```bash
+# 1) Copy infra scripts to VM and run setup once
+rsync -az ./infra/ root@<new-vm-ip>:/root/webagent-infra/
+ssh root@<new-vm-ip> "DOMAIN=myapp.example.com REPO_URL=git@github.com:OpenCodeEngineer/webagent.git APP_DIR=/opt/webagent APP_USER=openclaw bash /root/webagent-infra/setup.sh"
+
+# 2) Deploy current local repo state (repeat this whenever code changes)
+./infra/deploy.sh <new-vm-ip>
+```
+
+**Env vars for targeting a different VM:**
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DEPLOY_HOST` | `78.47.152.177` | VM IP or hostname |
+| `DEPLOY_USER` | `root` | SSH user |
+| `APP_DIR` | `/opt/webagent` | App directory on VM |
+| `APP_USER` | `openclaw` | OS user that owns the app (setup only) |
+| `DOMAIN` | `webagent.example.com` | Public domain (setup / TLS) |
+| `REPO_URL` | GitHub HTTPS URL | Git clone URL (setup only) |
+
+### GitHub Actions
+
+The workflow (`.github/workflows/deploy.yml`) runs automatically on push to `main` or via manual dispatch. It calls `infra/deploy.sh` directly — no changes needed. Secrets required:
+
+- `VM_SSH_KEY` — private SSH key for the VM
+- `VM_HOST` — VM IP or hostname
+
+To retarget the workflow to a different VM, update the `VM_HOST` secret in the repo settings.
+
+### Scripts
+
+```bash
+# Canonical redeploy script
+./infra/deploy.sh [host]
+
+# One-time bootstrap script (run on VM as root)
+DOMAIN=myapp.example.com REPO_URL=git@github.com:OpenCodeEngineer/webagent.git bash /path/to/infra/setup.sh
 ```

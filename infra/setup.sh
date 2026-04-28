@@ -8,8 +8,8 @@ set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/OpenCodeEngineer/webagent.git}"
 DOMAIN="${DOMAIN:-webagent.example.com}"
-APP_USER="openclaw"
-APP_DIR="/home/${APP_USER}/webagent"
+APP_USER="${APP_USER:-openclaw}"
+APP_DIR="${APP_DIR:-/opt/webagent}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ── 1. System packages ────────────────────────────────────────────────────────
