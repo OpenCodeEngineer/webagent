@@ -339,8 +339,7 @@ After running all phases, report a summary table:
 | 7. Agent Delete      | ✅/❌ | delete + confirmation |
 | 8. Agent Detail      | ✅/❌ | embed code, copy, regenerate |
 | 9. Admin CRM        | ✅/❌ | stats, users, agents, audit |
-| 10. Restart Gate     | ✅/❌/N/A | post-restart health (deploy only) — **RELEASE-CRITICAL** |
-| 10. Restart/List Critical Path | ✅/❌ | native chat + widget list/restart, no unknown-agent/auth-context failures |
+| 10. Restart/List Critical Path | ✅/❌ | native chat + widget list/restart, no unknown-agent/auth-context failures — **RELEASE-CRITICAL** |
 
 UI/UX Issues Found:
 - [list any visual/interaction problems]
