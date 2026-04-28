@@ -100,6 +100,9 @@
       .lamoom-dot:nth-child(2) { animation-delay: .12s; }
       .lamoom-dot:nth-child(3) { animation-delay: .24s; }
       @keyframes lamoom-bounce { 0%,80%,100% { transform: translateY(0); opacity: .5; } 40% { transform: translateY(-4px); opacity: 1; } }
+      .lamoom-h1 { font-size: 1.2em; margin: 12px 0 4px; }
+      .lamoom-h2 { font-size: 1.1em; margin: 10px 0 4px; }
+      .lamoom-blockquote { border-left: 3px solid #424242; margin: 6px 0; padding: 4px 10px; color: #a0a0a0; font-style: italic; }
       @keyframes lamoom-scale-in { from { transform: scale(0); } to { transform: scale(1); } }
       @media (max-width: 480px) {
         .lamoom-bubble { right: 16px; bottom: 16px; }
@@ -171,16 +174,20 @@
       replacements.reduce((output, replacement) => output.split(replacement.token).join(replacement.html), input);
 
     let escaped = escapeHtml(raw);
+
+    // --- Code blocks (extract first so nothing inside gets processed) ---
     const codeBlocks: Array<{ token: string; html: string }> = [];
-    escaped = escaped.replace(/```([\s\S]*?)(?:```|$)/g, (_match, code: string) => {
+    // Strip optional language label (e.g. ```json) from the code content
+    escaped = escaped.replace(/```([a-zA-Z0-9_-]*)\n?([\s\S]*?)(?:```|$)/g, (_match, _lang: string, code: string) => {
       const token = `@@LAMOOM_CODE_BLOCK_${codeBlocks.length}@@`;
       codeBlocks.push({
         token,
-        html: `<pre class="lamoom-code-block"><code>${code}</code></pre>`,
+        html: `<pre class="lamoom-code-block"><code>${code.replace(/\n$/, '')}</code></pre>`,
       });
       return token;
     });
 
+    // --- Inline code ---
     const inlineCodes: Array<{ token: string; html: string }> = [];
     escaped = escaped.replace(/`([^`\n]+?)`/g, (_match, code: string) => {
       const token = `@@LAMOOM_INLINE_CODE_${inlineCodes.length}@@`;
@@ -191,13 +198,17 @@
       return token;
     });
 
+    // --- Links ---
     escaped = escaped.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (_match, text: string, url: string) => {
       if (!/^(https?:\/\/|mailto:)/i.test(url)) return text;
       return `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`;
     });
-    escaped = escaped.replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, '<strong>$2</strong>');
-    escaped = escaped.replace(/(\*|_)(?=\S)([\s\S]*?\S)\1/g, '<em>$2</em>');
 
+    // --- Bold / italic — restricted to single line to avoid streaming artefacts ---
+    escaped = escaped.replace(/(\*\*|__)([^\n*_]+?)\1/g, '<strong>$2</strong>');
+    escaped = escaped.replace(/(\*|_)([^\n*_]+?)\1/g, '<em>$2</em>');
+
+    // --- Block-level rendering ---
     const paragraphHtml = escaped
       .split(/\n{2,}/)
       .map((paragraph) => {
@@ -206,6 +217,7 @@
         const textLines: string[] = [];
         let listType: 'ul' | 'ol' | null = null;
         let listItems: string[] = [];
+
         const flushText = (): void => {
           if (textLines.length === 0) return;
           parts.push(`<p>${textLines.join('<br>')}</p>`);
@@ -225,20 +237,41 @@
             flushList();
             continue;
           }
+
+          // Code block token (pass through)
           if (/^@@LAMOOM_CODE_BLOCK_\d+@@$/.test(trimmed)) {
             flushText();
             flushList();
             parts.push(trimmed);
             continue;
           }
-          const headingMatch = trimmed.match(/^###\s+(.+)$/);
+
+          // Headings: # through ######
+          const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/);
           if (headingMatch) {
             flushText();
             flushList();
-            parts.push(`<strong class="lamoom-heading">${headingMatch[1]}</strong>`);
+            const level = headingMatch[1]!.length;
+            const text = headingMatch[2]!;
+            const cls =
+              level === 1 ? 'lamoom-heading lamoom-h1' :
+              level === 2 ? 'lamoom-heading lamoom-h2' :
+              'lamoom-heading';
+            parts.push(`<strong class="${cls}">${text}</strong>`);
             continue;
           }
-          const unorderedMatch = trimmed.match(/^[-*]\s+(.+)$/);
+
+          // Blockquote
+          const bqMatch = trimmed.match(/^>\s*(.*)/);
+          if (bqMatch) {
+            flushText();
+            flushList();
+            parts.push(`<div class="lamoom-blockquote">${bqMatch[1]}</div>`);
+            continue;
+          }
+
+          // Unordered list
+          const unorderedMatch = trimmed.match(/^[-*+]\s+(.+)$/);
           if (unorderedMatch) {
             flushText();
             if (listType === 'ol') flushList();
@@ -246,6 +279,8 @@
             listItems.push(unorderedMatch[1] ?? '');
             continue;
           }
+
+          // Ordered list
           const orderedMatch = trimmed.match(/^\d+\.\s+(.+)$/);
           if (orderedMatch) {
             flushText();
@@ -254,6 +289,15 @@
             listItems.push(orderedMatch[1] ?? '');
             continue;
           }
+
+          // Horizontal rule
+          if (/^([-*_]){3,}$/.test(trimmed)) {
+            flushText();
+            flushList();
+            parts.push('<hr style="border:none;border-top:1px solid #2f2f2f;margin:8px 0;">');
+            continue;
+          }
+
           flushList();
           textLines.push(line);
         }
