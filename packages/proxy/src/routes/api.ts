@@ -994,4 +994,178 @@ Customer: ${normalizedLatestMessage}`
       return sendError(reply, 500, 'internal_error', 'Failed to create embed token');
     }
   });
+
+  // ─── Web-Fetch Proxy ──────────────────────────────────────────────────────
+
+  const webFetchBodySchema = z.object({
+    url: z.string().url(),
+    method: z.string().min(1).max(16).optional().default('GET'),
+    headers: z.record(z.string(), z.string()).optional(),
+    body: z.unknown().optional(),
+  });
+
+  const BLOCKED_HOSTNAMES = new Set([
+    'localhost',
+    '127.0.0.1',
+    '::1',
+    '0.0.0.0',
+    'metadata.google.internal',
+    '169.254.169.254', // AWS/GCP/Azure IMDS
+  ]);
+
+  function isBlockedUrl(raw: string): boolean {
+    try {
+      const u = new URL(raw);
+      const host = u.hostname.toLowerCase();
+      if (BLOCKED_HOSTNAMES.has(host)) return true;
+      // Block private IPv4 ranges
+      const parts = host.split('.').map(Number);
+      if (parts.length === 4 && parts.every((p) => p >= 0 && p <= 255)) {
+        const [a, b] = parts as [number, number, number, number];
+        if (a === 10) return true;
+        if (a === 172 && b >= 16 && b <= 31) return true;
+        if (a === 192 && b === 168) return true;
+      }
+      return false;
+    } catch {
+      return true;
+    }
+  }
+
+  /** Verify a widget embed token from Authorization: Bearer <token> header. */
+  async function verifyEmbedToken(
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): Promise<string | null> {
+    const authHeader = getHeaderValue(request.headers['authorization']);
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+    if (!token) {
+      sendError(reply, 401, 'unauthorized', 'Missing Authorization: Bearer <embed_token> header');
+      return null;
+    }
+    const rows = await app.db
+      .select({ id: widgetEmbeds.id })
+      .from(widgetEmbeds)
+      .where(eq(widgetEmbeds.embedToken, token))
+      .limit(1);
+    if (!rows[0]) {
+      sendError(reply, 401, 'unauthorized', 'Invalid embed token');
+      return null;
+    }
+    return token;
+  }
+
+  app.post(
+    '/api/fetch',
+    { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } },
+    async (request, reply) => {
+      const token = await verifyEmbedToken(request, reply);
+      if (!token) return;
+
+      const body = parseOrError(webFetchBodySchema, request.body, reply, 'invalid_fetch_payload');
+      if (!body) return;
+
+      if (isBlockedUrl(body.url)) {
+        return sendError(reply, 400, 'blocked_url', 'Target URL is not allowed');
+      }
+
+      // Validate allowed origins if configured for this embed token
+      const embedRows = await app.db
+        .select({ allowedOrigins: widgetEmbeds.allowedOrigins })
+        .from(widgetEmbeds)
+        .where(eq(widgetEmbeds.embedToken, token))
+        .limit(1);
+      const allowedOrigins = embedRows[0]?.allowedOrigins ?? null;
+      if (allowedOrigins && allowedOrigins.length > 0) {
+        const origin = getHeaderValue(request.headers['origin']);
+        const referer = getHeaderValue(request.headers['referer']);
+        const sourceOrigin = origin ?? (referer ? new URL(referer).origin : null);
+        if (!sourceOrigin || !allowedOrigins.some((o) => sourceOrigin === o || sourceOrigin.endsWith(`.${o}`))) {
+          return sendError(reply, 403, 'origin_not_allowed', 'Request origin not permitted');
+        }
+      }
+
+      try {
+        const fetchInit: RequestInit = {
+          method: (body.method ?? 'GET').toUpperCase(),
+          headers: body.headers as Record<string, string>,
+        };
+        if (body.body !== undefined && fetchInit.method !== 'GET' && fetchInit.method !== 'HEAD') {
+          fetchInit.body = typeof body.body === 'string' ? body.body : JSON.stringify(body.body);
+        }
+
+        const upstream = await fetch(body.url, fetchInit);
+        const contentType = upstream.headers.get('content-type') ?? '';
+        const responseBody = await upstream.text();
+
+        return reply.send({
+          status: upstream.status,
+          statusText: upstream.statusText,
+          headers: Object.fromEntries(upstream.headers.entries()),
+          body: responseBody,
+          contentType,
+        });
+      } catch (error) {
+        request.log.warn({ error, url: body.url }, 'web-fetch proxy upstream error');
+        return sendError(reply, 502, 'fetch_error', 'Failed to fetch upstream URL');
+      }
+    },
+  );
+
+  // ─── Escalation ───────────────────────────────────────────────────────────
+
+  const escalateBodySchema = z.object({
+    token: z.string().min(1),
+    userId: z.string().min(1),
+    email: z.string().email(),
+    name: z.string().optional().default(''),
+    context: z.string().optional().default(''),
+    transcript: z
+      .array(z.object({ role: z.string(), content: z.string() }))
+      .max(20)
+      .optional()
+      .default([]),
+  });
+
+  app.post(
+    '/api/escalate',
+    { config: { rateLimit: { max: 10, timeWindow: '5 minutes' } } },
+    async (request, reply) => {
+      const body = parseOrError(escalateBodySchema, request.body, reply, 'invalid_escalate_payload');
+      if (!body) return;
+
+      // Validate embed token
+      const embedRows = await app.db
+        .select({ id: widgetEmbeds.id, agentId: widgetEmbeds.agentId })
+        .from(widgetEmbeds)
+        .where(eq(widgetEmbeds.embedToken, body.token))
+        .limit(1);
+      const embed = embedRows[0];
+      if (!embed) {
+        return sendError(reply, 401, 'unauthorized', 'Invalid embed token');
+      }
+
+      // Store ticket in audit log — reusing existing infrastructure
+      await app.db.insert(auditLog).values({
+        customerId: null,
+        action: 'widget.escalation',
+        details: {
+          agentId: embed.agentId,
+          userId: body.userId,
+          email: body.email,
+          name: body.name,
+          context: body.context,
+          transcriptLength: body.transcript.length,
+          transcript: body.transcript,
+        },
+      });
+
+      request.log.info(
+        { agentId: embed.agentId, userId: body.userId, email: body.email },
+        'escalation ticket received',
+      );
+
+      return reply.status(202).send({ ok: true });
+    },
+  );
 }

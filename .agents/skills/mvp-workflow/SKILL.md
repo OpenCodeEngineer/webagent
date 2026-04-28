@@ -1,5 +1,5 @@
 ---
-name: e2e-test
+name: mvp-workflow
 description: >
   Browser-based E2E QA for the OpenClaw platform. Triggers on "run tests",
   "run e2e", "test the system", "test end to end", "verify the flow", "smoke test",
@@ -9,6 +9,18 @@ description: >
 ---
 
 # E2E QA Test Skill — Browser-Based
+
+## Execution Model
+
+**This skill MUST be executed via a subagent (Task tool).** When this skill is triggered:
+1. The orchestrator MUST delegate the entire QA run to a `general` subagent.
+2. Pass the full SKILL.md content as the subagent prompt.
+3. The subagent runs all phases autonomously and returns the final QA report.
+4. The orchestrator reviews the report and presents the verdict to the user.
+
+Do NOT run these phases inline — always delegate to a subagent for isolation and context efficiency.
+
+---
 
 Test the Lamoom platform end-to-end using browser tools. NOT scripts — use vibebrowser or playwright MCP to interact with the real UI.
 
