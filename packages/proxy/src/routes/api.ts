@@ -1,5 +1,5 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
-import { mkdir, readFile, rmdir, writeFile } from 'fs/promises';
+import { mkdir, readFile, rmdir, stat, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'node:os';
 import { execFile } from 'node:child_process';
@@ -230,11 +230,29 @@ async function registerAgentInOpenClaw(
     join(process.cwd(), 'openclaw', 'config', 'openclaw.json5') ||
     join(homedir(), '.openclaw', 'openclaw.json');
   const lockPath = `${configPath}.lock`;
+  let staleLockCleaned = false;
+  try {
+    const lockInfo = await stat(lockPath);
+    if (Date.now() - lockInfo.mtimeMs > 60_000) {
+      await rmdir(lockPath);
+      staleLockCleaned = true;
+    }
+  } catch {}
+
   try {
     await mkdir(lockPath, { recursive: false });
   } catch (err) {
-    app.log.warn({ err, lockPath }, 'openclaw config lock acquisition failed');
-    return;
+    if (staleLockCleaned) {
+      try {
+        await mkdir(lockPath, { recursive: false });
+      } catch (retryErr) {
+        app.log.error({ err: retryErr, lockPath }, 'openclaw config lock acquisition failed');
+        return;
+      }
+    } else {
+      app.log.error({ err, lockPath }, 'openclaw config lock acquisition failed');
+      return;
+    }
   }
 
   try {
@@ -263,6 +281,7 @@ async function registerAgentInOpenClaw(
         id: slug,
         name,
         workspace: join(workspacesDir, slug),
+        sandbox: { mode: 'off' },
         skills: skills?.length ? skills : ['website-api'],
         heartbeat: { every: '30m' },
       });
