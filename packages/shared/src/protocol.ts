@@ -13,6 +13,7 @@ export type ClientMessage =
     token: string;
     ticket?: string;
     agentToken?: string;
+    context?: Record<string, unknown>;
   }
   | {
     type: 'auth';
@@ -21,6 +22,7 @@ export type ClientMessage =
     agentToken: string;
     token?: string;
     ticket?: string;
+    context?: Record<string, unknown>;
   }
   | {
     type: 'auth';
@@ -29,6 +31,7 @@ export type ClientMessage =
     ticket: string;
     token?: string;
     agentToken?: string;
+    context?: Record<string, unknown>;
   }
   | { type: 'message'; content: string; attachments?: MessageAttachment[] }
   | { type: 'ping' };

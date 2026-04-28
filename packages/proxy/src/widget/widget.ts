@@ -39,6 +39,11 @@
   const agentToken = activeScript?.getAttribute('data-agent-token')?.trim();
   if (!agentToken) return;
 
+  // Read optional user-token-key: tells the widget which localStorage key holds the API token.
+  // The embedding page sets  data-user-token-key="oc_access_token"  (or any key name).
+  const userTokenKey = activeScript?.getAttribute('data-user-token-key')?.trim();
+  const userToken = userTokenKey ? (win.localStorage?.getItem(userTokenKey)?.trim() ?? '') : '';
+
   const userId = (() => {
     const existing = win.localStorage?.getItem('lamoom_uid')?.trim();
     if (existing) return existing;
@@ -364,13 +369,11 @@
     socket.onopen = () => {
       retryCount = 0;
       sendButton.disabled = false;
-      socket?.send(
-        JSON.stringify({
-          type: 'auth',
-          agentToken,
-          userId,
-        }),
-      );
+      const authMsg: Record<string, unknown> = { type: 'auth', agentToken, userId };
+      if (userToken) {
+        authMsg['context'] = { token: userToken };
+      }
+      socket?.send(JSON.stringify(authMsg));
     };
 
     socket.onmessage = (event: { data?: unknown }) => {
