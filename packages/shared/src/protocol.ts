@@ -40,6 +40,12 @@ export type ClientMessage =
 export type ServerMessage =
   | { type: 'auth_ok'; sessionId: string }
   | { type: 'auth_error'; reason: string }
+  | {
+    type: 'history';
+    sessionId: string;
+    messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+    embedCode?: string;
+  }
   | { type: 'message'; content: string; done: boolean }
   | { type: 'error'; message: string }
   | { type: 'pong' };

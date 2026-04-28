@@ -8,7 +8,11 @@ import { and, count, eq, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import JSON5 from 'json5';
 import { OpenClawClient } from '../openclaw/client.js';
-import { buildAgentSessionKey } from '../openclaw/sessions.js';
+import {
+  appendMetaHistoryMessage,
+  extractEmbedCodeFromMessages,
+  getMetaHistory,
+} from '../openclaw/meta-history.js';
 import { agents, auditLog, customers, widgetEmbeds, widgetSessions } from '../db/schema.js';
 import { invalidateEmbedTokenCache } from '../ws/handler.js';
 
@@ -218,6 +222,7 @@ async function registerAgentInOpenClaw(
   slug: string,
   name: string,
   app: FastifyInstance,
+  skills?: string[],
 ): Promise<void> {
   // Resolve config path: OPENCLAW_CONFIG_PATH > /opt/webagent/openclaw/config/openclaw.json5 > ~/.openclaw/openclaw.json
   const configPath =
@@ -258,7 +263,7 @@ async function registerAgentInOpenClaw(
         id: slug,
         name,
         workspace: join(workspacesDir, slug),
-        skills: ['website-api'],
+        skills: skills?.length ? skills : ['website-api'],
         heartbeat: { every: '30m' },
       });
 
@@ -346,6 +351,7 @@ export async function detectAgentCreation(
     websiteUrl: string;
     apiDescription: string;
     apiBaseUrl: string;
+    skills?: string[];
     createdAt: string;
   };
 
@@ -471,7 +477,7 @@ export async function detectAgentCreation(
   }
 
   // Register agent in OpenClaw gateway config and restart gateway
-  await registerAgentInOpenClaw(config.agentSlug, config.agentName, app);
+  await registerAgentInOpenClaw(config.agentSlug, config.agentName, app, config.skills);
 
   const existingEmbedRows = await app.db
     .select()
@@ -581,33 +587,35 @@ export function registerApiRoutes(app: FastifyInstance) {
     );
     if (!body) return;
 
-    const sessionId = body.sessionId?.trim() || randomUUID();
-    const isNewSession = !body.sessionId?.trim();
     const latestUserMessage = body.messages
       .filter((message) => message.role.toLowerCase() === 'user')
       .map((message) => message.content.trim())
       .filter((message) => message.length > 0)
       .at(-1) ?? '';
+    const normalizedLatestMessage = latestUserMessage || 'I want to create a chat agent for my website.';
 
-    const domain = (process.env.AUTH_URL || 'https://dev.lamoom.com').replace(/\/+$/, '');
-    const messageForAgent = isNewSession
-      ? `[Lamoom Platform — Agent Creation Session]
-Customer ID: ${customerId}
-Platform domain: ${domain}
-
-Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'}`
-      : latestUserMessage;
-
-    if (!messageForAgent.trim()) {
+    if (!normalizedLatestMessage.trim()) {
       return sendError(reply, 400, 'empty_message', 'Message content is required');
     }
 
     try {
+      const history = await getMetaHistory(app.db, customerId);
+      const isNewSession = history.messages.length === 0;
+      const sessionId = history.sessionId;
+      const domain = (process.env.AUTH_URL || 'https://dev.lamoom.com').replace(/\/+$/, '');
+      const messageForAgent = isNewSession
+        ? `[Lamoom Platform — Agent Creation Session]
+Customer ID: ${customerId}
+Platform domain: ${domain}
+
+Customer: ${normalizedLatestMessage}`
+        : normalizedLatestMessage;
+
       const openclawClient = new OpenClawClient();
       const agentResponse = await openclawClient.sendMessage({
         message: messageForAgent,
         agentId: 'meta',
-        sessionKey: buildAgentSessionKey('meta', `admin-${customerId}-${sessionId}`),
+        sessionKey: history.openclawSessionKey,
         name: 'agent-builder',
         timeoutSeconds: 240,
       });
@@ -623,6 +631,8 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
       }
 
       const responseText = agentResponse.response ?? '';
+      await appendMetaHistoryMessage(app.db, customerId, 'user', normalizedLatestMessage);
+      await appendMetaHistoryMessage(app.db, customerId, 'assistant', responseText);
       const existingEmbedCode
         = responseText.match(/<script\s[^>]*data-agent-token="[^"]*"[^>]*><\/script>/i)?.[0] ?? '';
       const createdAgentData = await detectAgentCreation(responseText, customerId, app, domain);
@@ -654,6 +664,29 @@ Customer: ${latestUserMessage || 'I want to create a chat agent for my website.'
         'meta_unavailable',
         'Agent builder service is temporarily unavailable. Please try again.',
       );
+    }
+  });
+
+  app.get('/api/agents/meta-history', async (request, reply) => {
+    const customerId = requireCustomerAuth(request, reply);
+    if (!customerId) return;
+
+    try {
+      const history = await getMetaHistory(app.db, customerId);
+      return reply.send({
+        data: {
+          sessionId: history.sessionId,
+          messages: history.messages.map(({ role, content, createdAt }) => ({
+            role,
+            content,
+            createdAt,
+          })),
+          embedCode: extractEmbedCodeFromMessages(history.messages),
+        },
+      });
+    } catch (error) {
+      request.log.error({ error }, 'failed to fetch meta-agent history');
+      return sendError(reply, 500, 'internal_error', 'Failed to fetch meta-agent history');
     }
   });
 

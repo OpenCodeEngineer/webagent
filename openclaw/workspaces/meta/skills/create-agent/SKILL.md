@@ -26,23 +26,34 @@ If links are missing, infer from fetched content and include only verified URLs.
 
 ## 4-Step Flow
 
+### Step 0 — Select templates (BEFORE writing files)
+
+Before generating, scan the `templates/` directory (relative to this workspace) for **specialized templates** that match the target website. Specialized templates have a site-specific suffix — for example:
+- `AGENTS-openclaw-console-navigation.md` → use for openclaw console agents instead of generic `AGENTS.md`
+- `skills/openclaw-console-navigation/SKILL.md` → include as an extra skill
+- `knowledgebase/openclaw-console-navigation.md` → include as the API reference knowledgebase
+
+**Selection rule:** if a specialized template matches the website being onboarded, prefer it over the generic template. Copy its content as-is (filling only genuinely dynamic values like names/URLs), because specialized templates already contain verified endpoint tables, auth flows, and canonical links.
+
 ### Step 1 — Generate workspace files via `write`
 
 Derive:
 - `agentSlug` = website name lowercased, non-alphanumeric collapsed to hyphens, trim edge hyphens, then append `-<customerIdFirst8>` (first 8 chars of customer ID) for customer-unique slugs.
 - `workspacePath` = `/opt/webagent/openclaw/workspaces/<agentSlug>`
 
-Read templates from `templates/` directory (relative to this workspace) as starting point, then `write`:
-- `<workspacePath>/AGENTS.md` — agent personality and instructions
+Read templates from `templates/` directory as starting point (using specialized templates from Step 0 when available), then `write`:
+- `<workspacePath>/AGENTS.md` — agent personality and instructions (use specialized AGENTS template if found)
 - `<workspacePath>/SOUL.md` — brand voice and values
 - `<workspacePath>/IDENTITY.md` — name and role
 - `<workspacePath>/TOOLS.md` — environment/local operational notes (no secrets)
 - `<workspacePath>/USER.md` — expected user context
 - `<workspacePath>/skills/website-knowledge/SKILL.md` — knowledge skill grounded in website facts and links
 - `<workspacePath>/skills/website-api/SKILL.md` — API interaction skill (only if API exists)
+- Any specialized skills found in Step 0 (e.g., `<workspacePath>/skills/openclaw-console-navigation/SKILL.md`)
 - `<workspacePath>/knowledgebase/overview.md` — product summary + capabilities
 - `<workspacePath>/knowledgebase/key-links.md` — canonical visitor links
 - `<workspacePath>/knowledgebase/use-cases.md` — concrete role/use-case examples
+- `<workspacePath>/knowledgebase/api-reference.md` — **required when API exists**: full endpoint table with method, path, request body, response shape, and auth requirements. Use specialized knowledgebase template if found.
 
 Fill all files with customer-specific values (website name, product, API details, tone, links).
 
@@ -60,6 +71,12 @@ In generated files, always include:
 5. A rule in AGENTS/knowledge skill: when asked "how do I install", return the direct install link (and docs link) explicitly.
 6. `TOOLS.md` entries for practical operator context (API base URL, auth scheme, important integration labels) without storing credentials or secrets.
 
+**API quality bar (when API exists):**
+7. `knowledgebase/api-reference.md` must contain a **structured endpoint table** with columns: Method, Path, Description, Request Body (if applicable), Response Shape.
+8. The `website-api` skill's `Available Actions` section must list **every** API endpoint as a table row — never omit endpoints mentioned in the user prompt or discovered during due diligence.
+9. The `website-api` skill must include `fetch` tool usage examples specific to the API (correct base URL, auth header format, content type).
+10. For mutating endpoints (POST, PUT, DELETE, PATCH), the skill must include the exact request body shape.
+
 ### Step 3 — Write agent config file
 
 `write` a JSON file at `<workspacePath>/agent-config.json`:
@@ -71,9 +88,12 @@ In generated files, always include:
   "websiteUrl": "<websiteUrl>",
   "apiDescription": "<short description of API capabilities>",
   "apiBaseUrl": "<API base URL if provided>",
+  "skills": ["website-api"],
   "createdAt": "<ISO timestamp>"
 }
 ```
+
+The `skills` array lists all skill directory names created in the workspace. Always include `"website-api"` when an API exists. Add any specialized skills created in Step 1 (e.g., `"openclaw-console-navigation"`). The proxy reads this array to register skills in the gateway config.
 
 ### Step 4 — Signal completion to proxy
 

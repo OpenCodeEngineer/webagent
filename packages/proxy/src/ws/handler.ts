@@ -7,7 +7,12 @@ import { and, eq } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
 import { agents, widgetEmbeds } from '../db/schema.js';
 import { OpenClawClient } from '../openclaw/client.js';
-import { buildAgentSessionKey, getOrCreateSession, touchSessionLastActiveAt } from '../openclaw/sessions.js';
+import {
+  appendMetaHistoryMessage,
+  extractEmbedCodeFromMessages,
+  getMetaHistory,
+} from '../openclaw/meta-history.js';
+import { getOrCreateSession, touchSessionLastActiveAt } from '../openclaw/sessions.js';
 import { detectAgentCreation } from '../routes/api.js';
 
 interface WebSocket {
@@ -422,12 +427,19 @@ export function handleConnection(
             state.userId = ticketCustomerId ?? msg.userId;
             state.agentId = 'meta';
             state.openclawAgentId = 'meta';
-            state.sessionKey = buildAgentSessionKey('meta', `admin-${state.userId}-${crypto.randomUUID()}`);
+            const history = await getMetaHistory(ctx.db, state.userId);
+            state.sessionKey = history.openclawSessionKey;
             state.authenticated = true;
             state.isAdmin = true;
-            state.firstMessage = true;
+            state.firstMessage = history.messages.length === 0;
             clearTimeout(authTimeout);
             send(ws, { type: 'auth_ok', sessionId: state.sessionKey });
+            send(ws, {
+              type: 'history',
+              sessionId: history.sessionId,
+              messages: history.messages.map(({ role, content }) => ({ role, content })),
+              embedCode: extractEmbedCodeFromMessages(history.messages),
+            });
             return;
           }
 
@@ -560,35 +572,43 @@ export function handleConnection(
               message: outboundMessage,
               agentId: state.openclawAgentId,
               sessionKey: state.sessionKey,
-              onDelta: state.isAdmin
-                ? undefined
-                : (delta) => {
-                    if (!delta) {
-                      return;
-                    }
-                    streamed = true;
-                    send(ws, { type: 'message', content: delta, done: false });
-                  },
+              onDelta: (delta) => {
+                if (!delta) {
+                  return;
+                }
+                streamed = true;
+                send(ws, { type: 'message', content: delta, done: false });
+              },
             });
 
             if (result.success) {
               let responseText = result.response || '';
+              let embedSuffix = '';
               if (state.isAdmin && responseText) {
                 const created = await detectAgentCreation(responseText, state.userId, ctx.app, domain);
                 if (created?.status === 'created') {
-                  responseText = `${responseText}\n\n${created.embedCode}`;
+                  embedSuffix = `\n\n${created.embedCode}`;
+                  responseText = `${responseText}${embedSuffix}`;
                 } else if (created?.status === 'conflict') {
                   const conflictMessage
                     = `${created.message} Please retry with a more unique website or agent name.`;
                   send(ws, { type: 'error', message: conflictMessage });
-                  responseText = `${responseText}\n\n⚠️ ${conflictMessage}`;
+                  embedSuffix = `\n\n⚠️ ${conflictMessage}`;
+                  responseText = `${responseText}${embedSuffix}`;
                 }
               }
 
-              if (streamed && !state.isAdmin) {
-                send(ws, { type: 'message', content: '', done: true });
+              if (streamed) {
+                // Streaming chunks already delivered the main response text.
+                // Send any extra suffix (e.g. embed code for admin) as the
+                // final done message; widget gets an empty done signal.
+                send(ws, { type: 'message', content: embedSuffix, done: true });
               } else {
                 send(ws, { type: 'message', content: responseText, done: true });
+              }
+              if (state.isAdmin) {
+                await appendMetaHistoryMessage(ctx.db, state.userId, 'user', customerContent);
+                await appendMetaHistoryMessage(ctx.db, state.userId, 'assistant', responseText);
               }
               state.firstMessage = false;
             } else {

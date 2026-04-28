@@ -83,7 +83,7 @@ export default async function AgentDetailPage({ params }: Props) {
             <CardDescription>Try chatting with your agent below. This is exactly what your visitors will see.</CardDescription>
           </CardHeader>
           <CardContent>
-            <WidgetPreview agentToken={agent.embedToken} />
+            <WidgetPreview agentToken={agent.embedToken} widgetBaseUrl={WIDGET_BASE_URL} />
           </CardContent>
         </Card>
       )}
