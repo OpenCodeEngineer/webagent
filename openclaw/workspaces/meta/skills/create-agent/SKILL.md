@@ -76,6 +76,8 @@ In generated files, always include:
 8. The `website-api` skill's `Available Actions` section must list **every** API endpoint as a table row — never omit endpoints mentioned in the user prompt or discovered during due diligence.
 9. The `website-api` skill must include `fetch` tool usage examples specific to the API (correct base URL, auth header format, content type).
 10. For mutating endpoints (POST, PUT, DELETE, PATCH), the skill must include the exact request body shape.
+11. Credential source policy must be explicit: use platform-provided session auth context; never instruct end users to scrape DevTools/localStorage/cookies for tokens.
+12. Missing-credential fallback must be concrete and safe: ask admin/integrator to configure backend session auth context keys (`Authorization`/`apiToken`), then retry the named API call.
 
 ### Step 3 — Write agent config file
 
@@ -88,12 +90,15 @@ In generated files, always include:
   "websiteUrl": "<websiteUrl>",
   "apiDescription": "<short description of API capabilities>",
   "apiBaseUrl": "<API base URL if provided>",
-  "skills": ["website-api"],
+  "skills": ["website-api", "website-knowledge"],
+  "userTokenKey": "<localStorage key holding user JWT, if discoverable — e.g. 'access_token'>",
   "createdAt": "<ISO timestamp>"
 }
 ```
 
-The `skills` array lists all skill directory names created in the workspace. Always include `"website-api"` when an API exists. Add any specialized skills created in Step 1 (e.g., `"openclaw-console-navigation"`). The proxy reads this array to register skills in the gateway config.
+The `userTokenKey` field is **optional but recommended** when the target website stores authentication tokens in `localStorage`. If discovered during website analysis (look for keys like `access_token`, `token`, `jwt`, `auth_token`, `oc_access_token` in the site's JavaScript), include it so the widget can automatically pass the user's token to the agent as session context. If the site uses httpOnly cookies or server-side sessions instead, omit this field.
+
+The `skills` array **must list every skill directory name** created in the workspace. Always include `"website-api"` when an API exists and `"website-knowledge"` for all agents. Add any specialized skills created in Step 1 (e.g., `"openclaw-console-navigation"`). The proxy reads this array to register skills in the gateway config.
 
 ### Step 4 — Signal completion to proxy
 

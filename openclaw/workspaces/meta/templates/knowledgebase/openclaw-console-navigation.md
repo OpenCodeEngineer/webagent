@@ -23,8 +23,9 @@ OpenClaw Box is a managed AI assistant hosting platform. Users deploy their own 
 1. `https://admin.openclaw.vibebrowser.app`
 2. `https://console.openclaw.vibebrowser.app`
 
-**Auth:** Bearer JWT. Obtain via `POST /api/v1/auth/login`. Pass as `Authorization: Bearer <token>`.
-Tokens auto-refresh via `POST /api/v1/auth/refresh` using the refresh token.
+**Auth:** Bearer JWT via `Authorization: Bearer <token>`.
+For this assistant, credentials must come from platform-provided session context (integration backend) — never from user-side browser token scraping.
+`POST /api/v1/auth/login` and `POST /api/v1/auth/refresh` are backend auth flows, not instructions for end users to extract tokens from DevTools/localStorage.
 
 ### Auth Endpoints
 | Method | Path | Description |

@@ -366,6 +366,15 @@ function isGatewayTokenAuthError(message: string): boolean {
   return normalized.includes('gateway token mismatch') || normalized.includes('gateway token missing');
 }
 
+function isUnknownAgentError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return normalized.includes('unknown agent') || normalized.includes('invalid agent params');
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function normalizeGatewayUrl(raw: string): URL {
   const trimmed = raw.trim();
   const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `ws://${trimmed}`;
@@ -803,6 +812,36 @@ export class OpenClawClient {
    * Send a message to an agent via the OpenClaw gateway WebSocket protocol.
    */
   async sendMessage(opts: {
+    message: string;
+    agentId: string;
+    sessionKey?: string;
+    name?: string;
+    timeoutSeconds?: number;
+    onDelta?: (delta: string) => void;
+  }): Promise<AgentResponse> {
+    const UNKNOWN_AGENT_RETRY_DELAY_MS = 3_000;
+    const MAX_UNKNOWN_AGENT_RETRIES = 2;
+
+    let unknownAgentAttempt = 0;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const result = await this.sendMessageOnce(opts);
+      if (
+        !result.success
+        && result.error
+        && isUnknownAgentError(result.error)
+        && unknownAgentAttempt < MAX_UNKNOWN_AGENT_RETRIES
+      ) {
+        // Gateway may not have reloaded its config yet after agent registration.
+        unknownAgentAttempt += 1;
+        await delay(UNKNOWN_AGENT_RETRY_DELAY_MS);
+        continue;
+      }
+      return result;
+    }
+  }
+
+  private async sendMessageOnce(opts: {
     message: string;
     agentId: string;
     sessionKey?: string;
