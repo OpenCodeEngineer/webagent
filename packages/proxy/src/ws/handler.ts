@@ -427,18 +427,26 @@ export function handleConnection(
             state.userId = ticketCustomerId ?? msg.userId;
             state.agentId = 'meta';
             state.openclawAgentId = 'meta';
-            const history = await getMetaHistory(ctx.db, state.userId);
-            state.sessionKey = history.openclawSessionKey;
+
+            let history: Awaited<ReturnType<typeof getMetaHistory>> | null = null;
+            try {
+              history = await getMetaHistory(ctx.db, state.userId);
+            } catch (err) {
+              console.error('Failed to load meta history during admin auth — falling back to fresh session:', err);
+            }
+
+            state.sessionKey = history?.openclawSessionKey
+              ?? `agent:meta:admin-${state.userId}-${crypto.randomUUID()}`;
             state.authenticated = true;
             state.isAdmin = true;
-            state.firstMessage = history.messages.length === 0;
+            state.firstMessage = !history || history.messages.length === 0;
             clearTimeout(authTimeout);
             send(ws, { type: 'auth_ok', sessionId: state.sessionKey });
             send(ws, {
               type: 'history',
-              sessionId: history.sessionId,
-              messages: history.messages.map(({ role, content }) => ({ role, content })),
-              embedCode: extractEmbedCodeFromMessages(history.messages),
+              sessionId: history?.sessionId ?? '',
+              messages: history?.messages.map(({ role, content }) => ({ role, content })) ?? [],
+              embedCode: history ? extractEmbedCodeFromMessages(history.messages) : '',
             });
             return;
           }
@@ -607,8 +615,12 @@ export function handleConnection(
                 send(ws, { type: 'message', content: responseText, done: true });
               }
               if (state.isAdmin) {
-                await appendMetaHistoryMessage(ctx.db, state.userId, 'user', customerContent);
-                await appendMetaHistoryMessage(ctx.db, state.userId, 'assistant', responseText);
+                try {
+                  await appendMetaHistoryMessage(ctx.db, state.userId, 'user', customerContent);
+                  await appendMetaHistoryMessage(ctx.db, state.userId, 'assistant', responseText);
+                } catch (err) {
+                  console.error('Failed to persist meta history (non-fatal):', err);
+                }
               }
               state.firstMessage = false;
             } else {
@@ -629,7 +641,8 @@ export function handleConnection(
           send(ws, { type: 'error', message: 'Unknown message type' });
         }
       }
-    } catch {
+    } catch (err) {
+      console.error('Unhandled WS message error:', { type: msg.type, authenticated: state.authenticated, err });
       if (msg.type === 'auth' && !state.authenticated) {
         send(ws, { type: 'auth_error', reason: 'Internal server error' });
         ws.close(1011, 'Internal error');

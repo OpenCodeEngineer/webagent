@@ -131,7 +131,12 @@ sudo -u openclaw bash -lc "cd '${APP_DIR}' && pnpm build"
 bash "${APP_DIR}/infra/admin-static-sync.sh" sync "${APP_DIR}"
 
 echo "→ Running DB migrations..."
-sudo -u openclaw bash -lc "cd '${APP_DIR}' && pnpm --filter @webagent/proxy db:migrate" || true
+if [[ -f "${APP_DIR}/.env" ]]; then
+  sudo -u openclaw bash -lc "cd '${APP_DIR}' && set -a && source .env && set +a && pnpm --filter @webagent/proxy db:migrate" \
+    || echo "⚠️  DB migration failed (exit $?) — deployment continues but tables may be stale"
+else
+  echo "⚠️  No .env file at ${APP_DIR}/.env — skipping DB migrations"
+fi
 
 if [[ -f "${NGINX_SITE_PATH}" ]]; then
   echo "→ Ensuring nginx /api auth routing + long-running API timeouts..."
