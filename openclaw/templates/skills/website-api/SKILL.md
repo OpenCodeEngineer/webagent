@@ -45,6 +45,22 @@ fetch("{{API_BASE_URL}}/endpoint", {
 - For POST/PUT/DELETE: include `method`, `headers`, and `body` as needed.
 - Parse the JSON response and present results in plain language.
 
+## Session Auth Context Contract
+
+- Read auth context from session keys that may provide `Authorization`, `Bearer`, `apiToken`, or `headers`.
+- Build request headers in this order: explicit request `Authorization` (if intentionally set) → session `Authorization` → `Bearer`/`apiToken` converted to `Authorization: Bearer <token>`.
+- Merge custom session `headers` as additional headers without dropping required defaults.
+- Keep backward compatibility: support legacy key shapes and missing fields gracefully.
+- Safety: never log tokens/secrets, request only least-privilege scopes, preserve existing explicit user headers unless intentionally overridden, and sanitize/validate header input shape before use.
+
+## Credential Source Policy (Required)
+
+- Credential source is **platform-provided session context** (server-side integration), not browser scraping.
+- Never ask visitors to retrieve tokens from DevTools, localStorage, sessionStorage, cookies, or network tabs.
+- If auth context is missing, reply with a concrete admin action:
+  - "I can run this once an admin configures session auth context (for example `Authorization` or `apiToken`) in the widget/integration backend."
+  - Then provide the exact API call you will run after configuration.
+
 ## Usage Rules
 
 1. **Always confirm** before performing actions that modify data (e.g., placing orders, updating profiles).
