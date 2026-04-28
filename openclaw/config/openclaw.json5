@@ -15,7 +15,7 @@
   agents: {
     defaults: {
       workspace: "~/.openclaw/workspace",
-      model: "azure-openai/kimi-k2.5-thinking",
+      model: "azure-openai/gpt-5.1",
       // Workspace-scoped sandboxing: no Docker, file tools restricted to workspace only
       sandbox: { mode: "off" },
       heartbeat: {
@@ -33,6 +33,34 @@
         sandbox: { mode: "off" },
         skills: ["create-agent", "manage-agents"],
         heartbeat: { every: "0m" }
+      },
+      {
+        id: "vibebrowser-app-0e3d9d31",
+        name: "Vibe Browser Co-Pilot",
+        workspace: "/opt/webagent/openclaw/workspaces/vibebrowser-app-0e3d9d31",
+        sandbox: { mode: "off" },
+        heartbeat: { every: "0m" }
+      },
+      {
+        id: "vibebrowser-app-19811498",
+        name: "Vibe Browser Co-Pilot Guide",
+        workspace: "/opt/webagent/openclaw/workspaces/vibebrowser-app-19811498",
+        sandbox: { mode: "off" },
+        heartbeat: { every: "0m" }
+      },
+      {
+        id: "vibebrowser-app-00000000",
+        name: "Vibe Website Co-Pilot",
+        workspace: "/opt/webagent/openclaw/workspaces/vibebrowser-app-00000000",
+        skills: ["website-api"],
+        heartbeat: { every: "30m" }
+      },
+      {
+        id: "openclaw-console-0e3d9d31",
+        name: "OpenClaw Console Assistant",
+        workspace: "/opt/webagent/openclaw/workspaces/openclaw-console-0e3d9d31",
+        skills: ["website-api"],
+        heartbeat: { every: "30m" }
       }
     ]
   },
