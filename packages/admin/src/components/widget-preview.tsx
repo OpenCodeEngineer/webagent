@@ -32,10 +32,7 @@ export function WidgetPreview({ agentToken, widgetBaseUrl }: { agentToken: strin
   );
 
   return (
-    <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">
-        Real embed preview loaded from <code className="font-mono">{scriptSrc}</code>.
-      </p>
+    <div>
       <iframe
         title="Real widget preview"
         srcDoc={srcDoc}
