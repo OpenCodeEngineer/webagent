@@ -5,7 +5,7 @@
 ### Hetzner VM
 - **IP:** 78.47.152.177
 - **SSH:** `root@78.47.152.177`
-- **Config:** `/opt/webagent/openclaw/config/openclaw.json5`
+- **Config:** `/opt/webagent/openclaw/openclaw.json5`
 
 ### Services
 - Proxy: Port 3001
@@ -16,7 +16,7 @@
 **NEVER hot-patch the VM directly!** Always modify local files first, commit, then deploy.
 
 1. **Modify local files** in this repo:
-   - Config: `openclaw/config/openclaw.json5` (model settings)
+   - Config: `openclaw/openclaw.json5` (model settings)
    - Nginx: `infra/nginx/webagent.conf` (proxy settings)
 
 2. **Commit changes:**

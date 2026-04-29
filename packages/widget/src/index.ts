@@ -1,4 +1,10 @@
 import { renderMarkdownToSafeHtml } from './markdown.js';
+import {
+  discoverHostWebMcpTools,
+  registerWidgetAsWebMcpProvider,
+  formatToolsAsContext,
+  type DiscoveredTool,
+} from './webmcp.js';
 
 interface WidgetConfig {
   agentToken: string;
@@ -51,6 +57,20 @@ class WebAgentWidget {
 
   private readonly messages: ChatMessage[] = [];
 
+  // WebMCP
+  private webMcpAbortController: AbortController | null = null;
+  private hostWebMcpTools: DiscoveredTool[] = [];
+  private webMcpContextSent = false;
+
+  // Escalation modal
+  private isEscalationOpen = false;
+  private escalationModal: HTMLElement | null = null;
+  private escalationOverlay: HTMLElement | null = null;
+  private escalationEmailInput: HTMLInputElement | null = null;
+  private escalationNameInput: HTMLInputElement | null = null;
+  private escalationContextInput: HTMLTextAreaElement | null = null;
+  private escalationSubmitButton: HTMLButtonElement | null = null;
+
   private bubbleButton: HTMLButtonElement | null = null;
   private panel: HTMLElement | null = null;
   private badge: HTMLElement | null = null;
@@ -101,6 +121,8 @@ class WebAgentWidget {
     this.isMounted = false;
     this.stopPing();
     this.clearReconnectTimer();
+    this.webMcpAbortController?.abort();
+    this.webMcpAbortController = null;
     if (this.ws) {
       this.ws.onclose = null;
       this.ws.close();
@@ -164,6 +186,12 @@ class WebAgentWidget {
     this.input = query<HTMLTextAreaElement>('.wa-input');
     this.sendButton = query<HTMLButtonElement>('.wa-send');
     this.liveRegion = query<HTMLElement>('.wa-live-region');
+    this.escalationModal = this.shadowRootNode?.querySelector<HTMLElement>('.wa-esc-modal') ?? null;
+    this.escalationOverlay = this.shadowRootNode?.querySelector<HTMLElement>('.wa-esc-overlay') ?? null;
+    this.escalationEmailInput = this.shadowRootNode?.querySelector<HTMLInputElement>('.wa-esc-email') ?? null;
+    this.escalationNameInput = this.shadowRootNode?.querySelector<HTMLInputElement>('.wa-esc-name') ?? null;
+    this.escalationContextInput = this.shadowRootNode?.querySelector<HTMLTextAreaElement>('.wa-esc-context') ?? null;
+    this.escalationSubmitButton = this.shadowRootNode?.querySelector<HTMLButtonElement>('.wa-esc-submit') ?? null;
   }
 
   private bindEvents(): void {
@@ -205,6 +233,15 @@ class WebAgentWidget {
     });
 
     document.addEventListener('keydown', this.onDocumentKeydown);
+
+    // Escalation modal bindings
+    this.shadowRootNode?.querySelector('.wa-esc-open')?.addEventListener('click', () => this.openEscalation());
+    this.shadowRootNode?.querySelector('.wa-esc-close')?.addEventListener('click', () => this.closeEscalation());
+    this.shadowRootNode?.querySelector('.wa-esc-overlay')?.addEventListener('click', () => this.closeEscalation());
+    this.shadowRootNode?.querySelector('.wa-esc-form')?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      void this.submitEscalation();
+    });
   }
 
   private openPanel(): void {
@@ -344,8 +381,18 @@ class WebAgentWidget {
       return;
     }
 
-    const outgoing: RetryPayload = { type: 'message', content };
-    const messageId = this.pushVisitorMessage(content, outgoing);
+    // On the first message after auth, prepend WebMCP host tool context if available
+    let wireContent = content;
+    if (!this.webMcpContextSent && this.hostWebMcpTools.length > 0) {
+      const ctx = formatToolsAsContext(this.hostWebMcpTools);
+      if (ctx) {
+        wireContent = `${ctx}\n\n${content}`;
+      }
+      this.webMcpContextSent = true;
+    }
+
+    const outgoing: RetryPayload = { type: 'message', content: wireContent };
+    const messageId = this.pushVisitorMessage(content, { type: 'message', content });
     this.input.value = '';
 
     if (this.sendPayload(outgoing)) {
@@ -416,6 +463,7 @@ class WebAgentWidget {
         this.isAuthenticated = true;
         this.setBanner('', 'info');
         this.updateInputState();
+        this.setupWebMcp();
         break;
       }
       case 'auth_error': {
@@ -592,6 +640,116 @@ class WebAgentWidget {
       .join('');
 
     this.messagesList.scrollTop = this.messagesList.scrollHeight;
+  }
+
+  // ─── WebMCP ───────────────────────────────────────────────────────────────
+
+  private setupWebMcp(): void {
+    // Abort any previous registration
+    this.webMcpAbortController?.abort();
+    this.webMcpAbortController = new AbortController();
+    this.webMcpContextSent = false;
+
+    // Discover tools the host page exposes
+    this.hostWebMcpTools = discoverHostWebMcpTools();
+
+    // Register this widget so external AI agents can send queries through it
+    registerWidgetAsWebMcpProvider(
+      (content) => {
+        if (!this.isAuthenticated) return;
+        const outgoing: RetryPayload = { type: 'message', content };
+        const messageId = this.pushVisitorMessage(content, outgoing);
+        if (this.sendPayload(outgoing)) {
+          this.waitingForAgent = true;
+          this.activeAgentMessageId = null;
+          this.renderTyping();
+        } else {
+          this.markMessageFailed(messageId);
+        }
+      },
+      this.webMcpAbortController.signal,
+    );
+  }
+
+  // ─── Escalation ───────────────────────────────────────────────────────────
+
+  private openEscalation(): void {
+    this.isEscalationOpen = true;
+    this.escalationModal?.setAttribute('data-open', 'true');
+    this.escalationOverlay?.setAttribute('data-open', 'true');
+    this.escalationOverlay?.setAttribute('aria-hidden', 'false');
+    this.escalationEmailInput?.focus();
+  }
+
+  private closeEscalation(): void {
+    this.isEscalationOpen = false;
+    this.escalationModal?.setAttribute('data-open', 'false');
+    this.escalationOverlay?.setAttribute('data-open', 'false');
+    this.escalationOverlay?.setAttribute('aria-hidden', 'true');
+    if (this.escalationEmailInput) this.escalationEmailInput.value = '';
+    if (this.escalationNameInput) this.escalationNameInput.value = '';
+    if (this.escalationContextInput) this.escalationContextInput.value = '';
+  }
+
+  private async submitEscalation(): Promise<void> {
+    const email = this.escalationEmailInput?.value.trim() ?? '';
+    if (!email) return;
+    const name = this.escalationNameInput?.value.trim() ?? '';
+    const context = this.escalationContextInput?.value.trim() ?? '';
+
+    if (this.escalationSubmitButton) {
+      this.escalationSubmitButton.disabled = true;
+      this.escalationSubmitButton.textContent = 'Sending…';
+    }
+
+    // Derive HTTP base URL from the WS server URL
+    const wsUrl = this.config.serverUrl;
+    const httpBase = wsUrl.replace(/^wss?:\/\//, (m) => (m.startsWith('wss') ? 'https://' : 'http://'));
+    const apiBase = httpBase.replace(/\/ws$/, '');
+
+    const transcript = this.messages.slice(-10).map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
+
+    try {
+      const response = await fetch(`${apiBase}/api/escalate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: this.config.agentToken,
+          userId: this.config.userId,
+          email,
+          name,
+          context,
+          transcript,
+        }),
+      });
+
+      if (!response.ok) {
+        this.setBanner('Failed to send — please try again.', 'error');
+        if (this.escalationSubmitButton) {
+          this.escalationSubmitButton.disabled = false;
+          this.escalationSubmitButton.textContent = 'Send to Support';
+        }
+        return;
+      }
+    } catch {
+      this.setBanner('Failed to send — please try again.', 'error');
+      if (this.escalationSubmitButton) {
+        this.escalationSubmitButton.disabled = false;
+        this.escalationSubmitButton.textContent = 'Send to Support';
+      }
+      return;
+    }
+
+    if (this.escalationSubmitButton) {
+      this.escalationSubmitButton.disabled = false;
+      this.escalationSubmitButton.textContent = 'Send to Support';
+    }
+
+    this.closeEscalation();
+    this.setBanner('Your request has been sent to support.', 'info');
   }
 
   private escapeHtml(input: string): string {
@@ -1017,6 +1175,171 @@ class WebAgentWidget {
             color: #fecaca;
             background: #450a0a;
           }
+
+          .wa-esc-modal {
+            background: #1e293b;
+            border-color: rgba(100, 116, 139, 0.45);
+          }
+
+          .wa-esc-field {
+            background: #0f172a;
+            color: #e2e8f0;
+            border-color: rgba(100, 116, 139, 0.5);
+          }
+        }
+
+        /* ─── Escalation modal ──────────────────────────────── */
+
+        .wa-esc-open {
+          background: none;
+          border: 0;
+          cursor: pointer;
+          font-size: 11px;
+          color: #64748b;
+          padding: 0 4px;
+          margin-left: 8px;
+          text-decoration: underline;
+          text-underline-offset: 2px;
+        }
+
+        .wa-esc-open:hover {
+          color: #2563eb;
+        }
+
+        .wa-esc-overlay {
+          display: none;
+          position: absolute;
+          inset: 0;
+          background: rgba(15, 23, 42, 0.45);
+          z-index: 10;
+          border-radius: 16px;
+        }
+
+        .wa-esc-modal {
+          display: none;
+          position: absolute;
+          inset: 12px;
+          background: #fff;
+          border-radius: 12px;
+          border: 1px solid rgba(148, 163, 184, 0.4);
+          box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+          z-index: 11;
+          flex-direction: column;
+          overflow: hidden;
+        }
+
+        .wa-esc-overlay[data-open='true'],
+        .wa-esc-modal[data-open='true'] {
+          display: flex;
+        }
+
+        .wa-esc-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 12px 14px;
+          border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+          background: #f8fafc;
+          font-size: 14px;
+          font-weight: 650;
+        }
+
+        .wa-esc-close {
+          background: none;
+          border: 0;
+          cursor: pointer;
+          font-size: 15px;
+          color: inherit;
+          width: 28px;
+          height: 28px;
+          border-radius: 6px;
+        }
+
+        .wa-esc-close:focus-visible {
+          outline: 2px solid #2563eb;
+        }
+
+        .wa-esc-body {
+          padding: 12px 14px;
+          overflow-y: auto;
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          font-size: 13px;
+        }
+
+        .wa-esc-desc {
+          margin: 0;
+          color: #64748b;
+          font-size: 12px;
+        }
+
+        .wa-esc-label {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          font-size: 12px;
+          font-weight: 600;
+        }
+
+        .wa-esc-field {
+          border-radius: 8px;
+          border: 1px solid rgba(148, 163, 184, 0.7);
+          padding: 7px 9px;
+          font: inherit;
+          color: inherit;
+          background: #fff;
+          font-size: 13px;
+        }
+
+        .wa-esc-field:focus-visible {
+          outline: 2px solid #2563eb;
+          outline-offset: 1px;
+        }
+
+        .wa-esc-transcript {
+          font-size: 11px;
+          color: #64748b;
+          border: 1px solid rgba(148, 163, 184, 0.35);
+          border-radius: 8px;
+          padding: 6px 8px;
+          max-height: 80px;
+          overflow-y: auto;
+        }
+
+        .wa-esc-footer {
+          display: flex;
+          justify-content: flex-end;
+          gap: 8px;
+          padding: 10px 14px;
+          border-top: 1px solid rgba(148, 163, 184, 0.25);
+          background: #f8fafc;
+        }
+
+        .wa-esc-btn {
+          border: 0;
+          border-radius: 8px;
+          padding: 7px 14px;
+          font: inherit;
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+        }
+
+        .wa-esc-btn-cancel {
+          background: #e2e8f0;
+          color: #334155;
+        }
+
+        .wa-esc-btn-submit {
+          background: #2563eb;
+          color: #fff;
+        }
+
+        .wa-esc-btn[disabled] {
+          opacity: 0.6;
+          cursor: not-allowed;
         }
       </style>
 
@@ -1045,8 +1368,39 @@ class WebAgentWidget {
           </form>
           <div class="wa-footer">
             <a href="https://github.com/OpenCodeEngineer/webagent" target="_blank" rel="noopener noreferrer">Powered by WebAgent</a>
+            <button type="button" class="wa-esc-open" aria-label="Contact support">Contact support</button>
           </div>
           <div class="wa-live-region" aria-live="polite" aria-atomic="true"></div>
+
+          <!-- Escalation modal (rendered inside shadow DOM) -->
+          <div class="wa-esc-overlay" data-open="false" aria-hidden="true"></div>
+          <div class="wa-esc-modal" data-open="false" role="dialog" aria-modal="true" aria-label="Contact support">
+            <div class="wa-esc-header">
+              <span>Contact Support</span>
+              <button type="button" class="wa-esc-close" aria-label="Close contact support">✕</button>
+            </div>
+            <form class="wa-esc-form">
+              <div class="wa-esc-body">
+                <p class="wa-esc-desc">We'll send your chat transcript to our support team who will follow up via email.</p>
+                <label class="wa-esc-label">
+                  Email *
+                  <input type="email" class="wa-esc-field wa-esc-email" required placeholder="your@email.com" />
+                </label>
+                <label class="wa-esc-label">
+                  Name
+                  <input type="text" class="wa-esc-field wa-esc-name" placeholder="Your name" />
+                </label>
+                <label class="wa-esc-label">
+                  Additional context
+                  <textarea class="wa-esc-field wa-esc-context" rows="2" placeholder="Anything else we should know?"></textarea>
+                </label>
+              </div>
+              <div class="wa-esc-footer">
+                <button type="button" class="wa-esc-btn wa-esc-btn-cancel wa-esc-close">Cancel</button>
+                <button type="submit" class="wa-esc-btn wa-esc-btn-submit wa-esc-submit">Send to Support</button>
+              </div>
+            </form>
+          </div>
         </section>
       </div>
     `;

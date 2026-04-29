@@ -30,9 +30,9 @@ echo "── Deploying LOCAL repo to ${REMOTE}:${APP_DIR} ──"
 
 echo "→ Preparing remote directory and preserving runtime OpenClaw config..."
 ssh "${REMOTE}" "set -euo pipefail; install -d -m 0755 '${APP_DIR}'; \
-  if [ -f '${APP_DIR}/openclaw/config/openclaw.json5' ]; then cp '${APP_DIR}/openclaw/config/openclaw.json5' '${RUNTIME_CONFIG_BACKUP}'; fi"
+  if [ -f '${APP_DIR}/openclaw/openclaw.json5' ]; then cp '${APP_DIR}/openclaw/openclaw.json5' '${RUNTIME_CONFIG_BACKUP}'; fi"
 
-echo "→ Syncing local repo (including openclaw workspaces/templates/agents files)..."
+echo "→ Syncing local repo (including openclaw config and agent files)..."
 RSYNC_ARGS=(
   -az
   --human-readable
@@ -46,7 +46,7 @@ RSYNC_ARGS=(
   --exclude 'dist/'
   --exclude '**/dist/'
   --exclude 'coverage/'
-  --exclude 'openclaw/workspaces/'
+  --exclude 'openclaw/workspace/'
   --exclude '.env'
 )
 
@@ -56,10 +56,10 @@ fi
 
 rsync "${RSYNC_ARGS[@]}" "${REPO_ROOT}/" "${REMOTE}:${APP_DIR}/"
 
-echo "→ Syncing managed OpenClaw workspace(s) from local repo..."
+echo "→ Syncing managed OpenClaw workspace from local repo..."
 rsync -az --human-readable --delete \
-  "${REPO_ROOT}/openclaw/workspaces/meta/" \
-  "${REMOTE}:${APP_DIR}/openclaw/workspaces/meta/"
+  "${REPO_ROOT}/openclaw/workspace/" \
+  "${REMOTE}:${APP_DIR}/openclaw/workspace/"
 
 echo "→ Running remote build/restart/apply steps..."
 ssh "${REMOTE}" bash -s "${APP_DIR}" "${RUNTIME_CONFIG_BACKUP}" "${NGINX_SITE_PATH}" <<'REMOTE'
@@ -70,9 +70,9 @@ NGINX_SITE_PATH="$3"
 
 cd "${APP_DIR}"
 
-if [[ -f "${RUNTIME_CONFIG_BACKUP}" && -f "${APP_DIR}/openclaw/config/openclaw.json5" ]]; then
+if [[ -f "${RUNTIME_CONFIG_BACKUP}" && -f "${APP_DIR}/openclaw/openclaw.json5" ]]; then
   echo "→ Merging runtime-registered OpenClaw agents into synced config..."
-  python3 - "${APP_DIR}/openclaw/config/openclaw.json5" "${RUNTIME_CONFIG_BACKUP}" <<'PY'
+  python3 - "${APP_DIR}/openclaw/openclaw.json5" "${RUNTIME_CONFIG_BACKUP}" <<'PY'
 import json
 import re
 import sys

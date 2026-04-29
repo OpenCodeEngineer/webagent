@@ -1,11 +1,6 @@
 ---
-name: e2e-test
-description: >
-  Browser-based E2E QA for the OpenClaw platform. Triggers on "run tests",
-  "run e2e", "test the system", "test end to end", "verify the flow", "smoke test",
-  "does it work", "qa check", "test ui", "check the ui".
-  Uses vibebrowser/playwright MCP tools to test the real product in a real browser.
-  Verifies UI/UX quality, full agent creation flow, and widget chat.
+name: mvp-test
+description: Browser-based E2E QA for the OpenClaw platform using playwright MCP tools. Verifies infrastructure health, login, agent creation, widget chat, and UI/UX quality against release gates.
 ---
 
 # E2E QA Test Skill — Browser-Based
