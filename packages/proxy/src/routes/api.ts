@@ -1032,35 +1032,99 @@ Customer: ${normalizedLatestMessage}`
     }
   }
 
-  /** Verify a widget embed token from Authorization: Bearer <token> header. */
-  async function verifyEmbedToken(
+  type VerifiedEmbedRow = {
+    id: string;
+    embedToken: string;
+    allowedOrigins: string[] | null;
+    agentId: string;
+  };
+
+  /**
+   * Verify a widget embed token from Authorization header or explicit token.
+   * Returns embed metadata needed by handlers.
+   */
+  async function verifyEmbedTokenFull(
     request: FastifyRequest,
     reply: FastifyReply,
-  ): Promise<string | null> {
+    tokenInput?: string,
+  ): Promise<{ id: string; allowedOrigins: string[] | null; agentId: string } | null> {
     const authHeader = getHeaderValue(request.headers['authorization']);
-    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+    const token = tokenInput?.trim() || bearerToken || null;
     if (!token) {
       sendError(reply, 401, 'unauthorized', 'Missing Authorization: Bearer <embed_token> header');
       return null;
     }
     const rows = await app.db
-      .select({ id: widgetEmbeds.id })
+      .select({
+        id: widgetEmbeds.id,
+        agentId: widgetEmbeds.agentId,
+        allowedOrigins: widgetEmbeds.allowedOrigins,
+      })
       .from(widgetEmbeds)
       .where(eq(widgetEmbeds.embedToken, token))
       .limit(1);
-    if (!rows[0]) {
+    const embed = rows[0];
+    if (!embed) {
       sendError(reply, 401, 'unauthorized', 'Invalid embed token');
       return null;
     }
-    return token;
+    return embed;
+  }
+
+  function resolveSourceOrigin(request: FastifyRequest): string | null {
+    const origin = getHeaderValue(request.headers['origin']);
+    if (origin) {
+      return origin;
+    }
+
+    const referer = getHeaderValue(request.headers['referer']);
+    if (!referer) {
+      return null;
+    }
+
+    try {
+      return new URL(referer).origin;
+    } catch {
+      return null;
+    }
+  }
+
+
+  function originMatches(sourceOrigin: string, allowed: string): boolean {
+    try {
+      const sourceHost = new URL(sourceOrigin).hostname;
+      const allowedHost = new URL(allowed).hostname;
+      return sourceHost === allowedHost || sourceHost.endsWith('.' + allowedHost);
+    } catch {
+      return sourceOrigin === allowed;
+    }
+  }
+
+  function ensureAllowedOrigin(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    allowedOrigins: string[] | null,
+  ): boolean {
+    if (!allowedOrigins || allowedOrigins.length === 0) {
+      return true;
+    }
+
+    const sourceOrigin = resolveSourceOrigin(request);
+    if (!sourceOrigin || !allowedOrigins.some((o) => originMatches(sourceOrigin, o))) {
+      sendError(reply, 403, 'origin_not_allowed', 'Request origin not permitted');
+      return false;
+    }
+
+    return true;
   }
 
   app.post(
     '/api/fetch',
     { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } },
     async (request, reply) => {
-      const token = await verifyEmbedToken(request, reply);
-      if (!token) return;
+      const embed = await verifyEmbedTokenFull(request, reply);
+      if (!embed) return;
 
       const body = parseOrError(webFetchBodySchema, request.body, reply, 'invalid_fetch_payload');
       if (!body) return;
@@ -1069,20 +1133,8 @@ Customer: ${normalizedLatestMessage}`
         return sendError(reply, 400, 'blocked_url', 'Target URL is not allowed');
       }
 
-      // Validate allowed origins if configured for this embed token
-      const embedRows = await app.db
-        .select({ allowedOrigins: widgetEmbeds.allowedOrigins })
-        .from(widgetEmbeds)
-        .where(eq(widgetEmbeds.embedToken, token))
-        .limit(1);
-      const allowedOrigins = embedRows[0]?.allowedOrigins ?? null;
-      if (allowedOrigins && allowedOrigins.length > 0) {
-        const origin = getHeaderValue(request.headers['origin']);
-        const referer = getHeaderValue(request.headers['referer']);
-        const sourceOrigin = origin ?? (referer ? new URL(referer).origin : null);
-        if (!sourceOrigin || !allowedOrigins.some((o) => sourceOrigin === o || sourceOrigin.endsWith(`.${o}`))) {
-          return sendError(reply, 403, 'origin_not_allowed', 'Request origin not permitted');
-        }
+      if (!ensureAllowedOrigin(request, reply, embed.allowedOrigins ?? null)) {
+        return;
       }
 
       try {
@@ -1135,14 +1187,13 @@ Customer: ${normalizedLatestMessage}`
       if (!body) return;
 
       // Validate embed token
-      const embedRows = await app.db
-        .select({ id: widgetEmbeds.id, agentId: widgetEmbeds.agentId })
-        .from(widgetEmbeds)
-        .where(eq(widgetEmbeds.embedToken, body.token))
-        .limit(1);
-      const embed = embedRows[0];
+      const embed = await verifyEmbedTokenFull(request, reply, body.token);
       if (!embed) {
-        return sendError(reply, 401, 'unauthorized', 'Invalid embed token');
+        return;
+      }
+
+      if (!ensureAllowedOrigin(request, reply, embed.allowedOrigins ?? null)) {
+        return;
       }
 
       // Store ticket in audit log — reusing existing infrastructure

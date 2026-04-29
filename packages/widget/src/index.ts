@@ -65,6 +65,7 @@ class WebAgentWidget {
   // Escalation modal
   private isEscalationOpen = false;
   private escalationModal: HTMLElement | null = null;
+  private escalationOverlay: HTMLElement | null = null;
   private escalationEmailInput: HTMLInputElement | null = null;
   private escalationNameInput: HTMLInputElement | null = null;
   private escalationContextInput: HTMLTextAreaElement | null = null;
@@ -186,6 +187,7 @@ class WebAgentWidget {
     this.sendButton = query<HTMLButtonElement>('.wa-send');
     this.liveRegion = query<HTMLElement>('.wa-live-region');
     this.escalationModal = this.shadowRootNode?.querySelector<HTMLElement>('.wa-esc-modal') ?? null;
+    this.escalationOverlay = this.shadowRootNode?.querySelector<HTMLElement>('.wa-esc-overlay') ?? null;
     this.escalationEmailInput = this.shadowRootNode?.querySelector<HTMLInputElement>('.wa-esc-email') ?? null;
     this.escalationNameInput = this.shadowRootNode?.querySelector<HTMLInputElement>('.wa-esc-name') ?? null;
     this.escalationContextInput = this.shadowRootNode?.querySelector<HTMLTextAreaElement>('.wa-esc-context') ?? null;
@@ -674,12 +676,16 @@ class WebAgentWidget {
   private openEscalation(): void {
     this.isEscalationOpen = true;
     this.escalationModal?.setAttribute('data-open', 'true');
+    this.escalationOverlay?.setAttribute('data-open', 'true');
+    this.escalationOverlay?.setAttribute('aria-hidden', 'false');
     this.escalationEmailInput?.focus();
   }
 
   private closeEscalation(): void {
     this.isEscalationOpen = false;
     this.escalationModal?.setAttribute('data-open', 'false');
+    this.escalationOverlay?.setAttribute('data-open', 'false');
+    this.escalationOverlay?.setAttribute('aria-hidden', 'true');
     if (this.escalationEmailInput) this.escalationEmailInput.value = '';
     if (this.escalationNameInput) this.escalationNameInput.value = '';
     if (this.escalationContextInput) this.escalationContextInput.value = '';
@@ -707,7 +713,7 @@ class WebAgentWidget {
     }));
 
     try {
-      await fetch(`${apiBase}/api/escalate`, {
+      const response = await fetch(`${apiBase}/api/escalate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -719,8 +725,22 @@ class WebAgentWidget {
           transcript,
         }),
       });
+
+      if (!response.ok) {
+        this.setBanner('Failed to send — please try again.', 'error');
+        if (this.escalationSubmitButton) {
+          this.escalationSubmitButton.disabled = false;
+          this.escalationSubmitButton.textContent = 'Send to Support';
+        }
+        return;
+      }
     } catch {
-      // best-effort; don't block the user
+      this.setBanner('Failed to send — please try again.', 'error');
+      if (this.escalationSubmitButton) {
+        this.escalationSubmitButton.disabled = false;
+        this.escalationSubmitButton.textContent = 'Send to Support';
+      }
+      return;
     }
 
     if (this.escalationSubmitButton) {

@@ -45,7 +45,11 @@ export function discoverHostWebMcpTools(): DiscoveredTool[] {
 
 /**
  * Register the widget as a WebMCP tool provider so external AI agents can invoke it.
- * The single tool "ask_support_agent" lets external agents send a query through the widget.
+ * The single tool "ask_support_agent" lets external agents enqueue a query through the widget.
+ *
+ * NOTE: This is notification-only / fire-and-forget — external callers receive
+ * `{ queued: true }` immediately and do NOT receive the agent's actual response.
+ * The response is only shown in the widget chat UI as it arrives.
  *
  * @param sendMessage  Callback that delivers a message string to the agent (same as user typing).
  * @param signal       AbortSignal; tool will be unregistered when aborted.
@@ -66,7 +70,7 @@ export function registerWidgetAsWebMcpProvider(
         name: 'ask_support_agent',
         title: 'Ask Support Agent',
         description:
-          'Send a question or request to the embedded website support agent and receive a response.',
+          'Queue a question or request for the embedded website support agent via the widget chat.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -79,9 +83,12 @@ export function registerWidgetAsWebMcpProvider(
         },
         annotations: { readOnlyHint: false },
         execute: async (input: Record<string, unknown>) => {
+          // NOTE: This is notification-only. The response confirms the message was queued
+          // but does not wait for the agent's reply. External agents should treat this
+          // as a fire-and-forget channel.
           const query = typeof input['query'] === 'string' ? input['query'] : String(input['query'] ?? '');
           sendMessage(query);
-          return { queued: true, query };
+          return { queued: true };
         },
       },
       { signal },
