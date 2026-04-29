@@ -29,7 +29,7 @@
       {
         id: "meta",
         name: "Agent Builder",
-        workspace: "/opt/webagent/openclaw/workspace",
+        workspace: "/opt/webagent/openclaw/workspaces/meta",
         sandbox: { mode: "off" },
         skills: ["create-agent", "manage-agents"],
         heartbeat: { every: "0m" }

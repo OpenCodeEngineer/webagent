@@ -46,7 +46,7 @@ RSYNC_ARGS=(
   --exclude 'dist/'
   --exclude '**/dist/'
   --exclude 'coverage/'
-  --exclude 'openclaw/workspace/'
+  --exclude 'openclaw/workspaces/'
   --exclude '.env'
 )
 
@@ -56,10 +56,10 @@ fi
 
 rsync "${RSYNC_ARGS[@]}" "${REPO_ROOT}/" "${REMOTE}:${APP_DIR}/"
 
-echo "→ Syncing managed OpenClaw workspace from local repo..."
+echo "→ Syncing managed OpenClaw meta workspace from local repo..."
 rsync -az --human-readable --delete \
-  "${REPO_ROOT}/openclaw/workspace/" \
-  "${REMOTE}:${APP_DIR}/openclaw/workspace/"
+  "${REPO_ROOT}/openclaw/workspaces/meta/" \
+  "${REMOTE}:${APP_DIR}/openclaw/workspaces/meta/"
 
 echo "→ Running remote build/restart/apply steps..."
 ssh "${REMOTE}" bash -s "${APP_DIR}" "${RUNTIME_CONFIG_BACKUP}" "${NGINX_SITE_PATH}" <<'REMOTE'
