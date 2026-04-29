@@ -994,4 +994,229 @@ Customer: ${normalizedLatestMessage}`
       return sendError(reply, 500, 'internal_error', 'Failed to create embed token');
     }
   });
+
+  // ─── Web-Fetch Proxy ──────────────────────────────────────────────────────
+
+  const webFetchBodySchema = z.object({
+    url: z.string().url(),
+    method: z.string().min(1).max(16).optional().default('GET'),
+    headers: z.record(z.string(), z.string()).optional(),
+    body: z.unknown().optional(),
+  });
+
+  const BLOCKED_HOSTNAMES = new Set([
+    'localhost',
+    '127.0.0.1',
+    '::1',
+    '0.0.0.0',
+    'metadata.google.internal',
+    '169.254.169.254', // AWS/GCP/Azure IMDS
+  ]);
+
+  function isBlockedUrl(raw: string): boolean {
+    try {
+      const u = new URL(raw);
+      const host = u.hostname.toLowerCase();
+      if (BLOCKED_HOSTNAMES.has(host)) return true;
+      // Block private IPv4 ranges
+      const parts = host.split('.').map(Number);
+      if (parts.length === 4 && parts.every((p) => p >= 0 && p <= 255)) {
+        const [a, b] = parts as [number, number, number, number];
+        if (a === 10) return true;
+        if (a === 172 && b >= 16 && b <= 31) return true;
+        if (a === 192 && b === 168) return true;
+      }
+      return false;
+    } catch {
+      return true;
+    }
+  }
+
+  type VerifiedEmbedRow = {
+    id: string;
+    embedToken: string;
+    allowedOrigins: string[] | null;
+    agentId: string;
+  };
+
+  /**
+   * Verify a widget embed token from Authorization header or explicit token.
+   * Returns embed metadata needed by handlers.
+   */
+  async function verifyEmbedTokenFull(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    tokenInput?: string,
+  ): Promise<{ id: string; allowedOrigins: string[] | null; agentId: string } | null> {
+    const authHeader = getHeaderValue(request.headers['authorization']);
+    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+    const token = tokenInput?.trim() || bearerToken || null;
+    if (!token) {
+      sendError(reply, 401, 'unauthorized', 'Missing Authorization: Bearer <embed_token> header');
+      return null;
+    }
+    const rows = await app.db
+      .select({
+        id: widgetEmbeds.id,
+        agentId: widgetEmbeds.agentId,
+        allowedOrigins: widgetEmbeds.allowedOrigins,
+      })
+      .from(widgetEmbeds)
+      .where(eq(widgetEmbeds.embedToken, token))
+      .limit(1);
+    const embed = rows[0];
+    if (!embed) {
+      sendError(reply, 401, 'unauthorized', 'Invalid embed token');
+      return null;
+    }
+    return embed;
+  }
+
+  function resolveSourceOrigin(request: FastifyRequest): string | null {
+    const origin = getHeaderValue(request.headers['origin']);
+    if (origin) {
+      return origin;
+    }
+
+    const referer = getHeaderValue(request.headers['referer']);
+    if (!referer) {
+      return null;
+    }
+
+    try {
+      return new URL(referer).origin;
+    } catch {
+      return null;
+    }
+  }
+
+
+  function originMatches(sourceOrigin: string, allowed: string): boolean {
+    try {
+      const sourceHost = new URL(sourceOrigin).hostname;
+      const allowedHost = new URL(allowed).hostname;
+      return sourceHost === allowedHost || sourceHost.endsWith('.' + allowedHost);
+    } catch {
+      return sourceOrigin === allowed;
+    }
+  }
+
+  function ensureAllowedOrigin(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    allowedOrigins: string[] | null,
+  ): boolean {
+    if (!allowedOrigins || allowedOrigins.length === 0) {
+      return true;
+    }
+
+    const sourceOrigin = resolveSourceOrigin(request);
+    if (!sourceOrigin || !allowedOrigins.some((o) => originMatches(sourceOrigin, o))) {
+      sendError(reply, 403, 'origin_not_allowed', 'Request origin not permitted');
+      return false;
+    }
+
+    return true;
+  }
+
+  app.post(
+    '/api/fetch',
+    { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } },
+    async (request, reply) => {
+      const embed = await verifyEmbedTokenFull(request, reply);
+      if (!embed) return;
+
+      const body = parseOrError(webFetchBodySchema, request.body, reply, 'invalid_fetch_payload');
+      if (!body) return;
+
+      if (isBlockedUrl(body.url)) {
+        return sendError(reply, 400, 'blocked_url', 'Target URL is not allowed');
+      }
+
+      if (!ensureAllowedOrigin(request, reply, embed.allowedOrigins ?? null)) {
+        return;
+      }
+
+      try {
+        const fetchInit: RequestInit = {
+          method: (body.method ?? 'GET').toUpperCase(),
+          headers: body.headers as Record<string, string>,
+        };
+        if (body.body !== undefined && fetchInit.method !== 'GET' && fetchInit.method !== 'HEAD') {
+          fetchInit.body = typeof body.body === 'string' ? body.body : JSON.stringify(body.body);
+        }
+
+        const upstream = await fetch(body.url, fetchInit);
+        const contentType = upstream.headers.get('content-type') ?? '';
+        const responseBody = await upstream.text();
+
+        return reply.send({
+          status: upstream.status,
+          statusText: upstream.statusText,
+          headers: Object.fromEntries(upstream.headers.entries()),
+          body: responseBody,
+          contentType,
+        });
+      } catch (error) {
+        request.log.warn({ error, url: body.url }, 'web-fetch proxy upstream error');
+        return sendError(reply, 502, 'fetch_error', 'Failed to fetch upstream URL');
+      }
+    },
+  );
+
+  // ─── Escalation ───────────────────────────────────────────────────────────
+
+  const escalateBodySchema = z.object({
+    token: z.string().min(1),
+    userId: z.string().min(1),
+    email: z.string().email(),
+    name: z.string().optional().default(''),
+    context: z.string().optional().default(''),
+    transcript: z
+      .array(z.object({ role: z.string(), content: z.string() }))
+      .max(20)
+      .optional()
+      .default([]),
+  });
+
+  app.post(
+    '/api/escalate',
+    { config: { rateLimit: { max: 10, timeWindow: '5 minutes' } } },
+    async (request, reply) => {
+      const body = parseOrError(escalateBodySchema, request.body, reply, 'invalid_escalate_payload');
+      if (!body) return;
+
+      // Validate embed token
+      const embed = await verifyEmbedTokenFull(request, reply, body.token);
+      if (!embed) {
+        return;
+      }
+
+      if (!ensureAllowedOrigin(request, reply, embed.allowedOrigins ?? null)) {
+        return;
+      }
+
+      // Store ticket in audit log — reusing existing infrastructure
+      await app.db.insert(auditLog).values({
+        customerId: null,
+        action: 'widget.escalation',
+        details: {
+          agentId: embed.agentId,
+          userId: body.userId,
+          email: body.email,
+          name: body.name,
+          context: body.context,
+          transcriptLength: body.transcript.length,
+          transcript: body.transcript,
+        },
+      });
+
+      request.log.info(
+        { agentId: embed.agentId, userId: body.userId, email: body.email },
+        'escalation ticket received',
+      );
+
+      return reply.status(202).send({ ok: true });
+    },
+  );
 }
