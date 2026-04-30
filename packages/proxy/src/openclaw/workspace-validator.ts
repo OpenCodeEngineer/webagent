@@ -40,9 +40,13 @@ export async function validateGeneratedWorkspace(
   const mdFiles = await collectMdFiles(workspacePath);
 
   for (const filePath of mdFiles) {
-    // Skip files in templates/ subdirectory
+    // Skip files in templates/ or knowledgebase/ subdirectories
+    // (templates are expected to have placeholders; knowledgebase may document template syntax)
     const rel = relative(workspacePath, filePath);
-    if (rel.startsWith('templates/') || rel.startsWith('templates\\')) {
+    if (
+      rel.startsWith('templates/') || rel.startsWith('templates\\') ||
+      rel.startsWith('knowledgebase/') || rel.startsWith('knowledgebase\\')
+    ) {
       continue;
     }
 

@@ -97,6 +97,18 @@ describe('validateGeneratedWorkspace', () => {
     assert.equal(result.valid, true);
   });
 
+  it('ignores files in knowledgebase/ subdirectory', async () => {
+    const ws = join(baseDir, 'with-knowledgebase');
+    await mkdir(join(ws, 'knowledgebase'), { recursive: true });
+    await writeFile(join(ws, 'AGENTS.md'), '# Agent\nReal content.');
+    await writeFile(join(ws, 'IDENTITY.md'), '# Identity\nName: Bot');
+    await writeFile(join(ws, 'SOUL.md'), '# Soul\nKind.');
+    await writeFile(join(ws, 'knowledgebase', 'api-reference.md'), '# Template syntax: {{API_BASE_URL}}');
+
+    const result = await validateGeneratedWorkspace(ws);
+    assert.equal(result.valid, true);
+  });
+
   it('detects {{PLACEHOLDER}} in .json files', async () => {
     const ws = join(baseDir, 'json-placeholder');
     await mkdir(ws, { recursive: true });
