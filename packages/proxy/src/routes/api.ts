@@ -1,5 +1,5 @@
-import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { mkdir, open, readFile, rename, rmdir, stat, unlink } from 'fs/promises';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { mkdir, readFile, rmdir, stat } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'node:os';
 import { execFile } from 'node:child_process';
@@ -8,6 +8,7 @@ import { and, count, eq, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import JSON5 from 'json5';
 import { OpenClawClient } from '../openclaw/client.js';
+import { atomicWriteFile } from '../openclaw/atomic-write.js';
 import {
   appendMetaHistoryMessage,
   extractEmbedCodeFromMessages,
@@ -306,28 +307,6 @@ export function extractLeadingHeader(raw: string): string {
 }
 
 
-/**
- * Atomic file write: write to a sibling temp file in the same directory,
- * fsync, then rename over the target. The directory rename is atomic on POSIX.
- */
-export async function writeFileAtomic(targetPath: string, contents: string): Promise<void> {
-  const tmp = `${targetPath}.tmp.${process.pid}.${randomBytes(6).toString('hex')}`;
-  let handle: Awaited<ReturnType<typeof open>> | null = null;
-  try {
-    handle = await open(tmp, 'w', 0o644);
-    await handle.writeFile(contents, 'utf8');
-    await handle.sync();
-  } finally {
-    if (handle) await handle.close();
-  }
-  try {
-    await rename(tmp, targetPath);
-  } catch (err) {
-    // Best-effort cleanup of the orphaned temp file.
-    try { await unlink(tmp); } catch {}
-    throw err;
-  }
-}
 
 /**
  * Register (or update) an agent entry in the OpenClaw gateway config and
@@ -425,7 +404,7 @@ export async function registerAgentInOpenClaw(
       const output = `${header}${serialized}\n`;
 
       // 4e: atomic write — write to temp file then rename.
-      await writeFileAtomic(configPath, output);
+      await atomicWriteFile(configPath, output);
       app.log.info({ slug, configPath }, 'registered agent in openclaw config');
 
       // Try SIGHUP first (no root needed for same-user processes), fall back to systemctl
