@@ -96,4 +96,20 @@ describe('validateGeneratedWorkspace', () => {
     const result = await validateGeneratedWorkspace(ws);
     assert.equal(result.valid, true);
   });
+
+  it('detects {{PLACEHOLDER}} in .json files', async () => {
+    const ws = join(baseDir, 'json-placeholder');
+    await mkdir(ws, { recursive: true });
+    await writeFile(join(ws, 'AGENTS.md'), '# Agent\nReal content.');
+    await writeFile(join(ws, 'IDENTITY.md'), '# Identity\nName: Bot');
+    await writeFile(join(ws, 'SOUL.md'), '# Soul\nKind.');
+    await writeFile(
+      join(ws, 'agent-config.json'),
+      '{\n  "apiBaseUrl": "{{API_BASE_URL}}"\n}',
+    );
+
+    const result = await validateGeneratedWorkspace(ws);
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some((e) => e.includes('agent-config.json') && e.includes('{{API_BASE_URL}}')));
+  });
 });
