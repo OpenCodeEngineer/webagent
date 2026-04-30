@@ -717,21 +717,31 @@ export function registerApiRoutes(app: FastifyInstance) {
         openclawAgentId: body.openclawAgentId,
       });
 
-      // 4b: keep openclaw.json5 in sync with the DB. Read skills from the
-      // agent's on-disk workspace (created by the meta-agent prior to this
-      // call); fall back to widgetConfig.skills if nothing is on disk yet.
-      const diskSkills = await getAgentSkillsFromDisk(body.openclawAgentId);
-      const widgetSkillsRaw = (body.widgetConfig as { skills?: unknown } | undefined)?.skills;
-      const widgetSkills = Array.isArray(widgetSkillsRaw)
-        ? widgetSkillsRaw.filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
-        : undefined;
-      const resolvedSkills = diskSkills ?? (widgetSkills && widgetSkills.length > 0 ? widgetSkills : undefined);
+      // 4b: ensure the new agent is registered in the OpenClaw gateway
+      // config so it is reachable immediately after creation. Prefer skills
+      // from the on-disk agent-config.json (source of truth maintained by
+      // the meta agent); fall back to widgetConfig.skills from the request
+      // body, then the registerAgentInOpenClaw default ('website-api').
       try {
-        await registerAgentInOpenClaw(body.openclawAgentId, body.name, app, resolvedSkills);
+        const diskSkills = await getAgentSkillsFromDisk(body.openclawAgentId);
+        const widgetSkills = (() => {
+          const wc = body.widgetConfig as { skills?: unknown } | undefined;
+          if (!wc || !Array.isArray(wc.skills)) return undefined;
+          const filtered = wc.skills.filter(
+            (s): s is string => typeof s === 'string' && s.trim().length > 0,
+          );
+          return filtered.length > 0 ? filtered : undefined;
+        })();
+        await registerAgentInOpenClaw(
+          body.openclawAgentId,
+          body.name,
+          app,
+          diskSkills ?? widgetSkills,
+        );
       } catch (err) {
         request.log.warn(
           { err, openclawAgentId: body.openclawAgentId },
-          'registerAgentInOpenClaw failed for internal agent (non-fatal)',
+          'failed to register internal agent in openclaw — agent row created but gateway not updated',
         );
       }
 
