@@ -84,7 +84,7 @@ async function collectMdFiles(dir: string): Promise<string[]> {
     if (!s) continue;
     if (s.isDirectory()) {
       results.push(...(await collectMdFiles(fullPath)));
-    } else if (entry.endsWith('.md')) {
+    } else if (entry.endsWith('.md') || entry.endsWith('.json')) {
       results.push(fullPath);
     }
   }

@@ -345,7 +345,7 @@ export async function detectAgentCreation(
   app: FastifyInstance,
   domain: string,
 ): Promise<
-  | { status: 'created'; agent: typeof agents.$inferSelect; embedToken: string; embedCode: string; validationErrors?: string[] }
+  | { status: 'created'; agent: typeof agents.$inferSelect; embedToken: string; embedCode: string }
   | { status: 'conflict'; slug: string; existingCustomerId: string; message: string }
   | { status: 'validation_failed'; slug: string; errors: string[] }
   | null
@@ -506,8 +506,13 @@ export async function detectAgentCreation(
   if (!validation.valid) {
     app.log.warn(
       { slug: config.agentSlug, errors: validation.errors },
-      'workspace has validation errors — agent will still be registered but may behave incorrectly',
+      'workspace has validation errors — rejecting agent registration',
     );
+    return {
+      status: 'validation_failed',
+      slug: config.agentSlug,
+      errors: validation.errors,
+    };
   }
 
   // Register agent in OpenClaw gateway config and restart gateway
@@ -546,7 +551,6 @@ export async function detectAgentCreation(
     agent: createdAgent,
     embedToken,
     embedCode,
-    validationErrors: validation.valid ? undefined : validation.errors,
   };
 }
 
@@ -683,16 +687,16 @@ Customer: ${normalizedLatestMessage}`
           { slug: createdAgentData.slug },
         );
       }
-      if (createdAgentData?.status === 'created' && createdAgentData.validationErrors?.length) {
-        const errorList = createdAgentData.validationErrors.slice(0, 10).join('\n');
-        const sentinel = `[AGENT_VALIDATION_WARNING::${createdAgentData.agent.openclawAgentId}::${errorList}]`;
+      if (createdAgentData?.status === 'validation_failed') {
+        const errorList = createdAgentData.errors.slice(0, 10).join('\n');
+        const sentinel = `[AGENT_VALIDATION_FAILED::${createdAgentData.slug}::${errorList}]`;
         return reply.send({
           data: {
             response: `${responseText}\n\n${sentinel}`,
             sessionId,
-            agent: createdAgentData.agent,
-            embedToken: createdAgentData.embedToken,
-            embedCode: createdAgentData.embedCode,
+            agent: null,
+            embedToken: null,
+            embedCode: null,
           },
         });
       }
