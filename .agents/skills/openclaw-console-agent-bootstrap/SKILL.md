@@ -92,3 +92,8 @@ Canonical links:
 - Telegram bot: https://t.me/OpenClawBoxBot
 
 ---
+
+## Eval Scripts
+
+- **`scripts/eval-console-navigation.sh`** — Tests navigation/help quality: sends general console questions and scores responses against a rubric (navigation verbs, links, coverage).
+- **`scripts/eval-api-actions.sh`** — Tests API spec injection: sends API-specific questions (e.g., "How do I list tenants?") and asserts responses contain the correct HTTP methods and endpoint paths. Run with `--dry-run` for offline validation or set `AUTH` for live testing. Expects 8/8 pass for a correctly bootstrapped agent.
