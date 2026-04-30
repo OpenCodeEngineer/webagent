@@ -13,6 +13,7 @@ Creates a fully configured customer agent after Phase 1 discovery.
 - **Never use `exec`, shell commands, or CLI process spawning.**
 - Use only built-in file tools (`read`, `write`, `edit`).
 - `write` creates missing parent directories automatically.
+- **CRITICAL: NEVER write literal `{{placeholder}}` syntax in generated files. All template variables MUST be replaced with actual values discovered during research. After writing all files, re-read each one and verify no `{{` sequences remain.**
 
 ## Inputs you must carry from discovery
 
@@ -110,6 +111,14 @@ In generated files, always include:
 The `userTokenKey` field is **optional but recommended** when the target website stores authentication tokens in `localStorage`. If discovered during website analysis (look for keys like `access_token`, `token`, `jwt`, `auth_token`, `oc_access_token` in the site's JavaScript), include it so the widget can automatically pass the user's token to the agent as session context. If the site uses httpOnly cookies or server-side sessions instead, omit this field.
 
 The `skills` array **must list every skill directory name** created in the workspace. Always include `"website-api"` when an API exists and `"website-knowledge"` for all agents. Add any specialized skills created in Step 1 (e.g., `"openclaw-console-navigation"`). The proxy reads this array to register skills in the gateway config.
+
+### Step 3.5 — Post-write placeholder self-check
+
+After writing all workspace files, **re-read every `.md` file** in `<workspacePath>/` and verify:
+1. No `{{` or `}}` sequences remain outside of fenced code blocks.
+2. All template variables have been replaced with concrete, customer-specific values.
+
+If any unresolved placeholders are found, fix them immediately before proceeding to Step 4. The proxy runs server-side validation and will **reject the agent** if placeholders remain, returning `[AGENT_VALIDATION_FAILED::<slug>::<errors>]` — requiring a full retry.
 
 ### Step 4 — Signal completion to proxy
 
