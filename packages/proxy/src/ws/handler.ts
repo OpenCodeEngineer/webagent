@@ -13,7 +13,7 @@ import {
   getMetaHistory,
 } from '../openclaw/meta-history.js';
 import { getOrCreateSession, touchSessionLastActiveAt } from '../openclaw/sessions.js';
-import { detectAgentCreation, registerAgentInOpenClaw } from '../routes/api.js';
+import { detectAgentCreation, getAgentSkillsFromDisk, registerAgentInOpenClaw } from '../routes/api.js';
 
 interface WebSocket {
   readyState: number;
@@ -724,7 +724,11 @@ export function handleConnection(
                     'self-heal skipped; agent row not found',
                   );
                 } else {
-                  const skills = getSkillsFromWidgetConfig(agentRow.widgetConfig);
+                  // 4c: skills live in on-disk agent-config.json, NOT in widgetConfig
+                  // (detectAgentCreation does not persist skills to the DB column).
+                  // Read from disk first; fall back to widgetConfig for legacy rows.
+                  const diskSkills = await getAgentSkillsFromDisk(agentRow.openclawAgentId);
+                  const skills = diskSkills ?? getSkillsFromWidgetConfig(agentRow.widgetConfig);
                   await registerAgentInOpenClaw(agentRow.openclawAgentId, agentRow.name, ctx.app, skills);
                   result = await openclawClient.sendMessage({
                     message: outboundMessage,
