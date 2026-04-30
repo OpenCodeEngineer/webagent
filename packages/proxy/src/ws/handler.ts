@@ -256,13 +256,23 @@ function buildWidgetMessageWithSessionPolicy(userContext: Record<string, unknown
     + '2. Explain: "I need session auth context to execute this. An admin must configure the `Authorization` or `apiToken` field in the widget integration settings (Settings → Integrations → Auth Context)."\n'
     + '3. Never give a vague refusal — always name the endpoint (e.g., `POST /api/v1/tenants/:id/restart`) and confirm expected outcome + that you will execute it once credentials are available.';
   if (Object.keys(userContext).length > 0) {
+    // Determine if actual credentials are present
+    const hasToken = typeof userContext.apiToken === 'string' && (userContext.apiToken as string).trim() !== '';
+    const hasAuthorization = typeof userContext.Authorization === 'string' && (userContext.Authorization as string).trim() !== '';
+    const hasHeaders = isRecord(userContext.headers) && Object.keys(userContext.headers).length > 0;
+    const hasCredentials = hasToken || hasAuthorization || hasHeaders;
+
+    const credentialStatus = hasCredentials
+      ? 'Authentication credentials are configured and will be injected into API requests automatically. Proceed with API calls confidently — do not ask the user to provide credentials.'
+      : 'Auth context is present but contains no usable credentials. If the user needs to make authenticated API calls, direct them to the admin dashboard to configure credentials.';
+
     const contextLines = Object.entries(userContext)
       .map(([k, v]) => `${k}: ${formatContextValue(v)}`)
       .join('\n');
-    return `[Session Context]\n${credentialPolicy}\n${fallbackGuidance}\n${contextLines}\n\nUser: ${customerContent}`;
+    return `[Session Context]\n${credentialPolicy}\n${credentialStatus}\n${fallbackGuidance}\n${contextLines}\n\nUser: ${customerContent}`;
   }
 
-  return `[Session Context — no credentials]\n${credentialPolicy}\nNo auth credentials were provided in session context.\n${fallbackGuidance}\n\nUser: ${customerContent}`;
+  return `[Session Context — no credentials]\n${credentialPolicy}\nNo API credentials are configured. If the user needs to make authenticated API calls, direct them to the admin dashboard to configure credentials.\n${fallbackGuidance}\n\nUser: ${customerContent}`;
 }
 
 function isStrictBase64(value: string): boolean {
