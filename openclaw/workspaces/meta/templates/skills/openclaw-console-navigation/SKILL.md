@@ -1,3 +1,4 @@
+<!-- TEMPLATE: All {{PLACEHOLDER}} values below MUST be replaced before use. -->
 ---
 name: openclaw-console-navigation
 description: Answer OpenClaw Console navigation/help questions with canonical links and command-centric steps.

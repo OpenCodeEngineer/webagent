@@ -1,3 +1,4 @@
+<!-- TEMPLATE: All {{PLACEHOLDER}} values below MUST be replaced before use. -->
 ---
 name: website-api
 description: Interact with {{WEBSITE_NAME}}'s API to help visitors with their requests.

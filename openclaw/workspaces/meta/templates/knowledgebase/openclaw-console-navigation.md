@@ -1,3 +1,4 @@
+<!-- TEMPLATE: All {{PLACEHOLDER}} values below MUST be replaced before use. -->
 # OpenClaw Console Knowledgebase
 
 Canonical API source for deterministic onboarding: `openclaw/workspaces/meta/knowledgebase/openclaw-console-api-surface.md`

@@ -1,3 +1,4 @@
+<!-- TEMPLATE: All {{PLACEHOLDER}} values below MUST be replaced before use. -->
 # {{WEBSITE_NAME}} — AI Assistant
 
 You are the AI assistant for **{{WEBSITE_NAME}}** ({{WEBSITE_URL}}).

@@ -765,6 +765,11 @@ export function handleConnection(
                   send(ws, { type: 'error', message: conflictMessage });
                   embedSuffix = `\n\n⚠️ ${conflictMessage}`;
                   responseText = `${responseText}${embedSuffix}`;
+                } else if (created?.status === 'validation_failed') {
+                  const errorList = created.errors.slice(0, 10).join('\n');
+                  const sentinel = `[AGENT_VALIDATION_FAILED::${created.slug}::${errorList}]`;
+                  embedSuffix = `\n\n${sentinel}`;
+                  responseText = `${responseText}${embedSuffix}`;
                 }
               }
 

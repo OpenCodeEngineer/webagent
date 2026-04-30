@@ -1,0 +1,43 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e2]
+  - main [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]:
+        - heading "Pay with Crypto" [level=1] [ref=e6]
+        - paragraph [ref=e7]: User 12345 — Pro plan
+      - generic [ref=e8]:
+        - generic [ref=e9]: $25.00
+        - generic [ref=e10]: USDC on Base
+      - generic [ref=e11]:
+        - generic [ref=e12]:
+          - generic [ref=e13]: "1"
+          - generic [ref=e14]: Select network
+        - generic [ref=e15]:
+          - button "🔵 Base" [ref=e16] [cursor=pointer]:
+            - generic [ref=e17]: 🔵
+            - generic [ref=e18]: Base
+          - button "⟠ Ethereum" [ref=e19] [cursor=pointer]:
+            - generic [ref=e20]: ⟠
+            - generic [ref=e21]: Ethereum
+          - button "◎ Solana" [ref=e22] [cursor=pointer]:
+            - generic [ref=e23]: ◎
+            - generic [ref=e24]: Solana
+          - button "💎 TON" [ref=e25] [cursor=pointer]:
+            - generic [ref=e26]: 💎
+            - generic [ref=e27]: TON
+      - generic [ref=e28]:
+        - generic [ref=e29]:
+          - generic [ref=e30]: "2"
+          - generic [ref=e31]: Select token
+        - generic [ref=e32]:
+          - button "USDC" [ref=e33] [cursor=pointer]
+          - button "USDT" [ref=e34] [cursor=pointer]
+      - generic [ref=e35]:
+        - generic [ref=e36]:
+          - generic [ref=e37]: "3"
+          - generic [ref=e38]: Send payment
+        - generic [ref=e40]:
+          - generic [ref=e43]: 0xd8dA...6045
+          - button "Pay $25.00 USDC" [ref=e44] [cursor=pointer]
+      - generic [ref=e46]: ✘invalid numeric value (argument="%response", value=null, code=INVALID_ARGUMENT, version=6.16.0)
+      - paragraph [ref=e47]: Powered by OpenClaw

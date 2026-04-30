@@ -8,6 +8,7 @@ import { and, count, eq, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import JSON5 from 'json5';
 import { OpenClawClient } from '../openclaw/client.js';
+import { validateGeneratedWorkspace } from '../openclaw/workspace-validator.js';
 import { atomicWriteFile } from '../openclaw/atomic-write.js';
 import {
   appendMetaHistoryMessage,
@@ -464,6 +465,7 @@ export async function detectAgentCreation(
 ): Promise<
   | { status: 'created'; agent: typeof agents.$inferSelect; embedToken: string; embedCode: string }
   | { status: 'conflict'; slug: string; existingCustomerId: string; message: string }
+  | { status: 'validation_failed'; slug: string; errors: string[] }
   | null
 > {
   const markerMatch = responseText.match(/\[AGENT_CREATED::\s*<?([a-z0-9_-]+)>?\s*\]/i);
@@ -494,11 +496,13 @@ export async function detectAgentCreation(
   };
 
   let config: AgentConfig | null = null;
+  let resolvedConfigPath: string | null = null;
   let lastReadError: unknown;
   for (const configPath of configPaths) {
     try {
       const rawConfig = await readFile(configPath, 'utf8');
       config = JSON.parse(rawConfig) as AgentConfig;
+      resolvedConfigPath = configPath;
       break;
     } catch (error) {
       lastReadError = error;
@@ -612,6 +616,21 @@ export async function detectAgentCreation(
       'failed to create or resolve agent for customer',
     );
     return null;
+  }
+
+  // Validate workspace for unresolved template placeholders and required files
+  const workspacePath = join(resolvedConfigPath!, '..');
+  const validation = await validateGeneratedWorkspace(workspacePath);
+  if (!validation.valid) {
+    app.log.warn(
+      { slug: config.agentSlug, errors: validation.errors },
+      'workspace has validation errors — rejecting agent registration',
+    );
+    return {
+      status: 'validation_failed',
+      slug: config.agentSlug,
+      errors: validation.errors,
+    };
   }
 
   // Register agent in OpenClaw gateway config and restart gateway
@@ -813,6 +832,19 @@ Customer: ${normalizedLatestMessage}`
           `${createdAgentData.message} Please retry with a more unique website or agent name.`,
           { slug: createdAgentData.slug },
         );
+      }
+      if (createdAgentData?.status === 'validation_failed') {
+        const errorList = createdAgentData.errors.slice(0, 10).join('\n');
+        const sentinel = `[AGENT_VALIDATION_FAILED::${createdAgentData.slug}::${errorList}]`;
+        return reply.send({
+          data: {
+            response: `${responseText}\n\n${sentinel}`,
+            sessionId,
+            agent: null,
+            embedToken: null,
+            embedCode: null,
+          },
+        });
       }
 
       return reply.send({

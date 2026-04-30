@@ -13,6 +13,8 @@ Creates a fully configured customer agent after Phase 1 discovery.
 - **Never use `exec`, shell commands, or CLI process spawning.**
 - Use only built-in file tools (`read`, `write`, `edit`).
 - `write` creates missing parent directories automatically.
+- **NEVER write literal `{{...}}` placeholder tokens in generated files.** All values must be filled with real, discovered data. The proxy will reject workspaces containing `{{` patterns and force a full retry.
+- **CRITICAL: NEVER write literal `{{placeholder}}` syntax in generated files. All template variables MUST be replaced with actual values discovered during research. After writing all files, re-read each one and verify no `{{` sequences remain.**
 
 ## Inputs you must carry from discovery
 
@@ -111,6 +113,14 @@ The `userTokenKey` field is **optional but recommended** when the target website
 
 The `skills` array **must list every skill directory name** created in the workspace. Always include `"website-api"` when an API exists and `"website-knowledge"` for all agents. Add any specialized skills created in Step 1 (e.g., `"openclaw-console-navigation"`). The proxy reads this array to register skills in the gateway config.
 
+### Step 3.5 — Post-write placeholder self-check
+
+After writing all workspace files, **re-read every `.md` file** in `<workspacePath>/` and verify:
+1. No `{{` or `}}` sequences remain outside of fenced code blocks.
+2. All template variables have been replaced with concrete, customer-specific values.
+
+If any unresolved placeholders are found, fix them immediately before proceeding to Step 4. The proxy runs server-side validation and will **reject the agent** if placeholders remain, returning `[AGENT_VALIDATION_FAILED::<slug>::<errors>]` — requiring a full retry.
+
 ### Step 4 — Signal completion to proxy
 
 Include the exact marker `[AGENT_CREATED::<agentSlug>]` in your response message. The proxy will:
@@ -124,3 +134,13 @@ Tell the customer: "Your agent has been created! The embed code will appear belo
 Also include discovered onboarding/install links in the response when available.
 
 **Do NOT** attempt to edit `openclaw.json` or `openclaw.json5` — the proxy handles registration automatically.
+
+## Post-Creation Validation Rules
+
+CRITICAL: Never write literal `{{...}}` placeholders in generated workspace files.
+All template variables MUST be replaced with actual customer-specific values before writing.
+
+After writing all workspace files, perform a self-check:
+1. Mentally review each file you wrote for any remaining `{{...}}` patterns.
+2. If you find any, fix them immediately before emitting `[AGENT_CREATED::<slug>]`.
+3. Common placeholders that MUST be replaced: {{WEBSITE_NAME}}, {{API_BASE_URL}}, {{API_ENDPOINTS}}, {{WIDGET_ID}}, {{AUTH_INSTRUCTIONS}}.
