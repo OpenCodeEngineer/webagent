@@ -11,6 +11,7 @@ import { registerOpenAiCompatRoutes } from './routes/openai-compat.js';
 import { registerSsoRoutes } from './routes/sso.js';
 import { registerWidgetRoutes } from './routes/widget.js';
 import { handleConnection } from './ws/handler.js';
+import { reconcileOpenClawConfig } from './openclaw/reconciler.js';
 import { DEFAULT_WS_PATH } from '@webagent/shared/constants';
 
 interface ManagedSocket {
@@ -93,6 +94,19 @@ process.once('SIGINT', () => {
 
 const start = async (): Promise<void> => {
   try {
+    // Reconcile openclaw.json5 against on-disk agent workspaces. Non-fatal:
+    // a broken workspace must not block the server from coming up.
+    try {
+      const summary = await reconcileOpenClawConfig(app);
+      if (summary.errors.length > 0) {
+        app.log.warn({ summary }, 'openclaw reconciler completed with errors');
+      } else {
+        app.log.info({ summary }, 'openclaw reconciler completed');
+      }
+    } catch (err) {
+      app.log.error({ err }, 'openclaw reconciler crashed (continuing startup)');
+    }
+
     await app.listen({ host: '0.0.0.0', port: config.port });
     app.log.info(
       { port: config.port, openClawGatewayUrl: config.openClawGatewayUrl },
