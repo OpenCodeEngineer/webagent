@@ -1,16 +1,42 @@
 import { readFile, readdir, stat } from 'fs/promises';
 import { join, relative } from 'path';
 
+export interface WorkspaceValidationResult {
+  valid: boolean;
+  errors: string[];
+}
+
+/** Required files that must exist and be non-empty in every workspace. */
+const REQUIRED_FILES = ['AGENTS.md', 'IDENTITY.md', 'SOUL.md'] as const;
+
 /**
  * Recursively scan all .md files in a workspace directory and return
- * a list of errors for any unresolved {{placeholder}} tokens found.
+ * validation results including unresolved {{PLACEHOLDER}} tokens and
+ * missing/empty required files.
  *
  * Ignores:
  * - Files under any `templates/` subdirectory (those ARE templates).
  * - Occurrences inside fenced code blocks (``` ... ```).
  */
-export async function validateGeneratedWorkspace(workspacePath: string): Promise<string[]> {
+export async function validateGeneratedWorkspace(
+  workspacePath: string,
+): Promise<WorkspaceValidationResult> {
   const errors: string[] = [];
+
+  // Check required files exist and are non-empty
+  for (const requiredFile of REQUIRED_FILES) {
+    const filePath = join(workspacePath, requiredFile);
+    try {
+      const content = await readFile(filePath, 'utf8');
+      if (content.trim().length === 0) {
+        errors.push(`${requiredFile}: required file is empty`);
+      }
+    } catch {
+      errors.push(`${requiredFile}: required file is missing`);
+    }
+  }
+
+  // Scan for unresolved placeholder tokens
   const mdFiles = await collectMdFiles(workspacePath);
 
   for (const filePath of mdFiles) {
@@ -32,15 +58,15 @@ export async function validateGeneratedWorkspace(workspacePath: string): Promise
       }
       if (inCodeBlock) continue;
 
-      const regex = /\{\{[^}]+\}\}/g;
+      const regex = /\{\{[A-Z_]+\}\}/g;
       let match: RegExpExecArray | null;
       while ((match = regex.exec(line)) !== null) {
-        errors.push(`${rel}:${i + 1}: unresolved placeholder ${match[0]}`);
+        errors.push(`${rel}:${i + 1} — un-replaced placeholder ${match[0]}`);
       }
     }
   }
 
-  return errors;
+  return { valid: errors.length === 0, errors };
 }
 
 async function collectMdFiles(dir: string): Promise<string[]> {

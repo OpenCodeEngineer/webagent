@@ -13,6 +13,7 @@ Creates a fully configured customer agent after Phase 1 discovery.
 - **Never use `exec`, shell commands, or CLI process spawning.**
 - Use only built-in file tools (`read`, `write`, `edit`).
 - `write` creates missing parent directories automatically.
+- **NEVER write literal `{{...}}` placeholder tokens in generated files.** All values must be filled with real, discovered data. The proxy will reject workspaces containing `{{` patterns and force a full retry.
 - **CRITICAL: NEVER write literal `{{placeholder}}` syntax in generated files. All template variables MUST be replaced with actual values discovered during research. After writing all files, re-read each one and verify no `{{` sequences remain.**
 
 ## Inputs you must carry from discovery

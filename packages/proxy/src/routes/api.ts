@@ -345,9 +345,8 @@ export async function detectAgentCreation(
   app: FastifyInstance,
   domain: string,
 ): Promise<
-  | { status: 'created'; agent: typeof agents.$inferSelect; embedToken: string; embedCode: string }
+  | { status: 'created'; agent: typeof agents.$inferSelect; embedToken: string; embedCode: string; validationErrors?: string[] }
   | { status: 'conflict'; slug: string; existingCustomerId: string; message: string }
-  | { status: 'validation_failed'; slug: string; errors: string[] }
   | null
 > {
   const markerMatch = responseText.match(/\[AGENT_CREATED::\s*<?([a-z0-9_-]+)>?\s*\]/i);
@@ -500,19 +499,14 @@ export async function detectAgentCreation(
     return null;
   }
 
-  // Validate workspace for unresolved template placeholders
+  // Validate workspace for unresolved template placeholders and required files
   const workspacePath = join(resolvedConfigPath!, '..');
-  const validationErrors = await validateGeneratedWorkspace(workspacePath);
-  if (validationErrors.length > 0) {
+  const validation = await validateGeneratedWorkspace(workspacePath);
+  if (!validation.valid) {
     app.log.warn(
-      { slug: config.agentSlug, errors: validationErrors },
-      'workspace has unresolved template placeholders — skipping registration',
+      { slug: config.agentSlug, errors: validation.errors },
+      'workspace has validation errors — agent will still be registered but may behave incorrectly',
     );
-    return {
-      status: 'validation_failed',
-      slug: config.agentSlug,
-      errors: validationErrors,
-    };
   }
 
   // Register agent in OpenClaw gateway config and restart gateway
