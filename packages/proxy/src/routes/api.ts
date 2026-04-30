@@ -347,6 +347,7 @@ export async function detectAgentCreation(
 ): Promise<
   | { status: 'created'; agent: typeof agents.$inferSelect; embedToken: string; embedCode: string; validationErrors?: string[] }
   | { status: 'conflict'; slug: string; existingCustomerId: string; message: string }
+  | { status: 'validation_failed'; slug: string; errors: string[] }
   | null
 > {
   const markerMatch = responseText.match(/\[AGENT_CREATED::\s*<?([a-z0-9_-]+)>?\s*\]/i);
@@ -545,6 +546,7 @@ export async function detectAgentCreation(
     agent: createdAgent,
     embedToken,
     embedCode,
+    validationErrors: validation.valid ? undefined : validation.errors,
   };
 }
 
@@ -681,16 +683,16 @@ Customer: ${normalizedLatestMessage}`
           { slug: createdAgentData.slug },
         );
       }
-      if (createdAgentData?.status === 'validation_failed') {
-        const errorList = createdAgentData.errors.slice(0, 10).join('\n');
-        const sentinel = `[AGENT_VALIDATION_FAILED::${createdAgentData.slug}::${errorList}]`;
+      if (createdAgentData?.status === 'created' && createdAgentData.validationErrors?.length) {
+        const errorList = createdAgentData.validationErrors.slice(0, 10).join('\n');
+        const sentinel = `[AGENT_VALIDATION_WARNING::${createdAgentData.agent.openclawAgentId}::${errorList}]`;
         return reply.send({
           data: {
             response: `${responseText}\n\n${sentinel}`,
             sessionId,
-            agent: null,
-            embedToken: null,
-            embedCode: '',
+            agent: createdAgentData.agent,
+            embedToken: createdAgentData.embedToken,
+            embedCode: createdAgentData.embedCode,
           },
         });
       }
