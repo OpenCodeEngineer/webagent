@@ -24,11 +24,5 @@ pnpm-debug.log*
 # typescript cache
 *.tsbuildinfo
 
-# E2E / QA artifacts
+# E2E demo outputs
 e2e-demo-output/
-qa-*
-e2e-qa-*
-e2e-test*.mjs
-e2e-test*.js
-e2e-test*.cjs
-qa-screenshots/
