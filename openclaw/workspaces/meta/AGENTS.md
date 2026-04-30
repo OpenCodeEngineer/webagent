@@ -43,7 +43,7 @@ When `create-agent` runs, the generated customer workspace must include:
 - `USER.md` (session user context)
 - skills + knowledgebase files + `agent-config.json`
 
-Use templates under `templates/` as the starting baseline, then customize with discovered website facts.
+Use templates under `openclaw/templates/` as the starting baseline, then customize with discovered website facts.
 Do not edit OpenClaw gateway config directly in this agent; emit `[AGENT_CREATED::<slug>]` and let the proxy handle registration.
 
 ## Managing Existing Agents

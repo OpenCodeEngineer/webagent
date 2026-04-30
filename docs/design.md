@@ -461,17 +461,10 @@ webagent/
 │           └── constants.ts          Ports, WS path, close codes
 │
 ├── openclaw/
-│   ├── openclaw.json5                Multi-agent config (hooks, sandbox, cron, session)
+│   ├── config/openclaw.json5         Multi-agent config (hooks, sandbox, cron, session)
+│   ├── templates/                    Base templates for new customer agents (AGENTS/SOUL/IDENTITY/TOOLS/USER.md)
 │   └── workspaces/
-│       └── meta/                     Meta-agent workspace (deployed to /opt/webagent/openclaw/workspaces/meta/)
-│           ├── AGENTS.md             Meta-agent operating instructions
-│           ├── IDENTITY.md           Meta-agent identity
-│           ├── SOUL.md               Meta-agent persona
-│           ├── TOOLS.md              Meta-agent tools config
-│           ├── USER.md               Meta-agent user context
-│           ├── HEARTBEAT.md          Meta-agent heartbeat config
-│           ├── skills/               Meta-agent skills (create-agent, manage-agents)
-│           └── templates/            Templates for new customer agents (AGENTS/SOUL/IDENTITY/USER.md + skills/)
+│       └── meta/                     Meta-agent workspace + create-agent skill
 │
 ├── infra/
 │   ├── setup.sh                      Full VM provisioning (Node, pnpm, nginx, certbot, systemd, UFW)
@@ -522,7 +515,7 @@ webagent/
 
 ### OpenClaw Config Registration
 - Proxy config path precedence:
-  `OPENCLAW_CONFIG_PATH` → `<repo>/openclaw/openclaw.json5` → `~/.openclaw/openclaw.json`
+  `OPENCLAW_CONFIG_PATH` → `<repo>/openclaw/config/openclaw.json5` → `~/.openclaw/openclaw.json`
 - Proxy parses JSON5, appends agent entry when missing, then writes back config JSON
 - Gateway is reloaded via SIGHUP (no root needed); falls back to `sudo systemctl restart openclaw-gateway`
 - Note: design originally planned `hybrid` hot-reload, but gateway requires restart
