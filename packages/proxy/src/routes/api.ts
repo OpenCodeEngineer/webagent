@@ -1,5 +1,5 @@
-import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
-import { mkdir, readFile, rmdir, stat, writeFile } from 'fs/promises';
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { mkdir, open, readFile, rename, rmdir, stat, unlink } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'node:os';
 import { execFile } from 'node:child_process';
@@ -215,8 +215,127 @@ async function insertAuditLog(
 }
 
 /**
- * Register a newly created agent in the OpenClaw gateway config (~/.openclaw/openclaw.json)
- * and restart the gateway so it picks up the new agent.
+ * Resolve the OpenClaw gateway config path (shared with reconciler).
+ *
+ * Order: OPENCLAW_CONFIG_PATH > <cwd>/openclaw/config/openclaw.json5
+ *        > ~/.openclaw/openclaw.json
+ */
+export function resolveOpenClawConfigPath(): string {
+  return (
+    process.env.OPENCLAW_CONFIG_PATH?.trim()
+    || join(process.cwd(), 'openclaw', 'config', 'openclaw.json5')
+    || join(homedir(), '.openclaw', 'openclaw.json')
+  );
+}
+
+/**
+ * Resolve the directory that contains per-agent workspaces.
+ * Mirrors the fallback logic in detectAgentCreation.
+ */
+export function resolveOpenClawWorkspacesDir(): string {
+  return (
+    process.env.OPENCLAW_WORKSPACES_DIR?.trim()
+    || join(process.cwd(), 'openclaw', 'workspaces')
+  );
+}
+
+/**
+ * Read on-disk agent-config.json for a given slug, trying both the configured
+ * workspaces dir and a repo-root fallback. Returns null on any failure.
+ */
+export async function readAgentConfigFromDisk(
+  slug: string,
+): Promise<Record<string, unknown> | null> {
+  const configuredWorkspacesDir = process.env.OPENCLAW_WORKSPACES_DIR?.trim();
+  const primaryWorkspacesDir = configuredWorkspacesDir || join(process.cwd(), 'openclaw', 'workspaces');
+  const candidates = [join(primaryWorkspacesDir, slug, 'agent-config.json')];
+  if (!configuredWorkspacesDir) {
+    const fallbackWorkspacesDir = join(process.cwd(), '..', '..', 'openclaw', 'workspaces');
+    const fallbackPath = join(fallbackWorkspacesDir, slug, 'agent-config.json');
+    if (fallbackPath !== candidates[0]) candidates.push(fallbackPath);
+  }
+  for (const p of candidates) {
+    try {
+      const raw = await readFile(p, 'utf8');
+      return JSON.parse(raw) as Record<string, unknown>;
+    } catch {}
+  }
+  return null;
+}
+
+/**
+ * Read just the skills array from a workspace's agent-config.json.
+ */
+export async function getAgentSkillsFromDisk(slug: string): Promise<string[] | undefined> {
+  const cfg = await readAgentConfigFromDisk(slug);
+  if (!cfg) return undefined;
+  const raw = (cfg as { skills?: unknown }).skills;
+  if (!Array.isArray(raw)) return undefined;
+  const skills = raw.filter((s): s is string => typeof s === 'string' && s.trim().length > 0);
+  return skills.length > 0 ? skills : undefined;
+}
+
+/**
+ * Extract a leading comment/whitespace block that appears BEFORE the first
+ * top-level `{`. JSON5 files in this repo place all comments inside the
+ * object so this is usually empty, but we preserve it when present so a
+ * future copyright/license header survives a rewrite. Walks character by
+ * character so the cut point is not confused by `{` inside comments.
+ */
+export function extractLeadingHeader(raw: string): string {
+  let i = 0;
+  while (i < raw.length) {
+    const ch = raw[i];
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+      i++;
+      continue;
+    }
+    if (ch === '/' && raw[i + 1] === '/') {
+      const nl = raw.indexOf('\n', i + 2);
+      i = nl < 0 ? raw.length : nl + 1;
+      continue;
+    }
+    if (ch === '/' && raw[i + 1] === '*') {
+      const end = raw.indexOf('*/', i + 2);
+      i = end < 0 ? raw.length : end + 2;
+      continue;
+    }
+    break;
+  }
+  return raw.slice(0, i);
+}
+
+
+/**
+ * Atomic file write: write to a sibling temp file in the same directory,
+ * fsync, then rename over the target. The directory rename is atomic on POSIX.
+ */
+export async function writeFileAtomic(targetPath: string, contents: string): Promise<void> {
+  const tmp = `${targetPath}.tmp.${process.pid}.${randomBytes(6).toString('hex')}`;
+  let handle: Awaited<ReturnType<typeof open>> | null = null;
+  try {
+    handle = await open(tmp, 'w', 0o644);
+    await handle.writeFile(contents, 'utf8');
+    await handle.sync();
+  } finally {
+    if (handle) await handle.close();
+  }
+  try {
+    await rename(tmp, targetPath);
+  } catch (err) {
+    // Best-effort cleanup of the orphaned temp file.
+    try { await unlink(tmp); } catch {}
+    throw err;
+  }
+}
+
+/**
+ * Register (or update) an agent entry in the OpenClaw gateway config and
+ * restart/reload the gateway so it picks up the change.
+ *
+ * If an entry with the same id (slug) already exists, this updates its
+ * mutable fields (name, workspace, sandbox, skills, heartbeat) IN PLACE
+ * while preserving any additional fields that may have been hand-edited.
  */
 export async function registerAgentInOpenClaw(
   slug: string,
@@ -224,11 +343,7 @@ export async function registerAgentInOpenClaw(
   app: FastifyInstance,
   skills?: string[],
 ): Promise<void> {
-  // Resolve config path: OPENCLAW_CONFIG_PATH > /opt/webagent/openclaw/config/openclaw.json5 > ~/.openclaw/openclaw.json
-  const configPath =
-    process.env.OPENCLAW_CONFIG_PATH?.trim() ||
-    join(process.cwd(), 'openclaw', 'config', 'openclaw.json5') ||
-    join(homedir(), '.openclaw', 'openclaw.json');
+  const configPath = resolveOpenClawConfigPath();
   const lockPath = `${configPath}.lock`;
   let staleLockCleaned = false;
   try {
@@ -268,25 +383,49 @@ export async function registerAgentInOpenClaw(
         return;
       }
 
-      if (config.agents.list.some((a) => a.id === slug)) {
-        app.log.info({ slug }, 'agent already in openclaw config — skipping');
-        return;
-      }
-
-      // Resolve workspace path for the new agent
-      const workspacesDir = process.env.OPENCLAW_WORKSPACES_DIR?.trim()
-        || join(process.cwd(), 'openclaw', 'workspaces');
-
-      config.agents.list.push({
+      // Resolve workspace path for the agent
+      const workspacesDir = resolveOpenClawWorkspacesDir();
+      const desiredEntry = {
         id: slug,
         name,
         workspace: join(workspacesDir, slug),
         sandbox: { mode: 'off' },
         skills: skills?.length ? skills : ['website-api'],
         heartbeat: { every: '30m' },
-      });
+      };
 
-      await writeFile(configPath, JSON.stringify(config, null, 2), 'utf8');
+      const existingIdx = config.agents.list.findIndex((a) => a.id === slug);
+      if (existingIdx >= 0) {
+        // 4a: update existing entry in place. Preserve any extra fields that
+        // were hand-edited (e.g. custom heartbeat target) by spreading first.
+        const existing = config.agents.list[existingIdx]!;
+        config.agents.list[existingIdx] = {
+          ...existing,
+          name: desiredEntry.name,
+          workspace: desiredEntry.workspace,
+          sandbox: desiredEntry.sandbox,
+          skills: desiredEntry.skills,
+          // Only set heartbeat if not already present, to preserve overrides.
+          heartbeat: (existing as { heartbeat?: unknown }).heartbeat ?? desiredEntry.heartbeat,
+        };
+        app.log.info({ slug }, 'updated existing openclaw agent entry');
+      } else {
+        config.agents.list.push(desiredEntry);
+        app.log.info({ slug }, 'appended new openclaw agent entry');
+      }
+
+      // 4d: preserve a leading comment block from the original file. JSON5 inline
+      // comments inside the object are still lost — proper preservation requires
+      // a JSON5 CST-aware editor.
+      // TODO(#193): replace JSON5.stringify with surgical edits that preserve
+      // all inline comments. For now we keep any header comments that appear
+      // *before* the opening `{`.
+      const header = extractLeadingHeader(raw);
+      const serialized = JSON5.stringify(config, null, 2);
+      const output = `${header}${serialized}\n`;
+
+      // 4e: atomic write — write to temp file then rename.
+      await writeFileAtomic(configPath, output);
       app.log.info({ slug, configPath }, 'registered agent in openclaw config');
 
       // Try SIGHUP first (no root needed for same-user processes), fall back to systemctl
@@ -577,6 +716,24 @@ export function registerApiRoutes(app: FastifyInstance) {
         agentId: createdAgent.id,
         openclawAgentId: body.openclawAgentId,
       });
+
+      // 4b: keep openclaw.json5 in sync with the DB. Read skills from the
+      // agent's on-disk workspace (created by the meta-agent prior to this
+      // call); fall back to widgetConfig.skills if nothing is on disk yet.
+      const diskSkills = await getAgentSkillsFromDisk(body.openclawAgentId);
+      const widgetSkillsRaw = (body.widgetConfig as { skills?: unknown } | undefined)?.skills;
+      const widgetSkills = Array.isArray(widgetSkillsRaw)
+        ? widgetSkillsRaw.filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+        : undefined;
+      const resolvedSkills = diskSkills ?? (widgetSkills && widgetSkills.length > 0 ? widgetSkills : undefined);
+      try {
+        await registerAgentInOpenClaw(body.openclawAgentId, body.name, app, resolvedSkills);
+      } catch (err) {
+        request.log.warn(
+          { err, openclawAgentId: body.openclawAgentId },
+          'registerAgentInOpenClaw failed for internal agent (non-fatal)',
+        );
+      }
 
       const embedToken = randomUUID();
       const createdEmbedRows = await app.db
