@@ -90,10 +90,10 @@ export async function validateGeneratedWorkspace(
       }
       if (inCodeBlock) continue;
 
-      const regex = /\{\{[A-Z_]+\}\}/g;
+      const regex = /\{\{[^}]*\}?\}?/g;
       let match: RegExpExecArray | null;
       while ((match = regex.exec(line)) !== null) {
-        errors.push(`${rel}:${i + 1} — un-replaced placeholder ${match[0]}`);
+        errors.push(`${rel}:${i + 1} — un-replaced placeholder: ${match[0]}`);
       }
     }
   }
