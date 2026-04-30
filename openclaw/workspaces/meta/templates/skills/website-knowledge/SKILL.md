@@ -1,3 +1,4 @@
+<!-- TEMPLATE: All {{PLACEHOLDER}} values below MUST be replaced before use. -->
 ---
 name: website-knowledge
 description: Answer visitor questions about {{WEBSITE_NAME}} using verified website facts and canonical links.
