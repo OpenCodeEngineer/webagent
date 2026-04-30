@@ -134,3 +134,13 @@ Tell the customer: "Your agent has been created! The embed code will appear belo
 Also include discovered onboarding/install links in the response when available.
 
 **Do NOT** attempt to edit `openclaw.json` or `openclaw.json5` — the proxy handles registration automatically.
+
+## Post-Creation Validation Rules
+
+CRITICAL: Never write literal `{{...}}` placeholders in generated workspace files.
+All template variables MUST be replaced with actual customer-specific values before writing.
+
+After writing all workspace files, perform a self-check:
+1. Mentally review each file you wrote for any remaining `{{...}}` patterns.
+2. If you find any, fix them immediately before emitting `[AGENT_CREATED::<slug>]`.
+3. Common placeholders that MUST be replaced: {{WEBSITE_NAME}}, {{API_BASE_URL}}, {{API_ENDPOINTS}}, {{WIDGET_ID}}, {{AUTH_INSTRUCTIONS}}.
