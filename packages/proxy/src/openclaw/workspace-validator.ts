@@ -36,6 +36,34 @@ export async function validateGeneratedWorkspace(
     }
   }
 
+  // Check for files that are byte-identical to their template counterpart
+  const templatesDir = join(workspacePath, '..', '..', 'meta', 'templates');
+  try {
+    const templatesStat = await stat(templatesDir);
+    if (templatesStat.isDirectory()) {
+      const templateFiles = await collectMdFiles(templatesDir);
+      for (const templateFile of templateFiles) {
+        const relFromTemplates = relative(templatesDir, templateFile);
+        const workspaceCounterpart = join(workspacePath, relFromTemplates);
+        try {
+          const [templateContent, workspaceContent] = await Promise.all([
+            readFile(templateFile, 'utf8'),
+            readFile(workspaceCounterpart, 'utf8'),
+          ]);
+          if (templateContent === workspaceContent && templateContent.trim().length > 0) {
+            errors.push(
+              `${relFromTemplates}: file is identical to template (not customized)`,
+            );
+          }
+        } catch {
+          // counterpart doesn't exist or unreadable — skip
+        }
+      }
+    }
+  } catch {
+    // templates dir doesn't exist — skip comparison
+  }
+
   // Scan for unresolved placeholder tokens
   const mdFiles = await collectMdFiles(workspacePath);
 
