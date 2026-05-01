@@ -184,94 +184,15 @@ else
   echo "⚠️  No .env file at ${APP_DIR}/.env — skipping DB migrations"
 fi
 
-if [[ -f "${NGINX_SITE_PATH}" ]]; then
-  echo "→ Ensuring nginx /api auth routing + long-running API timeouts..."
-  python3 - "${NGINX_SITE_PATH}" <<'PY'
-import re
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-lines = text.splitlines()
-
-if "location ^~ /api/auth/" in text:
-    # Modern managed nginx template present; do not mutate route ordering.
-    raise SystemExit(0)
-
-api_idx = None
-for i, line in enumerate(lines):
-    if re.search(r'^\s*location\s+/api/?\s*\{', line):
-        api_idx = i
-        break
-
-if api_idx is not None:
-    api_end = None
-    for j in range(api_idx + 1, len(lines)):
-        if lines[j].strip() == "}":
-            api_end = j
-            break
-    if api_end is not None:
-        block = lines[api_idx:api_end + 1]
-        has_read = any("proxy_read_timeout" in line for line in block)
-        has_send = any("proxy_send_timeout" in line for line in block)
-        insert_at = api_end
-        if not has_read:
-            lines.insert(insert_at, "        proxy_read_timeout 300s;")
-            insert_at += 1
-            api_end += 1
-        if not has_send:
-            lines.insert(insert_at, "        proxy_send_timeout 300s;")
-            api_end += 1
-
-if "location /api/auth/" not in "\n".join(lines):
-    admin_upstream = "admin_frontend" if "upstream admin_frontend" in text else "admin_upstream"
-    auth_block = [
-        "    # NextAuth routes -> Admin (inserted by infra/deploy.sh)",
-        "    location /api/auth/ {",
-        f"        proxy_pass http://{admin_upstream};",
-        "        proxy_http_version 1.1;",
-        "        proxy_set_header Host $host;",
-        "        proxy_set_header X-Real-IP $remote_addr;",
-        "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
-        "        proxy_set_header X-Forwarded-Proto $scheme;",
-        "    }",
-        "",
-    ]
-    insert_pos = 0
-    for i, line in enumerate(lines):
-        if re.search(r'^\s*location\s+/api/?\s*\{', line):
-            insert_pos = i
-            break
-    lines[insert_pos:insert_pos] = auth_block
-
-if "location /sso/" not in "\n".join(lines):
-    proxy_upstream = "proxy_upstream"
-    sso_block = [
-        "    # SSO / identity routes (inserted by infra/deploy.sh)",
-        "    location /sso/ {",
-        f"        proxy_pass http://{proxy_upstream};",
-        "        proxy_read_timeout 300s;",
-        "        proxy_send_timeout 300s;",
-        "        proxy_buffering on;",
-        "        limit_req zone=api_limit burst=60 nodelay;",
-        "        limit_req_status 429;",
-        "    }",
-        "",
-    ]
-    insert_pos = len(lines)
-    for i, line in enumerate(lines):
-        if re.search(r'^\s*location\s+/\s*\{', line):
-            insert_pos = i
-            break
-    lines[insert_pos:insert_pos] = sso_block
-
-new_text = "\n".join(lines) + "\n"
-if new_text != text:
-    path.write_text(new_text, encoding="utf-8")
-PY
+NGINX_TEMPLATE="${REPO_ROOT}/infra/nginx/webagent.conf"
+DOMAIN="${DOMAIN:-dev.lamoom.com}"
+if [[ -f "${NGINX_TEMPLATE}" ]]; then
+  echo "→ Installing nginx config from repo template..."
+  sed "s/\${DOMAIN}/${DOMAIN}/g" "${NGINX_TEMPLATE}" > "${NGINX_SITE_PATH}"
   nginx -t
   systemctl reload nginx
+else
+  echo "⚠️  Missing ${NGINX_TEMPLATE} — skipping nginx config"
 fi
 
 echo "→ Restarting services..."
