@@ -7,12 +7,34 @@ set -euo pipefail
 HOST="${1:-${DEPLOY_HOST:-78.47.152.177}}"
 DEPLOY_USER="${DEPLOY_USER:-root}"
 APP_DIR="${APP_DIR:-/opt/webagent}"
+APP_USER="${APP_USER:-openclaw}"
 NGINX_SITE_PATH="${NGINX_SITE_PATH:-/etc/nginx/sites-enabled/openclaw}"
 SYNC_DELETE="${SYNC_DELETE:-1}"
 REMOTE="${DEPLOY_USER}@${HOST}"
+SSH_OPTS=(
+  -o ServerAliveInterval=20
+  -o ServerAliveCountMax=6
+  -o TCPKeepAlive=yes
+)
 RUNTIME_CONFIG_BACKUP="/tmp/webagent-openclaw-runtime.json5"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+run_rsync() {
+  local description="$1"
+  shift
+  local -a args=("$@")
+
+  echo "→ ${description} (attempt 1)..."
+  if rsync -e "ssh ${SSH_OPTS[*]}" "${args[@]}"; then
+    return 0
+  else
+    local rc=$?
+    echo "⚠️  rsync failed (exit ${rc}); retrying with resilient flags..."
+  fi
+  sleep 2
+  rsync -e "ssh ${SSH_OPTS[*]}" --no-compress --inplace --partial "${args[@]}"
+}
 
 if [[ ! -f "${REPO_ROOT}/pnpm-workspace.yaml" ]]; then
   echo "❌ Could not find repo root from ${SCRIPT_DIR}" >&2
@@ -29,10 +51,9 @@ done
 echo "── Deploying LOCAL repo to ${REMOTE}:${APP_DIR} ──"
 
 echo "→ Preparing remote directory and preserving runtime OpenClaw config..."
-ssh "${REMOTE}" "set -euo pipefail; install -d -m 0755 '${APP_DIR}'; \
+ssh "${SSH_OPTS[@]}" "${REMOTE}" "set -euo pipefail; install -d -m 0755 '${APP_DIR}'; \
   if [ -f '${APP_DIR}/openclaw/config/openclaw.json5' ]; then cp '${APP_DIR}/openclaw/config/openclaw.json5' '${RUNTIME_CONFIG_BACKUP}'; fi"
 
-echo "→ Syncing local repo (including openclaw workspaces/templates/agents files)..."
 RSYNC_ARGS=(
   -az
   --human-readable
@@ -54,19 +75,21 @@ if [[ "${SYNC_DELETE}" == "1" ]]; then
   RSYNC_ARGS+=(--delete)
 fi
 
-rsync "${RSYNC_ARGS[@]}" "${REPO_ROOT}/" "${REMOTE}:${APP_DIR}/"
+run_rsync "Syncing local repo" "${RSYNC_ARGS[@]}" "${REPO_ROOT}/" "${REMOTE}:${APP_DIR}/"
 
-echo "→ Syncing managed OpenClaw workspace(s) from local repo..."
-rsync -az --human-readable --delete \
+# Preserve runtime-generated meta workspace state on host (.openclaw/workspace-state.json).
+run_rsync "Syncing managed OpenClaw workspace(s) from local repo" -az --human-readable --delete \
+  --exclude '.openclaw/' \
   "${REPO_ROOT}/openclaw/workspaces/meta/" \
   "${REMOTE}:${APP_DIR}/openclaw/workspaces/meta/"
 
 echo "→ Running remote build/restart/apply steps..."
-ssh "${REMOTE}" bash -s "${APP_DIR}" "${RUNTIME_CONFIG_BACKUP}" "${NGINX_SITE_PATH}" <<'REMOTE'
+ssh "${SSH_OPTS[@]}" "${REMOTE}" bash -s "${APP_DIR}" "${RUNTIME_CONFIG_BACKUP}" "${NGINX_SITE_PATH}" "${APP_USER}" <<'REMOTE'
 set -euo pipefail
 APP_DIR="$1"
 RUNTIME_CONFIG_BACKUP="$2"
 NGINX_SITE_PATH="$3"
+APP_USER="$4"
 OVERRIDE_SRC="${APP_DIR}/infra/systemd/openclaw.service.d/override.conf"
 
 cd "${APP_DIR}"
@@ -118,16 +141,16 @@ fi
 rm -f "${RUNTIME_CONFIG_BACKUP}" || true
 
 echo "→ Fixing ownership..."
-chown -R openclaw:openclaw "${APP_DIR}" 2>/dev/null || true
+chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}" 2>/dev/null || true
 
 echo "→ Installing dependencies..."
-sudo -u openclaw bash -lc "cd '${APP_DIR}' && CI=1 pnpm install --frozen-lockfile --prod=false"
+sudo -u "${APP_USER}" bash -lc "cd '${APP_DIR}' && CI=1 pnpm install --frozen-lockfile --prod=false"
 
 echo "→ Cleaning stale tsbuildinfo caches..."
 find "${APP_DIR}/packages" -name 'tsconfig.tsbuildinfo' -delete 2>/dev/null || true
 
 echo "→ Building packages..."
-sudo -u openclaw bash -lc "cd '${APP_DIR}' && pnpm build"
+sudo -u "${APP_USER}" bash -lc "cd '${APP_DIR}' && pnpm build"
 
 echo "→ Applying OpenClaw service drop-in override..."
 install -d -m 0755 /etc/systemd/system/openclaw.service.d
@@ -137,11 +160,22 @@ else
   echo "⚠️  Missing ${OVERRIDE_SRC} — skipping openclaw.service override"
 fi
 
+echo "→ Installing WebAgent service units from repo templates..."
+for unit in webagent-proxy webagent-admin; do
+  unit_src="${APP_DIR}/infra/systemd/${unit}.service"
+  unit_dst="/etc/systemd/system/${unit}.service"
+  if [[ -f "${unit_src}" ]]; then
+    sed -e "s|\${APP_DIR}|${APP_DIR}|g" -e "s|\${APP_USER}|${APP_USER}|g" "${unit_src}" > "${unit_dst}"
+  else
+    echo "⚠️  Missing ${unit_src} — keeping existing ${unit}.service"
+  fi
+done
+
 bash "${APP_DIR}/infra/admin-static-sync.sh" sync "${APP_DIR}"
 
 echo "→ Running DB migrations..."
 if [[ -f "${APP_DIR}/.env" ]]; then
-  sudo -u openclaw bash -lc "cd '${APP_DIR}' && set -a && source .env && set +a && pnpm --filter @webagent/proxy db:migrate" \
+  sudo -u "${APP_USER}" bash -lc "cd '${APP_DIR}' && set -a && source .env && set +a && pnpm --filter @webagent/proxy db:migrate" \
     || echo "⚠️  DB migration failed (exit $?) — deployment continues but tables may be stale"
 else
   echo "⚠️  No .env file at ${APP_DIR}/.env — skipping DB migrations"
@@ -234,6 +268,7 @@ PY
 fi
 
 echo "→ Restarting services..."
+systemctl daemon-reload
 systemctl restart openclaw.service || true
 systemctl restart webagent-proxy
 systemctl restart webagent-admin
