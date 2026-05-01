@@ -152,12 +152,15 @@ find "${APP_DIR}/packages" -name 'tsconfig.tsbuildinfo' -delete 2>/dev/null || t
 echo "→ Building packages..."
 sudo -u "${APP_USER}" bash -lc "cd '${APP_DIR}' && pnpm build"
 
-echo "→ Applying OpenClaw service drop-in override..."
-install -d -m 0755 /etc/systemd/system/openclaw.service.d
+echo "→ Applying OpenClaw gateway drop-in override (user-level service)..."
+OPENCLAW_USER_UNIT_DIR="/home/${APP_USER}/.config/systemd/user/openclaw-gateway.service.d"
+install -d -m 0755 "${OPENCLAW_USER_UNIT_DIR}"
+chown "${APP_USER}:${APP_USER}" "${OPENCLAW_USER_UNIT_DIR}"
 if [[ -f "${OVERRIDE_SRC}" ]]; then
-  sed "s|\${APP_DIR}|${APP_DIR}|g" "${OVERRIDE_SRC}" > /etc/systemd/system/openclaw.service.d/override.conf
+  sed "s|\${APP_DIR}|${APP_DIR}|g" "${OVERRIDE_SRC}" > "${OPENCLAW_USER_UNIT_DIR}/override.conf"
+  chown "${APP_USER}:${APP_USER}" "${OPENCLAW_USER_UNIT_DIR}/override.conf"
 else
-  echo "⚠️  Missing ${OVERRIDE_SRC} — skipping openclaw.service override"
+  echo "⚠️  Missing ${OVERRIDE_SRC} — skipping openclaw-gateway override"
 fi
 
 echo "→ Installing WebAgent service units from repo templates..."
@@ -273,7 +276,8 @@ fi
 
 echo "→ Restarting services..."
 systemctl daemon-reload
-systemctl restart openclaw.service || true
+# Restart OpenClaw gateway (user-level service)
+sudo -u "${APP_USER}" bash -lc "export XDG_RUNTIME_DIR=/run/user/\$(id -u); systemctl --user daemon-reload; systemctl --user restart openclaw-gateway.service" || true
 systemctl restart webagent-proxy
 systemctl restart webagent-admin
 sleep 4
