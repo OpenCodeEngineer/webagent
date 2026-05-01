@@ -48,3 +48,12 @@ Do not run both as competing sources of truth. Pick one owner for gateway lifecy
 - If using OpenClaw-managed daemon: operate via OpenClaw install/onboard flow and `openclaw.service`.
 - If using repo-managed gateway unit: ensure deployment/setup scripts, health gates, and docs all target only that unit.
 - Avoid mixed control planes because they can leave a healthy gateway process while one of the units reports inactive/failed.
+
+## Patch model (systemd drop-ins)
+
+Use systemd drop-ins for repo-controlled customizations instead of editing `openclaw.service` directly:
+
+- Repo source: `infra/systemd/openclaw.service.d/override.conf`
+- Host path: `/etc/systemd/system/openclaw.service.d/override.conf`
+
+This keeps OpenClaw's base unit replaceable by OpenClaw updates while preserving our environment wiring.

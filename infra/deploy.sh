@@ -67,6 +67,7 @@ set -euo pipefail
 APP_DIR="$1"
 RUNTIME_CONFIG_BACKUP="$2"
 NGINX_SITE_PATH="$3"
+OVERRIDE_SRC="${APP_DIR}/infra/systemd/openclaw.service.d/override.conf"
 
 cd "${APP_DIR}"
 
@@ -127,6 +128,14 @@ find "${APP_DIR}/packages" -name 'tsconfig.tsbuildinfo' -delete 2>/dev/null || t
 
 echo "→ Building packages..."
 sudo -u openclaw bash -lc "cd '${APP_DIR}' && pnpm build"
+
+echo "→ Applying OpenClaw service drop-in override..."
+install -d -m 0755 /etc/systemd/system/openclaw.service.d
+if [[ -f "${OVERRIDE_SRC}" ]]; then
+  sed "s|\${APP_DIR}|${APP_DIR}|g" "${OVERRIDE_SRC}" > /etc/systemd/system/openclaw.service.d/override.conf
+else
+  echo "⚠️  Missing ${OVERRIDE_SRC} — skipping openclaw.service override"
+fi
 
 bash "${APP_DIR}/infra/admin-static-sync.sh" sync "${APP_DIR}"
 
@@ -225,7 +234,7 @@ PY
 fi
 
 echo "→ Restarting services..."
-systemctl restart openclaw-gateway || true
+systemctl restart openclaw.service || true
 systemctl restart webagent-proxy
 systemctl restart webagent-admin
 sleep 4

@@ -13,7 +13,8 @@
 ### Config Locations
 - OpenClaw config: `/opt/webagent/openclaw/config/openclaw.json5`
 - Proxy service: `systemctl restart webagent-proxy`
-- Gateway service: `systemctl restart openclaw-gateway`
+- Gateway service: `systemctl restart openclaw.service`
+- OpenClaw systemd drop-in override: `/etc/systemd/system/openclaw.service.d/override.conf`
 
 ### Azure Models
 - Endpoint: `${AZURE_DEV_AI_BASE_URL}` → `https://vibe-dev-ai.cognitiveservices.azure.com/openai/v1`
@@ -28,7 +29,7 @@ Set in `agents.defaults.model` in openclaw.json5:
 ```
 
 ### Troubleshooting
-1. Check gateway: `ssh root@78.47.152.177 "journalctl -u openclaw-gateway --no-pager -n 50"`
+1. Check gateway: `ssh root@78.47.152.177 "journalctl -u openclaw.service --no-pager -n 50"`
 2. Check proxy: `ssh root@78.47.152.177 "journalctl -u webagent-proxy --no-pager -n 50"`
 3. Test model directly:
    ```bash
@@ -90,3 +91,9 @@ To retarget the workflow to a different VM, update the `VM_HOST` secret in the r
 # One-time bootstrap script (run on VM as root)
 DOMAIN=myapp.example.com REPO_URL=git@github.com:OpenCodeEngineer/webagent.git bash /path/to/infra/setup.sh
 ```
+
+### Service ownership
+
+- OpenClaw base unit (`openclaw.service`) is installed/owned by OpenClaw runtime tooling.
+- This repo must only apply drop-in overrides under `openclaw.service.d/`.
+- Do not maintain a competing gateway unit as the primary runtime owner.
