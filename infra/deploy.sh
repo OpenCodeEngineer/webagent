@@ -184,7 +184,7 @@ else
   echo "⚠️  No .env file at ${APP_DIR}/.env — skipping DB migrations"
 fi
 
-NGINX_TEMPLATE="${REPO_ROOT}/infra/nginx/webagent.conf"
+NGINX_TEMPLATE="${APP_DIR}/infra/nginx/webagent.conf"
 DOMAIN="${DOMAIN:-dev.lamoom.com}"
 if [[ -f "${NGINX_TEMPLATE}" ]]; then
   echo "→ Installing nginx config from repo template..."
