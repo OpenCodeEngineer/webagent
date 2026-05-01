@@ -105,9 +105,9 @@ const start = async (): Promise<void> => {
       app.log.error({ err }, 'openclaw reconciler crashed (continuing startup)');
     }
 
-    await app.listen({ host: '0.0.0.0', port: config.port });
+    await app.listen({ host: config.host, port: config.port });
     app.log.info(
-      { port: config.port, openClawGatewayUrl: config.openClawGatewayUrl },
+      { host: config.host, port: config.port, openClawGatewayUrl: config.openClawGatewayUrl },
       'proxy server started',
     );
   } catch (error) {

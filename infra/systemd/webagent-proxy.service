@@ -22,6 +22,9 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=webagent-proxy
 
+# Default-safe bind host for backend service.
+Environment=PROXY_BIND_HOST=127.0.0.1
+
 LimitNOFILE=65536
 LimitNPROC=4096
 MemoryMax=1G
