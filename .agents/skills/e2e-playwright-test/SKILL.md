@@ -35,8 +35,9 @@ Run these checks IN ORDER using vibebrowser tools. Take a screenshot after each 
 5. **Screenshots MUST be taken and visually inspected.** A phase without its screenshot is incomplete and MUST be re-run.
 6. **Blocker precedence is absolute:** if any blocker appears anywhere, final verdict MUST be NOT READY.
 7. **READY requires all hard-release-gate criteria and complete evidence.** Any failed/missing gate item or evidence gap = NOT READY.
+8. **Stability-sensitive checks require repeated probes.** A single successful call is insufficient; any intermittent 5xx/timeout in probe loops is a FAIL.
 
-**Architecture baseline:** Native WebSocket chat (`/create` + `CreateAgentChat`) is the source-of-truth flow. The MVP runs on one VM with systemd services (`webagent-admin`, `webagent-proxy`, `openclaw-gateway`) and workspace-scoped OpenClaw tools. Do not require Docker or LibreChat for MVP readiness.
+**Architecture baseline:** Native WebSocket chat (`/create` + `CreateAgentChat`) is the source-of-truth flow. The MVP runs on one VM with systemd services (`webagent-admin`, `webagent-proxy`, `openclaw.service`) and workspace-scoped OpenClaw tools. Do not require Docker or LibreChat for MVP readiness.
 
 ### Phase 0: Infrastructure (curl, not browser)
 ```
@@ -44,8 +45,25 @@ curl -sk https://dev.lamoom.com/health → 200 {"status":"ok"}
 curl -sk https://dev.lamoom.com/health/openclaw → 200 {"status":"ok"}  
 curl -sk https://dev.lamoom.com/widget.js → 200, non-empty JS
 curl -sk https://dev.lamoom.com/v1/models → 200 {"data":[...]} (OpenAI-compat endpoint)
-ssh root@78.47.152.177 "systemctl is-active webagent-admin webagent-proxy openclaw-gateway nginx ssh" → all active
+ssh root@78.47.152.177 "systemctl is-active webagent-admin webagent-proxy openclaw.service nginx ssh" → all active
 ```
+
+### Phase 0a: Admin Route Stability — BLOCKING (curl, not browser)
+
+Catch intermittent login/provider failures that one-off checks can miss.
+
+1. Run repeated probes:
+   ```
+   for i in 1 2 3; do
+     curl -sk --max-time 20 -o /tmp/login-$i.html -w "login[$i] http=%{http_code} total=%{time_total}\n" https://dev.lamoom.com/login
+     curl -sk --max-time 20 -o /tmp/providers-$i.json -w "providers[$i] http=%{http_code} total=%{time_total}\n" https://dev.lamoom.com/api/auth/providers
+   done
+   ```
+2. **CHECK**: all `/login` probes return HTTP 200 and non-error HTML (not 5xx page).
+3. **CHECK**: all `/api/auth/providers` probes return HTTP 200 and valid JSON.
+4. **CHECK**: providers payload includes both `google` and `credentials`.
+
+**If any probe fails or times out → STOP. Report BLOCKING failure.**
 
 ### Phase 0b: Static Assets — BLOCKING (curl, not browser)
 Next.js standalone mode does NOT auto-include `_next/static/`. If this fails, ALL pages render as unstyled black & white.
@@ -84,6 +102,24 @@ Verify NextAuth providers are correctly configured and the DrizzleAdapter connec
 
 **If providers endpoint returns an error or is missing `google` → STOP. Report BLOCKING failure.**
 Common cause: DrizzleAdapter table name mismatch (adapter expects singular `account`/`user`, DB has plural `accounts`/`users`). Fix: pass custom table schemas to `DrizzleAdapter()` in `packages/admin/src/lib/auth.ts`.
+
+### Phase 0d: Runtime Integrity Signals — BLOCKING (ssh + logs)
+
+Catch runtime corruption/compromise indicators that make QA results invalid.
+
+1. Inspect service runtime/cgroup process tree:
+   ```
+   ssh root@78.47.152.177 "systemctl status webagent-admin webagent-proxy --no-pager"
+   ```
+2. Inspect recent admin logs:
+   ```
+   ssh root@78.47.152.177 "journalctl -u webagent-admin -n 200 --no-pager"
+   ```
+3. **CHECK**: no repeated uncaught exceptions (`uncaughtException`, recurrent `ReferenceError`, recurrent `TypeError`).
+4. **CHECK**: no repeated suspicious file-open errors against unexpected absolute paths (example: `/let`, `/app/let`, `/dev/let`, `/var/let`, `/etc/let`).
+5. **CHECK**: no suspicious non-app child process names in admin/proxy service cgroups.
+
+**If any integrity signal appears → STOP. Mark NOT READY and open a release-blocker issue immediately.**
 
 ### Phase 1: Login & Dashboard — RELEASE-CRITICAL
 
@@ -314,8 +350,26 @@ For release-critical phases, provide:
 2. **Endpoint/status evidence** for infra/auth/deploy checks: endpoint URL, HTTP status, key assertion/result.
 3. **Deployment parity evidence**: merged commit/PR reference plus deployed revision/build evidence from the tested environment.
 4. **Screenshots + one-line interpretation** per critical phase.
+5. **Demo GIF evidence for PRs:** a short GIF generated from captured screenshots and posted in the PR comments.
 
 Missing critical evidence means verdict = **NOT READY**.
+
+### Demo GIF Requirement (when PR exists)
+
+At the end of QA, generate a short demo GIF from the collected screenshots and post it in the PR discussion.
+
+1. Save screenshots in chronological order under `artifacts/mvp/`.
+2. Generate GIF (example):
+   ```
+   ffmpeg -y -framerate 1 -pattern_type glob -i 'artifacts/mvp/*.png' \
+     -vf "fps=8,scale=1280:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" \
+     artifacts/mvp-demo.gif
+   ```
+3. Make the GIF accessible to reviewers (commit to PR branch or upload artifact link).
+4. Add PR comment with:
+   - phase summary (PASS/FAIL)
+   - markdown image/link to GIF
+   - final verdict line
 
 ## Reporting
 
@@ -327,8 +381,10 @@ After running all phases, report a summary table:
 | Phase | Status | Notes |
 |-------|--------|-------|
 | 0. Infrastructure | ✅/❌ | health, openclaw health, widget.js, /v1/models, systemd services |
+| 0a. Admin Route Stability | ✅/❌ | repeated `/login` + `/api/auth/providers` probes all 200 within timeout — **BLOCKING** |
 | 0b. Static Assets | ✅/❌ | CSS 200+size>1KB, JS chunks 200 — **BLOCKING** |
 | 0c. OAuth Providers | ✅/❌ | /api/auth/providers returns google+credentials — **BLOCKING** |
+| 0d. Runtime Integrity | ✅/❌ | no suspicious cgroup processes/log anomalies — **BLOCKING** |
 | 1. Login & Dashboard | ✅/❌ | auth works, dark theme — **RELEASE-CRITICAL** |
 | 2. Native Chat Integration | ✅/❌ | WebSocket auth works, chat loads, dark theme, no login page — **BLOCKING** |
 | 3. Agent Creation | ✅/❌ | site-specific discovery, markdown rendered, embed code — **RELEASE-CRITICAL** |
@@ -358,11 +414,11 @@ After any deploy, verify these common failure modes:
 1. `_next/static/` JS chunks return 404 → standalone static files not copied
 2. `NEXT_PUBLIC_*` env vars not baked into build → rebuild with env inline
 3. Proxy not restarted after code change → `systemctl restart webagent-proxy`
-4. OpenClaw gateway not restarted after config change → `systemctl restart openclaw-gateway`
+4. OpenClaw service not restarted after config change → `systemctl restart openclaw.service`
 5. Widget.js stale → clear browser cache, check `/widget.js` returns fresh content
 6. Google OAuth callback fails → DrizzleAdapter not passed custom table schemas (singular vs plural table names)
 7. Native chat WebSocket auth fails → check `/api/auth/ws-ticket`, `/ws`, browser console, and `journalctl -u webagent-proxy -n 50 --output=cat`
-8. `/create` cannot reach meta-agent → check `openclaw-gateway`, proxy gateway token env, and OpenClaw config registration
+8. `/create` cannot reach meta-agent → check `openclaw.service`, proxy gateway token env, and OpenClaw config registration
 9. tsbuildinfo stale on VM → `find /opt/webagent/packages -name 'tsconfig.tsbuildinfo' -delete` then rebuild
 
 ### Phase 10: Restart-Deployment Gate — RELEASE-CRITICAL (when deploy is in scope)

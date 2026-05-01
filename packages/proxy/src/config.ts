@@ -7,11 +7,17 @@ import {
 dotenv.config();
 
 export interface ProxyConfig {
+  host: string;
   port: number;
   databaseUrl: string;
   openClawGatewayUrl: string;
   openClawGatewayToken: string;
   openClawHooksToken: string;
+}
+
+function getHost(): string {
+  const host = process.env.PROXY_BIND_HOST?.trim();
+  return host || '127.0.0.1';
 }
 
 function getRequiredEnv(name: string): string {
@@ -65,6 +71,7 @@ export function loadConfig(): ProxyConfig {
   const gatewayToken = getGatewayToken();
 
   return {
+    host: getHost(),
     port: parsedPort,
     databaseUrl: getRequiredEnv('DATABASE_URL'),
     openClawGatewayUrl: getGatewayUrl(),

@@ -192,6 +192,10 @@ path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 lines = text.splitlines()
 
+if "location ^~ /api/auth/" in text:
+    # Modern managed nginx template present; do not mutate route ordering.
+    raise SystemExit(0)
+
 api_idx = None
 for i, line in enumerate(lines):
     if re.search(r'^\s*location\s+/api/?\s*\{', line):
