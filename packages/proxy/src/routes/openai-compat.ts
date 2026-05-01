@@ -31,7 +31,7 @@ function parseBearerToken(request: FastifyRequest): string | null {
 }
 
 function isAuthorized(request: FastifyRequest): boolean {
-  const expectedToken = process.env.LIBRECHAT_API_KEY?.trim() || process.env.PROXY_API_TOKEN?.trim() || '';
+  const expectedToken = process.env.PROXY_API_TOKEN?.trim() || process.env.PROXY_CUSTOMER_API_TOKEN?.trim() || '';
   const providedToken = parseBearerToken(request) || '';
   if (!expectedToken || !providedToken) {
     return false;

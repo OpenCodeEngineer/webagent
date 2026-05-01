@@ -75,22 +75,28 @@ certbot --nginx -d "${DOMAIN}" --non-interactive --agree-tos \
   --register-unsafely-without-email --redirect
 
 # ── 10. Systemd services ──────────────────────────────────────────────────────
-for svc in openclaw-gateway webagent-proxy webagent-admin; do
+for svc in webagent-proxy webagent-admin; do
   cp "${SCRIPT_DIR}/systemd/${svc}.service" /etc/systemd/system/
   sed -i "s|\${APP_DIR}|${APP_DIR}|g" "/etc/systemd/system/${svc}.service"
   sed -i "s|\${APP_USER}|${APP_USER}|g" "/etc/systemd/system/${svc}.service"
 done
+
+# OpenClaw-managed base service override (do not replace openclaw.service directly)
+install -d -m 0755 /etc/systemd/system/openclaw.service.d
+cp "${SCRIPT_DIR}/systemd/openclaw.service.d/override.conf" /etc/systemd/system/openclaw.service.d/override.conf
+sed -i "s|\${APP_DIR}|${APP_DIR}|g" /etc/systemd/system/openclaw.service.d/override.conf
+
 systemctl daemon-reload
-systemctl enable --now openclaw-gateway webagent-proxy webagent-admin
+systemctl enable --now openclaw.service webagent-proxy webagent-admin
 
 # ── 11. Firewall ──────────────────────────────────────────────────────────────
 ufw allow OpenSSH
 ufw allow 'Nginx Full'
 ufw --force enable
 
-# ── 12. Sudoers — allow webagent user to restart openclaw-gateway without password ──
+# ── 12. Sudoers — allow webagent user to restart openclaw service without password ──
 # (fallback for when SIGHUP doesn't work)
-echo "${APP_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart openclaw-gateway" > /etc/sudoers.d/webagent-openclaw
+echo "${APP_USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart openclaw.service" > /etc/sudoers.d/webagent-openclaw
 chmod 440 /etc/sudoers.d/webagent-openclaw
 
 echo "✅  Setup complete. Services running on ${DOMAIN}"

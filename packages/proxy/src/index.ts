@@ -8,7 +8,6 @@ import { registerApiRoutes } from './routes/api.js';
 import { registerAdminApiRoutes } from './routes/admin-api.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerOpenAiCompatRoutes } from './routes/openai-compat.js';
-import { registerSsoRoutes } from './routes/sso.js';
 import { registerWidgetRoutes } from './routes/widget.js';
 import { handleConnection } from './ws/handler.js';
 import { reconcileOpenClawConfig } from './openclaw/reconciler.js';
@@ -35,7 +34,6 @@ registerWidgetRoutes(app);
 registerApiRoutes(app);
 registerAdminApiRoutes(app);
 registerOpenAiCompatRoutes(app);
-registerSsoRoutes(app);
 
 app.get(DEFAULT_WS_PATH, { websocket: true }, (socket, request) => {
   const ip = request.ip;

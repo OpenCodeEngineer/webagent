@@ -783,6 +783,7 @@ function getSharedGatewayTransport(gatewayWsUrl: string, token: string): Gateway
 
 export class OpenClawClient {
   private gatewayWsUrl: string;
+  private healthUrl: string;
   private hooksWakeUrl: string;
   private token: string;
   private hooksToken: string;
@@ -794,6 +795,7 @@ export class OpenClawClient {
     const runtimeGatewayToken = readGatewayTokenFromRunningProcess();
     this.gatewayWsUrl = toGatewayWsUrl(gatewayUrl || config.openClawGatewayUrl);
     const gatewayHttpUrl = toGatewayHttpUrl(gatewayUrl || config.openClawGatewayUrl);
+    this.healthUrl = new URL('/health', gatewayHttpUrl).toString();
     this.hooksWakeUrl = new URL('/hooks/wake', gatewayHttpUrl).toString();
     this.tokenCandidates = collectUniqueTokens([
       token,
@@ -955,15 +957,12 @@ export class OpenClawClient {
 
   async ping(): Promise<boolean> {
     try {
-      const res = await fetch(this.hooksWakeUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.hooksToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ text: 'health-check', mode: 'next-heartbeat' }),
-      });
-      return res.ok;
+      const res = await fetch(this.healthUrl);
+      if (!res.ok) {
+        return false;
+      }
+      const body = await res.json() as { ok?: unknown; status?: unknown };
+      return body.ok === true || body.status === 'live' || body.status === 'ok';
     } catch {
       return false;
     }
