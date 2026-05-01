@@ -34,26 +34,23 @@ openclaw gateway status
 - Runtime OpenClaw config path remains:
   - `/opt/webagent/openclaw/config/openclaw.json5`
 
-## Service ownership caveat
+## Service ownership
 
-On this VM, there are currently two service definitions related to OpenClaw:
+OpenClaw gateway runs as a **user-level systemd service** owned by the official OpenClaw installer:
 
-- `openclaw.service` (OpenClaw-managed service under `/etc/systemd/system/openclaw.service`)
-- `openclaw-gateway.service` (repo/infra-managed service)
+- Install: `openclaw gateway install --port 18789 --force` (as `openclaw` user)
+- Service: `openclaw-gateway.service` (user-level, at `~/.config/systemd/user/`)
+- Manage: `sudo -u openclaw bash -lc "export XDG_RUNTIME_DIR=/run/user/$(id -u); systemctl --user {start|stop|restart|status} openclaw-gateway.service"`
+- Prerequisites: `loginctl enable-linger openclaw` (persists user services across logins)
 
-Do not run both as competing sources of truth. Pick one owner for gateway lifecycle. Recommended: prefer OpenClaw's installed service model and keep project docs/scripts aligned to that choice.
-
-## Ops guideline
-
-- If using OpenClaw-managed daemon: operate via OpenClaw install/onboard flow and `openclaw.service`.
-- If using repo-managed gateway unit: ensure deployment/setup scripts, health gates, and docs all target only that unit.
-- Avoid mixed control planes because they can leave a healthy gateway process while one of the units reports inactive/failed.
+Do **not** create a system-level `openclaw.service` — the official installer owns the gateway lifecycle.
 
 ## Patch model (systemd drop-ins)
 
-Use systemd drop-ins for repo-controlled customizations instead of editing `openclaw.service` directly:
+Use systemd drop-ins for repo-controlled customizations (config path, env file):
 
 - Repo source: `infra/systemd/openclaw.service.d/override.conf`
-- Host path: `/etc/systemd/system/openclaw.service.d/override.conf`
+- Host path: `~openclaw/.config/systemd/user/openclaw-gateway.service.d/override.conf`
+- Deploy script applies this automatically.
 
 This keeps OpenClaw's base unit replaceable by OpenClaw updates while preserving our environment wiring.
