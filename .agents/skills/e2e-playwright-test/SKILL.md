@@ -36,7 +36,7 @@ Run these checks IN ORDER using vibebrowser tools. Take a screenshot after each 
 6. **Blocker precedence is absolute:** if any blocker appears anywhere, final verdict MUST be NOT READY.
 7. **READY requires all hard-release-gate criteria and complete evidence.** Any failed/missing gate item or evidence gap = NOT READY.
 
-**Architecture baseline:** Native chat (`/create` + LibreChat iframe) is the source-of-truth flow. Legacy/custom chat fallback is not valid release-gate evidence.
+**Architecture baseline:** Native WebSocket chat (`/create` + `CreateAgentChat`) is the source-of-truth flow. The MVP runs on one VM with systemd services (`webagent-admin`, `webagent-proxy`, `openclaw-gateway`) and workspace-scoped OpenClaw tools. Do not require Docker or LibreChat for MVP readiness.
 
 ### Phase 0: Infrastructure (curl, not browser)
 ```
@@ -44,7 +44,7 @@ curl -sk https://dev.lamoom.com/health → 200 {"status":"ok"}
 curl -sk https://dev.lamoom.com/health/openclaw → 200 {"status":"ok"}  
 curl -sk https://dev.lamoom.com/widget.js → 200, non-empty JS
 curl -sk https://dev.lamoom.com/v1/models → 200 {"data":[...]} (OpenAI-compat endpoint)
-ssh root@78.47.152.177 "docker ps --format '{{.Names}} {{.Status}}' | grep libre" → lamoom-librechat Up
+ssh root@78.47.152.177 "systemctl is-active webagent-admin webagent-proxy openclaw-gateway nginx ssh" → all active
 ```
 
 ### Phase 0b: Static Assets — BLOCKING (curl, not browser)
@@ -99,30 +99,30 @@ Common cause: DrizzleAdapter table name mismatch (adapter expects singular `acco
    - **CHECK**: Agent list visible (may be empty or have existing agents)
    - **SCREENSHOT**: Take screenshot, verify professional dark theme
 
-### Phase 2: Create Agent Chat — Native Chat Integration — BLOCKING
+### Phase 2: Create Agent Chat — Native WebSocket Integration — BLOCKING
 
 1. **Navigate** to `https://dev.lamoom.com/create`
 2. **CHECK**: Page loads with dark background (#171717), header bar shows "Create Agent"
-3. **CHECK**: SSO loading indicator appears briefly ("·" bouncing dots)
-4. **CHECK**: LibreChat iframe loads successfully (no "Unable to open AI Chat" error)
-5. **CHECK**: LibreChat interface visible inside iframe:
+3. **CHECK**: Native chat authenticates via `/api/auth/ws-ticket` and `/ws`
+4. **CHECK**: Chat interface is visible without iframe, external login, or SSO bridge
+5. **CHECK**: Native chat UI is usable:
    - ✅ Dark theme matching the overall app
    - ✅ Chat input field visible at the bottom
-   - ✅ Agent builder header or endpoint label visible
-   - ❌ FAIL if: legacy external login/register page is shown (SSO/session bridge failed)
+   - ✅ Connected/authenticated state, no auth error banner
+   - ❌ FAIL if: external login/register page is shown
    - ❌ FAIL if: White/light background (theme mismatch)
-   - ❌ FAIL if: "Unable to open AI Chat" error (SSO endpoint failed)
-6. **SCREENSHOT**: Full page with LibreChat loaded in iframe
+   - ❌ FAIL if: WebSocket auth/connect error appears
+6. **SCREENSHOT**: Full page with native chat loaded
 
-**If the iframe does not load or shows a login/error page → STOP. Verdict = NOT READY.** The /create page is the core product surface; a broken iframe means zero user value.
+**If native chat does not load or cannot authenticate/connect → STOP. Verdict = NOT READY.** The /create page is the core product surface; a broken chat means zero user value.
 
 ### Phase 3: Agent Creation Conversation (via native chat) — RELEASE-CRITICAL
 
-1. **Click** into the LibreChat message input inside the iframe
+1. **Click** into the native chat message input
 2. **Type** a real website description:
    > "I want to create an AI chat agent for openclaw.vibebrowser.app/console — it's the OpenClaw Console for managing AI agents with tenant management, agent creation, and admin features."
 3. **Press Enter** to send
-4. **CHECK**: Message appears in LibreChat conversation (markdown rendered)
+4. **CHECK**: Message appears in native chat conversation (markdown rendered)
 5. **Wait** for meta-agent response (up to 180s) — native chat shows streaming indicator
 6. **CHECK — CRITICAL (Website Discovery)**: The response MUST prove the meta-agent fetched openclaw.vibebrowser.app/console:
    - Mentions specific details about the product (console, tenant management, admin, agent creation)
@@ -167,7 +167,7 @@ The meta-agent should be able to call OpenClaw Console internal APIs. Verify:
 ### Phase 5: Widget Preview Chat (on agent detail page) — RELEASE-CRITICAL
 
 1. From Phase 4, you should be on an agent detail page
-2. **CHECK**: "Test Your Widget" section visible on the page
+2. **CHECK**: Widget preview/chat section visible on the page
 3. **CHECK**: Widget preview shows "Connected" status (green badge)
 4. **Click** the input field in the widget preview
 5. **Type**: "I am evaluating Vibe Browser. How do I install the extension? Please include the direct install link and docs link."
@@ -284,11 +284,11 @@ Run these checks on every page you visit. Any failure = QA FAIL.
 |---|-------|---------------|
 | 1 | Dark theme everywhere | No white/light backgrounds. bg should be #171717 or similar |
 | 2 | No broken layouts | No overlapping elements, no horizontal scroll |
-| 3 | /create loads LibreChat | Iframe loads, SSO works, no login page shown |
-| 4 | Markdown rendering | LibreChat renders markdown (bold, code, lists) in responses |
+| 3 | /create loads native chat | WebSocket auth works, chat input visible, no login page shown |
+| 4 | Markdown rendering | Native chat renders markdown (bold, code, lists) in responses |
 | 5 | No "student project" feel | No default shadcn cards/borders, professional look |
-| 6 | Loading states | SSO loading dots on /create, typing indicator in chat |
-| 7 | Error handling | If SSO or API fails, error message + retry button shown |
+| 6 | Loading states | Connection/typing indicators visible in chat |
+| 7 | Error handling | If WebSocket or API fails, error message + retry/reconnect behavior is visible |
 | 8 | Professional typography | Consistent font sizes, proper spacing, readable text |
 
 ## Hard Release Gate (Non-Negotiable)
@@ -326,11 +326,11 @@ After running all phases, report a summary table:
 
 | Phase | Status | Notes |
 |-------|--------|-------|
-| 0. Infrastructure | ✅/❌ | health, openclaw health, widget.js, /v1/models, LibreChat docker |
+| 0. Infrastructure | ✅/❌ | health, openclaw health, widget.js, /v1/models, systemd services |
 | 0b. Static Assets | ✅/❌ | CSS 200+size>1KB, JS chunks 200 — **BLOCKING** |
 | 0c. OAuth Providers | ✅/❌ | /api/auth/providers returns google+credentials — **BLOCKING** |
 | 1. Login & Dashboard | ✅/❌ | auth works, dark theme — **RELEASE-CRITICAL** |
-| 2. LibreChat Integration | ✅/❌ | SSO works, iframe loads, dark theme, no login page — **BLOCKING** |
+| 2. Native Chat Integration | ✅/❌ | WebSocket auth works, chat loads, dark theme, no login page — **BLOCKING** |
 | 3. Agent Creation | ✅/❌ | site-specific discovery, markdown rendered, embed code — **RELEASE-CRITICAL** |
 | 4. Agent Verification | ✅/❌ | appears in dashboard |
 | 5. Widget Preview | ✅/❌ | live chat on dashboard works — **RELEASE-CRITICAL** |
@@ -361,11 +361,9 @@ After any deploy, verify these common failure modes:
 4. OpenClaw gateway not restarted after config change → `systemctl restart openclaw-gateway`
 5. Widget.js stale → clear browser cache, check `/widget.js` returns fresh content
 6. Google OAuth callback fails → DrizzleAdapter not passed custom table schemas (singular vs plural table names)
-7. LibreChat not running → `cd /opt/librechat && docker compose up -d`
-8. SSO bridge returns 429 → LibreChat rate limited registration, restart: `docker compose restart api`
-9. SSO bridge "no token" → user not created in LibreChat (email verification issue), check `ALLOW_UNVERIFIED_EMAIL_LOGIN=true` in `/opt/librechat/.env`
-10. LibreChat iframe shows login page → SSO flow failed, check proxy logs: `journalctl -u webagent-proxy -n 20 --output=cat | grep sso`
-11. tsbuildinfo stale on VM → `find /opt/webagent/packages -name 'tsconfig.tsbuildinfo' -delete` then rebuild
+7. Native chat WebSocket auth fails → check `/api/auth/ws-ticket`, `/ws`, browser console, and `journalctl -u webagent-proxy -n 50 --output=cat`
+8. `/create` cannot reach meta-agent → check `openclaw-gateway`, proxy gateway token env, and OpenClaw config registration
+9. tsbuildinfo stale on VM → `find /opt/webagent/packages -name 'tsconfig.tsbuildinfo' -delete` then rebuild
 
 ### Phase 10: Restart-Deployment Gate — RELEASE-CRITICAL (when deploy is in scope)
 
