@@ -37,7 +37,7 @@ Run these checks IN ORDER using vibebrowser tools. Take a screenshot after each 
 7. **READY requires all hard-release-gate criteria and complete evidence.** Any failed/missing gate item or evidence gap = NOT READY.
 8. **Stability-sensitive checks require repeated probes.** A single successful call is insufficient; any intermittent 5xx/timeout in probe loops is a FAIL.
 
-**Architecture baseline:** Native WebSocket chat (`/create` + `CreateAgentChat`) is the source-of-truth flow. The MVP runs on one VM with systemd services (`webagent-admin`, `webagent-proxy`, `openclaw.service`) and workspace-scoped OpenClaw tools. Do not require Docker or LibreChat for MVP readiness.
+**Architecture baseline:** Native WebSocket chat (`/create` + `CreateAgentChat`) is the source-of-truth flow. The MVP runs on one VM with systemd services (`webagent-admin`, `webagent-proxy`, `openclaw-gateway`) and workspace-scoped OpenClaw tools. Do not require Docker or LibreChat for MVP readiness.
 
 ### Phase 0: Infrastructure (curl, not browser)
 ```
@@ -45,7 +45,7 @@ curl -sk https://dev.lamoom.com/health → 200 {"status":"ok"}
 curl -sk https://dev.lamoom.com/health/openclaw → 200 {"status":"ok"}  
 curl -sk https://dev.lamoom.com/widget.js → 200, non-empty JS
 curl -sk https://dev.lamoom.com/v1/models → 200 {"data":[...]} (OpenAI-compat endpoint)
-ssh root@78.47.152.177 "systemctl is-active webagent-admin webagent-proxy openclaw.service nginx ssh" → all active
+ssh root@78.47.152.177 "systemctl is-active webagent-admin webagent-proxy openclaw-gateway nginx ssh" → all active
 ```
 
 ### Phase 0a: Admin Route Stability — BLOCKING (curl, not browser)
@@ -418,7 +418,7 @@ After any deploy, verify these common failure modes:
 5. Widget.js stale → clear browser cache, check `/widget.js` returns fresh content
 6. Google OAuth callback fails → DrizzleAdapter not passed custom table schemas (singular vs plural table names)
 7. Native chat WebSocket auth fails → check `/api/auth/ws-ticket`, `/ws`, browser console, and `journalctl -u webagent-proxy -n 50 --output=cat`
-8. `/create` cannot reach meta-agent → check `openclaw.service`, proxy gateway token env, and OpenClaw config registration
+8. `/create` cannot reach meta-agent → check `openclaw-gateway`, proxy gateway token env, and OpenClaw config registration
 9. tsbuildinfo stale on VM → `find /opt/webagent/packages -name 'tsconfig.tsbuildinfo' -delete` then rebuild
 
 ### Phase 10: Restart-Deployment Gate — RELEASE-CRITICAL (when deploy is in scope)
