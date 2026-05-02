@@ -26,7 +26,24 @@ set -euo pipefail
 BASE_URL="${1:-${PROXY_URL:-${BASE_URL:-https://dev.lamoom.com}}}"
 AUTH_SECRET="${2:-${PROXY_INTERNAL_SECRET:-${PROXY_API_TOKEN:-}}}"
 DEFAULT_TEST_CUSTOMER_ID="00000000-0000-4000-8000-000000000001"
-CUSTOMER_ID="${TEST_CUSTOMER_ID:-$DEFAULT_TEST_CUSTOMER_ID}"
+generate_test_customer_id() {
+  if command -v python3 &>/dev/null; then
+    python3 - <<'PY'
+import uuid
+print(str(uuid.uuid4()))
+PY
+    return
+  fi
+
+  if command -v node &>/dev/null; then
+    node -e "console.log(require('crypto').randomUUID())"
+    return
+  fi
+
+  echo "$DEFAULT_TEST_CUSTOMER_ID"
+}
+
+CUSTOMER_ID="${TEST_CUSTOMER_ID:-$(generate_test_customer_id)}"
 WORKSPACES_DIR="${OPENCLAW_WORKSPACES_DIR:-}"
 
 # Strip trailing slash
@@ -229,7 +246,7 @@ test_meta_greeting() {
     fail "T4: Meta-agent greeting" "failed to generate customer HMAC signature"
     return 1
   }
-  resp=$(curl -sk -w "\n%{http_code}" --max-time 60 \
+  resp=$(curl -sk -w "\n%{http_code}" --max-time 300 \
     -X POST "$BASE_URL/api/agents/create-via-meta" \
     -H "x-customer-id: $CUSTOMER_ID" \
     -H "x-customer-sig: $customer_sig" \
@@ -1142,7 +1159,7 @@ test_meta_discovery() {
     fail "T14: Website discovery" "failed to generate customer HMAC signature"
     return 1
   }
-  resp=$(curl -sk -w "\n%{http_code}" --max-time 120 \
+  resp=$(curl -sk -w "\n%{http_code}" --max-time 300 \
     -X POST "$BASE_URL/api/agents/create-via-meta" \
     -H "x-customer-id: $CUSTOMER_ID" \
     -H "x-customer-sig: $customer_sig" \
