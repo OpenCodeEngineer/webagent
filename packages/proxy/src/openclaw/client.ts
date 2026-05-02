@@ -851,7 +851,7 @@ export class OpenClawClient {
     timeoutSeconds?: number;
     onDelta?: (delta: string) => void;
   }): Promise<AgentResponse> {
-    const timeoutMs = (opts.timeoutSeconds ?? 120) * 1000;
+    const timeoutMs = (opts.timeoutSeconds ?? 300) * 1000;
     let lastError = '';
 
     for (let index = 0; index < this.tokenCandidates.length; index += 1) {
@@ -887,6 +887,7 @@ export class OpenClawClient {
             agentId: opts.agentId,
             sessionKey: opts.sessionKey,
             idempotencyKey: runId,
+            timeout: opts.timeoutSeconds ?? 300,
           },
           { expectFinal: true, timeoutMs },
         );

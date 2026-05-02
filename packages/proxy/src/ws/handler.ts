@@ -605,13 +605,14 @@ export function handleConnection(
             state.userContext = normalizeSessionAuthContext(serverAuthCtx as Record<string, unknown>);
           }
 
-          // Client context can add NON-auth fields only (safety)
+          // Client context: allow auth passthrough only when widgetConfig.allowClientAuth is true
+          const allowClientAuth = !!(tokenData.widgetConfig as Record<string, unknown> | null)?.allowClientAuth;
           const rawContext = msg.context;
           if (rawContext && typeof rawContext === 'object' && !Array.isArray(rawContext)) {
             const clientCtx = rawContext as Record<string, unknown>;
             const AUTH_KEYS = new Set(['Authorization', 'Bearer', 'apiToken', 'token', 'headers']);
             for (const [k, v] of Object.entries(clientCtx)) {
-              if (!AUTH_KEYS.has(k)) {
+              if (allowClientAuth || !AUTH_KEYS.has(k)) {
                 state.userContext[k] = v;
               }
             }
