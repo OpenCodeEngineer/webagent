@@ -15,6 +15,8 @@ function resolveWidgetDistPath(): string | null {
     resolve(process.cwd(), 'packages/proxy/dist/widget.js'),
     resolve(import.meta.dirname, '../../dist/widget.js'),
     resolve(import.meta.dirname, '../widget.js'),
+    resolve(process.cwd(), 'packages/proxy/dist/widget/widget.js'),
+    resolve(import.meta.dirname, '../widget/widget.js'),
   ];
 
   for (const path of paths) {
