@@ -89,6 +89,57 @@ export default async function AgentDetailPage({ params }: Props) {
             </CardContent>
           </Card>
 
+          {/* Passing User Data */}
+          {agent.embedToken && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Passing End-User Data</CardTitle>
+                <CardDescription>
+                  Forward your logged-in user&apos;s bearer token so the agent can call
+                  authenticated APIs on their behalf.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground mb-2">
+                    Option 1 &mdash; Inline token (server-rendered)
+                  </p>
+                  <pre className="rounded-lg bg-zinc-900 border border-zinc-800 p-4 overflow-x-auto">
+                    <code className="text-emerald-400 font-mono text-xs whitespace-pre">{`<script
+  src="https://${WIDGET_BASE_URL.replace(/^https?:\/\//i, "").replace(/\/+$/, "")}/widget.js"
+  data-agent-token="${agent.embedToken}"
+  data-user-token="<%= currentUser.jwt %>"
+  async
+></script>`}</code>
+                  </pre>
+                  <p className="text-xs text-muted-foreground mt-1.5">
+                    Replace <code className="rounded bg-zinc-800 px-1 py-0.5 text-zinc-300">&lt;%= currentUser.jwt %&gt;</code> with
+                    your template language&apos;s expression for the signed-in user&apos;s JWT or API token.
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground mb-2">
+                    Option 2 &mdash; Read from localStorage
+                  </p>
+                  <pre className="rounded-lg bg-zinc-900 border border-zinc-800 p-4 overflow-x-auto">
+                    <code className="text-emerald-400 font-mono text-xs whitespace-pre">{`<script
+  src="https://${WIDGET_BASE_URL.replace(/^https?:\/\//i, "").replace(/\/+$/, "")}/widget.js"
+  data-agent-token="${agent.embedToken}"
+  data-user-token-key="auth_token"
+  async
+></script>`}</code>
+                  </pre>
+                  <p className="text-xs text-muted-foreground mt-1.5">
+                    The widget reads <code className="rounded bg-zinc-800 px-1 py-0.5 text-zinc-300">localStorage.getItem(&quot;auth_token&quot;)</code> at
+                    init and sends it as <code className="rounded bg-zinc-800 px-1 py-0.5 text-zinc-300">Authorization: Bearer &lt;token&gt;</code> with
+                    every agent request.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* API Configuration */}
           {agent.embedToken && (
             <Card>
