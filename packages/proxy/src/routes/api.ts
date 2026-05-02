@@ -216,6 +216,22 @@ async function insertAuditLog(
   await app.db.insert(auditLog).values({ customerId, action, details: details ?? null });
 }
 
+function escapeHtmlAttribute(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+export function buildWidgetEmbedCode(domain: string, embedToken: string, userTokenKey?: string): string {
+  const normalizedDomain = domain.replace(/^https?:\/\//i, '');
+  const tokenKeyAttr = userTokenKey?.trim()
+    ? ` data-user-token-key="${escapeHtmlAttribute(userTokenKey.trim())}"`
+    : '';
+  return `<script src="https://${normalizedDomain}/widget.js" data-agent-token="${embedToken}"${tokenKeyAttr} async></script>`;
+}
+
 /**
  * Resolve the OpenClaw gateway config path (shared with reconciler).
  *
@@ -657,12 +673,7 @@ export async function detectAgentCreation(
     slug,
   });
 
-  const normalizedDomain = domain.replace(/^https?:\/\//i, '');
-  const tokenKeyAttr = config.userTokenKey
-    ? ` data-user-token-key="${config.userTokenKey}"`
-    : '';
-  const embedCode
-    = `<script src="https://${normalizedDomain}/widget.js" data-agent-token="${embedToken}"${tokenKeyAttr} async></script>`;
+  const embedCode = buildWidgetEmbedCode(domain, embedToken, config.userTokenKey);
 
   return {
     status: 'created',
