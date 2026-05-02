@@ -244,7 +244,7 @@ function normalizeSessionAuthContext(rawContext: Record<string, unknown>): Recor
   return normalized;
 }
 
-function buildWidgetMessageWithSessionPolicy(userContext: Record<string, unknown>, customerContent: string): string {
+export function buildWidgetMessageWithSessionPolicy(userContext: Record<string, unknown>, customerContent: string): string {
   const credentialPolicy
     = 'Credential source: server-side session auth context provided by the widget/integration backend.\n'
     + 'Never ask end users to fetch or copy JWTs/tokens from DevTools, localStorage, sessionStorage, cookies, or network tabs.\n'
