@@ -743,8 +743,8 @@ pnpm --filter @webagent/admin dev     # Dev admin Next.js
 pnpm --filter @webagent/widget build  # Build widget IIFE bundle
 
 # Database
-pnpm --filter @webagent/proxy drizzle-kit generate   # Generate migration
-pnpm --filter @webagent/proxy drizzle-kit push        # Push schema to Neon
+pnpm --filter @webagent/proxy db:generate   # Generate migration
+pnpm --filter @webagent/proxy db:migrate    # Apply checked-in migrations
 
 # OpenClaw (must be installed separately on the VM)
 openclaw start                         # Start OpenClaw gateway
@@ -1012,18 +1012,21 @@ The widget uses a hand-rolled tokenizer that converts Markdown to HTML strings:
 - User messages use `textContent` (no interpretation of any formatting)
 - Supported: bold, italic, inline code, fenced code blocks, ordered/unordered lists, links, headings
 
-**Safety model:** links have their `href` stripped and the `target="_blank" rel="noopener noreferrer"`
-attributes set. No external HTML or script injection is possible because user messages always use
-`textContent`, and the assistant Markdown parser emits only the known node types above.
+**Safety model:** raw input is HTML-escaped before tokenization. Assistant links keep only safe
+`http:`, `https:`, and `mailto:` hrefs and add `target="_blank" rel="noopener noreferrer"`;
+unsupported link schemes render as text. User messages always use `textContent`, and the assistant
+Markdown parser emits only the known node types above.
 
 ### Admin chat (`packages/admin/src/lib/markdown.tsx`)
 
-The admin uses a custom parser that returns **React nodes** (not HTML strings), so there is no
-`dangerouslySetInnerHTML` or `innerHTML` path:
-- `renderMarkdownToReactNodes(input)` → `ReactNode[]` rendered by React's reconciler
-- `isSafeHref(href)` validates all link hrefs; only `http:`, `https:`, `mailto:`, `tel:`,
-  and relative paths are allowed — everything else is rendered as plain text.
-- Supported: paragraphs, ordered/unordered lists, inline code, fenced code blocks, links.
+The admin uses `react-markdown` with `remark-gfm` and returns **React nodes** (not HTML strings),
+so there is no `dangerouslySetInnerHTML` or `innerHTML` path:
+- `renderMarkdownToReactNodes(input)` → `<ReactMarkdown ...>` rendered by React's reconciler
+- `skipHtml` is enabled so raw HTML in message content is ignored rather than executed.
+- Links are rendered by the ReactMarkdown anchor component with `target="_blank"` and
+  `rel="noopener noreferrer"`.
+- Supported: GitHub-flavored Markdown via `remark-gfm`, including paragraphs, headings,
+  ordered/unordered lists, inline/fenced code, links, blockquotes, and tables.
 
 ---
 
@@ -1061,10 +1064,10 @@ performance index on `(session_id, created_at)`.
 Run after each deploy that includes these migrations:
 
 ```bash
-pnpm --filter @webagent/proxy drizzle-kit push
+pnpm --filter @webagent/proxy db:migrate
 ```
 
-or using the deploy script which runs `db:migrate` automatically.
+or use the deploy script, which runs `db:migrate` automatically after build/static sync.
 
 ### No data loss on rollback
 
@@ -1114,7 +1117,7 @@ DROP TABLE IF EXISTS meta_agent_sessions;
 - ✅ Admin meta-session key is stable (`agent:meta:admin-<customerId>`); embed code survives page refresh via history retrieval (issue #164)
 - ✅ Generation pipeline: `agent-config.json` `skills` array propagated to gateway config on registration; specialized templates selected at Step 0 (issue #164)
 - ✅ Streaming: WS admin and widget flows deliver token-by-token via `onDelta`; `done:true` sent after last delta (issue #164)
-- ✅ Markdown: widget uses `innerHTML`-based renderer (assistant only); admin chat uses React-node renderer with `isSafeHref` — no raw HTML execution in either path (issue #164)
+- ✅ Markdown: widget uses `innerHTML`-based renderer (assistant only, escaped input and safe link schemes); admin chat uses `react-markdown` with `skipHtml` — no raw HTML execution in either path (issue #164)
 - ✅ Agent detail page: `WidgetPreview` loads real `<script>` embed in an iframe instead of a custom WS simulator (issue #164)
 
 ### 🔴 BLOCKING — Must Fix Before Any Production Launch
