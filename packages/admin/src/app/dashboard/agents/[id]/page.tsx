@@ -5,12 +5,12 @@ import { normalizeCustomerIdToUuid } from "@/lib/customer-id";
 import { AgentDetailActions } from "@/components/agent-detail-actions";
 import { AgentEditForm } from "@/components/agent-edit-form";
 import { AgentAuthContext } from "@/components/agent-auth-context";
-import { WidgetPreview } from "@/components/widget-preview";
+import { TestAgentChat } from "@/components/test-agent-chat";
 import { CreateAgentChat } from "@/components/create-agent-chat";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { MessageCircle } from "lucide-react";
+
 import { cn } from "@/lib/utils";
 
 const WIDGET_BASE_URL = process.env.NEXT_PUBLIC_APP_URL || process.env.AUTH_URL || "https://dev.lamoom.com";
@@ -195,19 +195,16 @@ export default async function AgentDetailPage({ params }: Props) {
         </TabsContent>
 
         <TabsContent value="test-chat">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <MessageCircle className="h-4 w-4 text-muted-foreground" />
-                <CardTitle>Test chat</CardTitle>
-              </div>
-              <CardDescription>Test the final embedded agent exactly as site visitors will see it.</CardDescription>
-            </CardHeader>
-            <CardContent>
+          <Card className="overflow-hidden">
+            <CardContent className="p-0">
               {agent.embedToken ? (
-                <WidgetPreview agentToken={agent.embedToken} widgetBaseUrl={WIDGET_BASE_URL} />
+                <div className="h-[600px] rounded-b-xl overflow-hidden">
+                  <TestAgentChat agentToken={agent.embedToken} widgetBaseUrl={WIDGET_BASE_URL} />
+                </div>
               ) : (
-                <p className="text-sm text-muted-foreground">No embed token is available for this agent yet.</p>
+                <div className="p-6">
+                  <p className="text-sm text-muted-foreground">No embed token is available for this agent yet.</p>
+                </div>
               )}
             </CardContent>
           </Card>
