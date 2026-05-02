@@ -19,6 +19,15 @@ interface TestAgentChatProps {
   className?: string;
 }
 
+function createSessionUserId(): string {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (uuid) {
+    return `test-${uuid.slice(0, 8)}`;
+  }
+
+  return `test-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export function TestAgentChat({ agentToken, widgetBaseUrl, className }: TestAgentChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -33,7 +42,7 @@ export function TestAgentChat({ agentToken, widgetBaseUrl, className }: TestAgen
   const mountedRef = useRef(true);
   const shouldReconnectRef = useRef(true);
   const streamingIdRef = useRef<string | null>(null);
-  const userIdRef = useRef(`test-${crypto.randomUUID().slice(0, 8)}`);
+  const userIdRef = useRef(createSessionUserId());
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -214,7 +223,7 @@ export function TestAgentChat({ agentToken, widgetBaseUrl, className }: TestAgen
   // --- Reset conversation ---
   const onReset = useCallback(() => {
     // Generate new user ID to get a fresh session
-    userIdRef.current = `test-${crypto.randomUUID().slice(0, 8)}`;
+    userIdRef.current = createSessionUserId();
     setMessages([]);
     setLoading(false);
     streamingIdRef.current = null;
