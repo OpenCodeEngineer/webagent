@@ -887,6 +887,7 @@ export class OpenClawClient {
             agentId: opts.agentId,
             sessionKey: opts.sessionKey,
             idempotencyKey: runId,
+            timeout: opts.timeoutSeconds ?? 300,
           },
           { expectFinal: true, timeoutMs },
         );
