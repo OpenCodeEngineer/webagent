@@ -184,7 +184,7 @@ else
   echo "⚠️  No .env file at ${APP_DIR}/.env — skipping DB migrations"
 fi
 
-NGINX_TEMPLATE="${REPO_ROOT}/infra/nginx/webagent.conf"
+NGINX_TEMPLATE="${APP_DIR}/infra/nginx/webagent.conf"
 DOMAIN="${DOMAIN:-dev.lamoom.com}"
 if [[ -f "${NGINX_TEMPLATE}" ]]; then
   echo "→ Installing nginx config from repo template..."
@@ -193,6 +193,46 @@ if [[ -f "${NGINX_TEMPLATE}" ]]; then
   systemctl reload nginx
 else
   echo "⚠️  Missing ${NGINX_TEMPLATE} — skipping nginx config"
+fi
+
+# ── DNS (BIND9) ──────────────────────────────────────────────────────────────
+BIND_DIR="${APP_DIR}/infra/bind"
+BIND_ZONE_DIR="${BIND_DIR}/zones"
+if [[ -d "${BIND_ZONE_DIR}" ]]; then
+  echo "→ Ensuring BIND9 is installed and running..."
+  if ! dpkg -s bind9 &>/dev/null; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::='--force-confold' bind9
+  fi
+  # Install BIND config from repo (never overwrite certbot-key.conf — it's a server secret)
+  install -d -m 0775 -g bind /etc/bind/zones
+  [[ -f "${BIND_DIR}/named.conf.local" ]] && cp "${BIND_DIR}/named.conf.local" /etc/bind/named.conf.local
+  [[ -f "${BIND_DIR}/named.conf.options" ]] && cp "${BIND_DIR}/named.conf.options" /etc/bind/named.conf.options
+  # Sync zone files from repo
+  cp "${BIND_ZONE_DIR}"/*.db /etc/bind/zones/ 2>/dev/null || true
+  # Fix permissions
+  chown -R bind:bind /var/cache/bind
+  chown -R root:bind /etc/bind/zones/
+  find /etc/bind/zones/ -type f -exec chmod 664 {} +
+  for f in /etc/bind/named.conf.options /etc/bind/named.conf.local /etc/bind/certbot-key.conf; do
+    [[ -f "$f" ]] && chown root:bind "$f" && chmod 640 "$f"
+  done
+  if ! systemctl is-active --quiet named; then
+    systemctl enable named
+    systemctl start named
+  else
+    rndc reload 2>/dev/null || systemctl reload named || true
+  fi
+  # Verify DNS is answering
+  if command -v dig &>/dev/null; then
+    DNS_RESULT="$(dig +short "${DOMAIN}" @127.0.0.1 2>/dev/null || true)"
+    if [[ -z "${DNS_RESULT}" ]]; then
+      echo "⚠️  BIND9 is running but not answering for ${DOMAIN}"
+    else
+      echo "✓ BIND9 resolves ${DOMAIN} → ${DNS_RESULT}"
+    fi
+  fi
+else
+  echo "⚠️  No BIND zone files at ${BIND_ZONE_DIR} — skipping DNS setup"
 fi
 
 echo "→ Restarting services..."

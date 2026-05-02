@@ -1,0 +1,17 @@
+$TTL    300
+@       IN      SOA     ns1.dev.lamoom.com. admin.dev.lamoom.com. (
+                        2026042401  ; Serial (YYYYMMDDNN)
+                        3600        ; Refresh
+                        600         ; Retry
+                        86400       ; Expire
+                        300 )       ; Negative cache TTL
+
+; Nameserver record
+@       IN      NS      ns1.dev.lamoom.com.
+
+; Glue record
+ns1     IN      A       78.47.152.177
+
+; Main records
+@       IN      A       78.47.152.177
+*       IN      A       78.47.152.177
