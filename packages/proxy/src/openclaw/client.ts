@@ -851,7 +851,7 @@ export class OpenClawClient {
     timeoutSeconds?: number;
     onDelta?: (delta: string) => void;
   }): Promise<AgentResponse> {
-    const timeoutMs = (opts.timeoutSeconds ?? 120) * 1000;
+    const timeoutMs = (opts.timeoutSeconds ?? 300) * 1000;
     let lastError = '';
 
     for (let index = 0; index < this.tokenCandidates.length; index += 1) {

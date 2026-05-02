@@ -3,6 +3,7 @@
 This project runs OpenClaw on a single VM. Use OpenClaw's official installer guidance as the source of truth:
 
 - Install docs: `https://docs.openclaw.ai/install`
+- Source code: `https://github.com/openclaw/openclaw`
 
 ## Official install options (from OpenClaw docs)
 
@@ -16,8 +17,6 @@ This project runs OpenClaw on a single VM. Use OpenClaw's official installer gui
 
 ## Verify install
 
-Run:
-
 ```bash
 openclaw --version
 openclaw doctor
@@ -28,29 +27,62 @@ openclaw gateway status
 
 - Do not assume Docker/LibreChat for MVP runtime validation.
 - Current architecture is single-VM systemd services:
-  - `webagent-admin`
-  - `webagent-proxy`
-  - OpenClaw gateway service
-- Runtime OpenClaw config path remains:
-  - `/opt/webagent/openclaw/config/openclaw.json5`
+  - `webagent-admin` (system-level)
+  - `webagent-proxy` (system-level)
+  - OpenClaw gateway (user-level, managed by OpenClaw CLI)
 
-## Service ownership
+## Gateway service ownership
 
-OpenClaw gateway runs as a **user-level systemd service** owned by the official OpenClaw installer:
+The OpenClaw CLI **owns the gateway systemd unit entirely**. Do not create or patch it manually.
 
-- Install: `openclaw gateway install --port 18789 --force` (as `openclaw` user)
-- Service: `openclaw-gateway.service` (user-level, at `~/.config/systemd/user/`)
-- Manage: `sudo -u openclaw bash -lc "export XDG_RUNTIME_DIR=/run/user/$(id -u); systemctl --user {start|stop|restart|status} openclaw-gateway.service"`
-- Prerequisites: `loginctl enable-linger openclaw` (persists user services across logins)
+### How `openclaw gateway install` works
 
-Do **not** create a system-level `openclaw.service` — the official installer owns the gateway lifecycle.
+Source: `src/daemon/systemd-unit.ts` and `src/daemon/systemd.ts` in the OpenClaw repo.
 
-## Patch model (systemd drop-ins)
+1. **Writes a user-level systemd unit** to `~/.config/systemd/user/<service-name>.service`
+2. **Writes an env file** to `<stateDir>/gateway.systemd.env` (mode 0600) from `~/.openclaw/.env`
+3. **If the unit already exists**: backs up to `<unit>.bak`, then **overwrites** with fresh content
+4. **After writing**: runs `systemctl --user daemon-reload`, `enable`, and `restart`
 
-Use systemd drop-ins for repo-controlled customizations (config path, env file):
+The generated unit uses `Type=simple`, `Restart=always`, `RestartSec=5`, `KillMode=control-group`,
+`StartLimitBurst=5`, `StartLimitIntervalSec=60`. ExecStart points to the OpenClaw runtime node process.
 
-- Repo source: `infra/systemd/openclaw.service.d/override.conf`
-- Host path: `~openclaw/.config/systemd/user/openclaw-gateway.service.d/override.conf`
-- Deploy script applies this automatically.
+### Do NOT use systemd drop-ins or overrides
 
-This keeps OpenClaw's base unit replaceable by OpenClaw updates while preserving our environment wiring.
+The OpenClaw CLI regenerates the unit file on `gateway install`. Any drop-in overrides
+(`openclaw-gateway.service.d/override.conf`) risk conflicting with the generated unit and
+are not preserved across OpenClaw upgrades. Instead:
+
+- **Environment variables**: Add them to `~/.openclaw/.env` — the CLI reads this and writes
+  them into `gateway.systemd.env` which the unit loads via `EnvironmentFile=`.
+- **Config path**: Set `OPENCLAW_CONFIG_PATH` in `~/.openclaw/.env`.
+- **App env vars**: Source the app `.env` from `~/.openclaw/.env` or merge needed vars into it.
+
+### Managing the gateway
+
+```bash
+# Install/reinstall (as openclaw user):
+openclaw gateway install --port 18789
+
+# Status:
+openclaw gateway status
+
+# Manual systemctl (when needed):
+sudo -u openclaw bash -lc \
+  "export XDG_RUNTIME_DIR=/run/user/\$(id -u); \
+   systemctl --user {start|stop|restart|status} openclaw-gateway.service"
+```
+
+Prerequisites: `loginctl enable-linger openclaw` (persists user services across logins).
+
+### OpenClaw config
+
+Runtime config lives at the path set by `OPENCLAW_CONFIG_PATH`. For this project:
+`/opt/webagent/openclaw/config/openclaw.json5`.
+
+The OpenClaw state directory is `~/.openclaw/` which contains:
+- `openclaw.json` — runtime state/config managed by OpenClaw
+- `.env` — environment vars that get written into `gateway.systemd.env`
+- `gateway.systemd.env` — generated env file loaded by the systemd unit
+- `agents/` — agent data
+- `workspace/` — agent workspaces
