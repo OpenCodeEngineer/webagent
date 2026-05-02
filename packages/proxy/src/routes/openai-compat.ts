@@ -31,7 +31,7 @@ function parseBearerToken(request: FastifyRequest): string | null {
 }
 
 function isAuthorized(request: FastifyRequest): boolean {
-  const expectedToken = process.env.LIBRECHAT_API_KEY?.trim() || process.env.PROXY_API_TOKEN?.trim() || '';
+  const expectedToken = process.env.PROXY_API_TOKEN?.trim() || process.env.PROXY_CUSTOMER_API_TOKEN?.trim() || '';
   const providedToken = parseBearerToken(request) || '';
   if (!expectedToken || !providedToken) {
     return false;
@@ -184,10 +184,20 @@ export function registerOpenAiCompatRoutes(app: FastifyInstance) {
         timeoutSeconds: 240,
       });
 
-      const finalResponse = response.success ? (response.response ?? '') : '';
-      if (response.success) {
-        await detectAgentCreation(finalResponse, customerId, app, domain);
+      if (!response.success) {
+        sse.write(sseChunk({
+          error: {
+            message: response.error || 'Upstream agent error',
+            type: 'server_error',
+          },
+        }));
+        sse.write('data: [DONE]\n\n');
+        sse.end();
+        return;
       }
+
+      const finalResponse = response.success ? (response.response ?? '') : '';
+      await detectAgentCreation(finalResponse, customerId, app, domain);
 
       if (finalResponse) {
         sse.write(sseChunk({

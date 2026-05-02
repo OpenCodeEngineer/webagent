@@ -3,6 +3,7 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { Bot, SendHorizontal, Copy, Check, Paperclip, X } from "lucide-react";
 import { type MetaAgentMessage } from "@/lib/api";
+import { renderMarkdownToReactNodes } from "@/lib/markdown";
 import { cn } from "@/lib/utils";
 
 const EMBED_CODE_RE = /<script[^>]*data-agent-token[^>]*><\/script>/;
@@ -14,6 +15,7 @@ const MAX_TOTAL_SIZE_BYTES = 8 * 1024 * 1024;
 
 interface CreateAgentChatProps {
   customerId?: string;
+  className?: string;
 }
 
 function formatFileSize(bytes: number): string {
@@ -43,7 +45,7 @@ function readFileAsBase64(file: File): Promise<string> {
   });
 }
 
-export function CreateAgentChat({ customerId }: CreateAgentChatProps) {
+export function CreateAgentChat({ customerId, className }: CreateAgentChatProps) {
   const [messages, setMessages] = useState<MetaAgentMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -61,6 +63,7 @@ export function CreateAgentChat({ customerId }: CreateAgentChatProps) {
   const mountedRef = useRef(true);
   const shouldReconnectRef = useRef(true);
   const authFailureNotifiedRef = useRef(false);
+  const streamingIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -130,6 +133,25 @@ export function CreateAgentChat({ customerId }: CreateAgentChatProps) {
           return;
         }
 
+        if (data.type === "history") {
+          const rawMessages = Array.isArray(data.messages) ? data.messages : [];
+          const parsedMessages: MetaAgentMessage[] = rawMessages
+            .map((message) => {
+              if (!message || typeof message !== "object") return null;
+              const value = message as { role?: unknown; content?: unknown };
+              if ((value.role !== "user" && value.role !== "assistant") || typeof value.content !== "string") {
+                return null;
+              }
+              return { role: value.role, content: value.content };
+            })
+            .filter((message): message is MetaAgentMessage => !!message);
+          setMessages(parsedMessages);
+          if (typeof data.embedCode === "string" && data.embedCode.trim()) {
+            setEmbedCode(data.embedCode.trim());
+          }
+          return;
+        }
+
         if (data.type === "auth_error") {
           const reason = typeof data.reason === "string" && data.reason.trim().length > 0
             ? data.reason
@@ -151,19 +173,57 @@ export function CreateAgentChat({ customerId }: CreateAgentChatProps) {
         if (data.type === "error") {
           const errMsg = typeof data.message === "string" ? data.message : "An error occurred";
           setMessages((prev) => [...prev, { role: "assistant", content: `⚠️ ${errMsg}` }]);
+          streamingIdRef.current = null;
           setLoading(false);
           return;
         }
 
-        if (data.type === "message" && data.done === true) {
+        if (data.type === "message" && typeof data.done === "boolean") {
           const content = typeof data.content === "string" ? data.content : "";
-          if (content) {
-            setMessages((prev) => [...prev, { role: "assistant", content }]);
-            const embedMatch = content.match(EMBED_CODE_RE)?.[0];
-            if (embedMatch) setEmbedCode(embedMatch);
+          if (!data.done) {
+            // Streaming chunk — append to in-progress assistant message
+            if (!streamingIdRef.current) {
+              streamingIdRef.current = `s-${Date.now()}`;
+              setMessages((prev) => [...prev, { role: "assistant", content }]);
+            } else {
+              setMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (last?.role === "assistant") {
+                  return [...prev.slice(0, -1), { ...last, content: last.content + content }];
+                }
+                return prev;
+              });
+            }
+          } else {
+            // Done — finalize
+            if (streamingIdRef.current) {
+              streamingIdRef.current = null;
+              if (content) {
+                // Append any trailing content (e.g. embed code suffix)
+                setMessages((prev) => {
+                  const last = prev[prev.length - 1];
+                  if (last?.role === "assistant") {
+                    return [...prev.slice(0, -1), { ...last, content: last.content + content }];
+                  }
+                  return [...prev, { role: "assistant", content }];
+                });
+              }
+            } else if (content) {
+              // Non-streamed fallback: full response in one message
+              setMessages((prev) => [...prev, { role: "assistant", content }]);
+            }
+            // Check for embed code in the final assembled message
+            setMessages((prev) => {
+              const last = prev[prev.length - 1];
+              if (last?.role === "assistant") {
+                const embedMatch = last.content.match(EMBED_CODE_RE)?.[0];
+                if (embedMatch) setEmbedCode(embedMatch);
+              }
+              return prev;
+            });
+            setLoading(false);
+            textareaRef.current?.focus();
           }
-          setLoading(false);
-          textareaRef.current?.focus();
         }
       });
 
@@ -305,7 +365,7 @@ export function CreateAgentChat({ customerId }: CreateAgentChatProps) {
   const hasMessages = messages.length > 0 || loading;
 
   return (
-    <div className="flex h-full flex-col bg-[#171717]">
+    <div className={cn("flex h-full flex-col bg-[#171717]", className)}>
       {/* Messages area */}
       <div className="relative flex-1 overflow-y-auto">
         {!hasMessages && (
@@ -328,8 +388,8 @@ export function CreateAgentChat({ customerId }: CreateAgentChatProps) {
               const isUser = message.role === "user";
               return isUser ? (
                 <div key={`${message.role}-${index}`} className="flex justify-end py-2">
-                  <div className="max-w-[85%] rounded-2xl bg-zinc-800 px-4 py-3 text-sm text-zinc-100">
-                    {message.content}
+                  <div className="max-w-[85%] space-y-2 rounded-2xl bg-zinc-800 px-4 py-3 text-sm text-zinc-100">
+                    {renderMarkdownToReactNodes(message.content)}
                   </div>
                 </div>
               ) : (
@@ -337,8 +397,8 @@ export function CreateAgentChat({ customerId }: CreateAgentChatProps) {
                   <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-700 mt-0.5">
                     <Bot className="h-4 w-4 text-zinc-400" />
                   </div>
-                  <div className="min-w-0 flex-1 text-base leading-relaxed text-zinc-200 whitespace-pre-wrap">
-                    {message.content}
+                  <div className="min-w-0 flex-1 space-y-3 text-base leading-relaxed text-zinc-200">
+                    {renderMarkdownToReactNodes(message.content)}
                   </div>
                 </div>
               );

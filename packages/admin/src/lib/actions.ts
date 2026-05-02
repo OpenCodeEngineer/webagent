@@ -22,7 +22,11 @@ export async function serverGetAgents() {
 
 export async function serverGetAgent(id: string) {
   const customerId = await requireCustomerId();
-  return getAgent(id, signRequest(customerId));
+  try {
+    return await getAgent(id, signRequest(customerId));
+  } catch {
+    return null;
+  }
 }
 
 export async function serverUpdateAgent(id: string, data: Record<string, unknown>) {

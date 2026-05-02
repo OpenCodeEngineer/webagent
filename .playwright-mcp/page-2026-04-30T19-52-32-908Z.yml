@@ -1,0 +1,68 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - button "Open menu" [ref=e4]:
+      - img
+    - generic [ref=e5]:
+      - img [ref=e6]
+      - generic [ref=e9]: Lamoom
+  - main [ref=e11]:
+    - generic [ref=e13]:
+      - generic [ref=e14]:
+        - generic [ref=e15]:
+          - heading "Dashboard" [level=1] [ref=e16]
+          - paragraph [ref=e17]: Manage and launch your web agents.
+        - link "Create New Agent" [ref=e18] [cursor=pointer]:
+          - /url: /create
+          - img
+          - text: Create New Agent
+      - generic [ref=e19]:
+        - generic [ref=e21]: Your Agents
+        - generic [ref=e23]:
+          - generic [ref=e24]:
+            - generic [ref=e26]:
+              - heading "OpenClaw Console Assistant" [level=3] [ref=e27]
+              - generic [ref=e28]: active
+            - generic [ref=e29]:
+              - generic [ref=e30]:
+                - img [ref=e31]
+                - generic [ref=e34]: https://openclaw.vibebrowser.app/console
+              - generic [ref=e35]:
+                - img [ref=e36]
+                - generic [ref=e41]: "Sessions: 9"
+            - generic [ref=e42]:
+              - link "View" [ref=e43] [cursor=pointer]:
+                - /url: /dashboard/agents/35b2b388-4227-4687-a43b-83197a989497
+              - button "Pause" [ref=e44]
+              - button "Delete" [ref=e45]
+          - generic [ref=e46]:
+            - generic [ref=e48]:
+              - heading "E2E-Test-1777421617552" [level=3] [ref=e49]
+              - generic [ref=e50]: active
+            - generic [ref=e51]:
+              - generic [ref=e52]:
+                - img [ref=e53]
+                - generic [ref=e56]: https://example.com
+              - generic [ref=e57]:
+                - img [ref=e58]
+                - generic [ref=e63]: "Sessions: 0"
+            - generic [ref=e64]:
+              - link "View" [ref=e65] [cursor=pointer]:
+                - /url: /dashboard/agents/7883926e-6fd2-421e-9a99-e2021a7baebe
+              - button "Pause" [ref=e66]
+              - button "Delete" [ref=e67]
+          - generic [ref=e68]:
+            - generic [ref=e70]:
+              - heading "E2E-Test-1777421899636" [level=3] [ref=e71]
+              - generic [ref=e72]: active
+            - generic [ref=e73]:
+              - generic [ref=e74]:
+                - img [ref=e75]
+                - generic [ref=e78]: https://example.com
+              - generic [ref=e79]:
+                - img [ref=e80]
+                - generic [ref=e85]: "Sessions: 0"
+            - generic [ref=e86]:
+              - link "View" [ref=e87] [cursor=pointer]:
+                - /url: /dashboard/agents/0c2e3874-79f3-46e7-8632-ba41bc03f539
+              - button "Pause" [ref=e88]
+              - button "Delete" [ref=e89]

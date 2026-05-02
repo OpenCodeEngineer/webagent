@@ -4,6 +4,15 @@ export interface MessageAttachment {
   data: string;
 }
 
+export interface AuthContext {
+  Authorization?: string;
+  Bearer?: string;
+  apiToken?: string;
+  token?: string;
+  headers?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
 // Client → Server messages
 export type ClientMessage =
   | {
@@ -13,7 +22,7 @@ export type ClientMessage =
     token: string;
     ticket?: string;
     agentToken?: string;
-    context?: Record<string, unknown>;
+    context?: AuthContext;
   }
   | {
     type: 'auth';
@@ -22,7 +31,7 @@ export type ClientMessage =
     agentToken: string;
     token?: string;
     ticket?: string;
-    context?: Record<string, unknown>;
+    context?: AuthContext;
   }
   | {
     type: 'auth';
@@ -31,7 +40,7 @@ export type ClientMessage =
     ticket: string;
     token?: string;
     agentToken?: string;
-    context?: Record<string, unknown>;
+    context?: AuthContext;
   }
   | { type: 'message'; content: string; attachments?: MessageAttachment[] }
   | { type: 'ping' };
@@ -40,6 +49,12 @@ export type ClientMessage =
 export type ServerMessage =
   | { type: 'auth_ok'; sessionId: string }
   | { type: 'auth_error'; reason: string }
+  | {
+    type: 'history';
+    sessionId: string;
+    messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+    embedCode?: string;
+  }
   | { type: 'message'; content: string; done: boolean }
   | { type: 'error'; message: string }
   | { type: 'pong' };

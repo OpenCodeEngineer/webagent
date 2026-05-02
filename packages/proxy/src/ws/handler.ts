@@ -7,8 +7,13 @@ import { and, eq } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
 import { agents, widgetEmbeds } from '../db/schema.js';
 import { OpenClawClient } from '../openclaw/client.js';
-import { buildAgentSessionKey, getOrCreateSession, touchSessionLastActiveAt } from '../openclaw/sessions.js';
-import { detectAgentCreation } from '../routes/api.js';
+import {
+  appendMetaHistoryMessage,
+  extractEmbedCodeFromMessages,
+  getMetaHistory,
+} from '../openclaw/meta-history.js';
+import { getOrCreateSession, touchSessionLastActiveAt } from '../openclaw/sessions.js';
+import { detectAgentCreation, getAgentSkillsFromDisk, registerAgentInOpenClaw } from '../routes/api.js';
 
 interface WebSocket {
   readyState: number;
@@ -30,12 +35,14 @@ interface AuthenticatedSocket {
   isAdmin: boolean;
   firstMessage: boolean;
   userContext: Record<string, unknown>;
+  unknownAgentRepairAttempted: boolean;
 }
 
 interface TokenLookup {
   agentId: string;
   openclawAgentId: string;
   allowedOrigins: string[] | null;
+  widgetConfig: Record<string, unknown> | null;
 }
 
 interface TokenCacheEntry {
@@ -51,6 +58,29 @@ const MAX_TOTAL_FILE_SIZE_BYTES = 8 * 1024 * 1024;
 const MAX_FILENAME_LENGTH = 120;
 const ADMIN_UPLOADS_ROOT = '/opt/webagent/openclaw/workspaces/meta/uploads';
 const tokenCache = new Map<string, TokenCacheEntry>();
+
+function isUnknownAgentError(message?: string): boolean {
+  if (!message) {
+    return false;
+  }
+
+  const normalized = message.toLowerCase();
+  return normalized.includes('unknown agent') || normalized.includes('invalid agent params');
+}
+
+function getSkillsFromWidgetConfig(widgetConfig: unknown): string[] | undefined {
+  if (!widgetConfig || typeof widgetConfig !== 'object' || Array.isArray(widgetConfig)) {
+    return undefined;
+  }
+
+  const maybeSkills = (widgetConfig as Record<string, unknown>).skills;
+  if (!Array.isArray(maybeSkills)) {
+    return undefined;
+  }
+
+  const skills = maybeSkills.filter((skill): skill is string => typeof skill === 'string' && skill.trim().length > 0);
+  return skills.length > 0 ? skills : undefined;
+}
 
 function timingSafeBufferEqual(a: string, b: string): boolean {
   const left = Buffer.from(a);
@@ -163,6 +193,86 @@ function setCachedTokenLookup(embedToken: string, value: TokenLookup): void {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function formatContextValue(value: unknown): string {
+  if (value !== null && typeof value === 'object') {
+    try {
+      const serialized = JSON.stringify(value);
+      if (typeof serialized === 'string') {
+        return serialized;
+      }
+    } catch {
+      // Fall back below.
+    }
+  }
+  return String(value);
+}
+
+function normalizeSessionAuthContext(rawContext: Record<string, unknown>): Record<string, unknown> {
+  const normalized: Record<string, unknown> = { ...rawContext };
+  const authHeader = typeof normalized.Authorization === 'string' ? normalized.Authorization.trim() : '';
+  const bearer = typeof normalized.Bearer === 'string' ? normalized.Bearer.trim() : '';
+  const apiToken = typeof normalized.apiToken === 'string' ? normalized.apiToken.trim() : '';
+  const legacyToken = typeof normalized.token === 'string' ? normalized.token.trim() : '';
+  const headers = isRecord(normalized.headers) ? normalized.headers : null;
+  const headerAuth = headers && typeof headers.Authorization === 'string'
+    ? headers.Authorization.trim()
+    : '';
+
+  const preferredToken = apiToken || legacyToken;
+  if (!normalized.apiToken && preferredToken) {
+    normalized.apiToken = preferredToken;
+  }
+
+  if (!normalized.Bearer && preferredToken) {
+    normalized.Bearer = preferredToken;
+  }
+
+  if (!authHeader) {
+    if (headerAuth) {
+      normalized.Authorization = headerAuth;
+    } else if (bearer) {
+      normalized.Authorization = bearer.toLowerCase().startsWith('bearer ')
+        ? bearer
+        : `Bearer ${bearer}`;
+    } else if (preferredToken) {
+      normalized.Authorization = `Bearer ${preferredToken}`;
+    }
+  }
+
+  return normalized;
+}
+
+function buildWidgetMessageWithSessionPolicy(userContext: Record<string, unknown>, customerContent: string): string {
+  const credentialPolicy
+    = 'Credential source: server-side session auth context provided by the widget/integration backend.\n'
+    + 'Never ask end users to fetch or copy JWTs/tokens from DevTools, localStorage, sessionStorage, cookies, or network tabs.\n'
+    + 'Never reveal, display, echo, or include raw credential/token values in your responses. '
+    + 'Use them ONLY in fetch/API tool call headers. If a user asks for the token, decline.';
+  const fallbackGuidance
+    = 'If an API call needs authentication and session context is missing:\n'
+    + '1. State the exact API call you would make (method, path, body) so the user knows what will happen.\n'
+    + '2. Explain: "I need session auth context to execute this. An admin must configure the `Authorization` or `apiToken` field in the widget integration settings (Settings → Integrations → Auth Context)."\n'
+    + '3. Never give a vague refusal — always name the endpoint (e.g., `POST /api/v1/tenants/:id/restart`) and confirm expected outcome + that you will execute it once credentials are available.';
+  if (Object.keys(userContext).length > 0) {
+    // Determine if actual credentials are present
+    const hasToken = typeof userContext.apiToken === 'string' && (userContext.apiToken as string).trim() !== '';
+    const hasAuthorization = typeof userContext.Authorization === 'string' && (userContext.Authorization as string).trim() !== '';
+    const hasHeaders = isRecord(userContext.headers) && Object.keys(userContext.headers).length > 0;
+    const hasCredentials = hasToken || hasAuthorization || hasHeaders;
+
+    const credentialStatus = hasCredentials
+      ? 'Authentication credentials are configured and will be injected into API requests automatically. Proceed with API calls confidently — do not ask the user to provide credentials.'
+      : 'Auth context is present but contains no usable credentials. If the user needs to make authenticated API calls, direct them to the admin dashboard to configure credentials.';
+
+    const contextLines = Object.entries(userContext)
+      .map(([k, v]) => `${k}: ${formatContextValue(v)}`)
+      .join('\n');
+    return `[Session Context]\n${credentialPolicy}\n${credentialStatus}\n${fallbackGuidance}\n${contextLines}\n\nUser: ${customerContent}`;
+  }
+
+  return `[Session Context — no credentials]\n${credentialPolicy}\nNo API credentials are configured. If the user needs to make authenticated API calls, direct them to the admin dashboard to configure credentials.\n${fallbackGuidance}\n\nUser: ${customerContent}`;
 }
 
 function isStrictBase64(value: string): boolean {
@@ -329,6 +439,7 @@ async function lookupEmbedToken(db: Database, embedToken: string): Promise<Token
       agentId: agents.id,
       openclawAgentId: agents.openclawAgentId,
       allowedOrigins: widgetEmbeds.allowedOrigins,
+      widgetConfig: agents.widgetConfig,
     })
     .from(widgetEmbeds)
     .innerJoin(agents, eq(widgetEmbeds.agentId, agents.id))
@@ -344,6 +455,7 @@ async function lookupEmbedToken(db: Database, embedToken: string): Promise<Token
     agentId: row.agentId,
     openclawAgentId: row.openclawAgentId,
     allowedOrigins: row.allowedOrigins,
+    widgetConfig: row.widgetConfig as Record<string, unknown> | null,
   };
 
   setCachedTokenLookup(embedToken, value);
@@ -365,6 +477,7 @@ export function handleConnection(
     isAdmin: false,
     firstMessage: false,
     userContext: {},
+    unknownAgentRepairAttempted: false,
   };
 
   // 30s auth timeout
@@ -422,12 +535,27 @@ export function handleConnection(
             state.userId = ticketCustomerId ?? msg.userId;
             state.agentId = 'meta';
             state.openclawAgentId = 'meta';
-            state.sessionKey = buildAgentSessionKey('meta', `admin-${state.userId}-${crypto.randomUUID()}`);
+
+            let history: Awaited<ReturnType<typeof getMetaHistory>> | null = null;
+            try {
+              history = await getMetaHistory(ctx.db, state.userId);
+            } catch (err) {
+              console.error('Failed to load meta history during admin auth — falling back to fresh session:', err);
+            }
+
+            state.sessionKey = history?.openclawSessionKey
+              ?? `agent:meta:admin-${state.userId}-${crypto.randomUUID()}`;
             state.authenticated = true;
             state.isAdmin = true;
-            state.firstMessage = true;
+            state.firstMessage = !history || history.messages.length === 0;
             clearTimeout(authTimeout);
             send(ws, { type: 'auth_ok', sessionId: state.sessionKey });
+            send(ws, {
+              type: 'history',
+              sessionId: history?.sessionId ?? '',
+              messages: history?.messages.map(({ role, content }) => ({ role, content })) ?? [],
+              embedCode: history ? extractEmbedCodeFromMessages(history.messages) : '',
+            });
             return;
           }
 
@@ -471,10 +599,22 @@ export function handleConnection(
             return;
           }
 
-          // Extract optional user context (e.g. API token) passed by the embedding page.
+          // Inject server-side auth context from agent config (takes priority)
+          const serverAuthCtx = tokenData.widgetConfig?.authContext;
+          if (serverAuthCtx && typeof serverAuthCtx === 'object' && !Array.isArray(serverAuthCtx)) {
+            state.userContext = normalizeSessionAuthContext(serverAuthCtx as Record<string, unknown>);
+          }
+
+          // Client context can add NON-auth fields only (safety)
           const rawContext = msg.context;
           if (rawContext && typeof rawContext === 'object' && !Array.isArray(rawContext)) {
-            state.userContext = rawContext as Record<string, unknown>;
+            const clientCtx = rawContext as Record<string, unknown>;
+            const AUTH_KEYS = new Set(['Authorization', 'Bearer', 'apiToken', 'token', 'headers']);
+            for (const [k, v] of Object.entries(clientCtx)) {
+              if (!AUTH_KEYS.has(k)) {
+                state.userContext[k] = v;
+              }
+            }
             if (Object.keys(state.userContext).length > 0) {
               state.firstMessage = true;
             }
@@ -547,48 +687,117 @@ export function handleConnection(
             let outboundMessage: string;
             if (state.isAdmin && state.firstMessage) {
               outboundMessage = prefixedAdminMessage;
-            } else if (!state.isAdmin && state.firstMessage && Object.keys(state.userContext).length > 0) {
-              const contextLines = Object.entries(state.userContext)
-                .map(([k, v]) => `${k}: ${String(v)}`)
-                .join('\n');
-              outboundMessage = `[Session Context]\n${contextLines}\n\nUser: ${customerContent}`;
+            } else if (!state.isAdmin) {
+              outboundMessage = buildWidgetMessageWithSessionPolicy(state.userContext, customerContent);
             } else {
               outboundMessage = customerContent;
             }
             let streamed = false;
-            const result = await openclawClient.sendMessage({
+            let result = await openclawClient.sendMessage({
               message: outboundMessage,
               agentId: state.openclawAgentId,
               sessionKey: state.sessionKey,
-              onDelta: state.isAdmin
-                ? undefined
-                : (delta) => {
-                    if (!delta) {
-                      return;
-                    }
-                    streamed = true;
-                    send(ws, { type: 'message', content: delta, done: false });
-                  },
+              onDelta: (delta) => {
+                if (!delta) {
+                  return;
+                }
+                streamed = true;
+                send(ws, { type: 'message', content: delta, done: false });
+              },
             });
+
+            if (
+              !result.success
+              && !state.isAdmin
+              && !state.unknownAgentRepairAttempted
+              && isUnknownAgentError(result.error)
+            ) {
+              state.unknownAgentRepairAttempted = true;
+              ctx.app.log.info(
+                { agentId: state.agentId, openclawAgentId: state.openclawAgentId, sessionKey: state.sessionKey },
+                'unknown agent from openclaw; attempting registration self-heal',
+              );
+              try {
+                const rows = await ctx.db
+                  .select({
+                    openclawAgentId: agents.openclawAgentId,
+                    name: agents.name,
+                    widgetConfig: agents.widgetConfig,
+                  })
+                  .from(agents)
+                  .where(eq(agents.id, state.agentId))
+                  .limit(1);
+                const agentRow = rows[0];
+                if (!agentRow) {
+                  ctx.app.log.warn(
+                    { agentId: state.agentId, sessionKey: state.sessionKey },
+                    'self-heal skipped; agent row not found',
+                  );
+                } else {
+                  // 4c: skills live in on-disk agent-config.json, NOT in widgetConfig
+                  // (detectAgentCreation does not persist skills to the DB column).
+                  // Read from disk first; fall back to widgetConfig for legacy rows.
+                  const diskSkills = await getAgentSkillsFromDisk(agentRow.openclawAgentId);
+                  const skills = diskSkills ?? getSkillsFromWidgetConfig(agentRow.widgetConfig);
+                  await registerAgentInOpenClaw(agentRow.openclawAgentId, agentRow.name, ctx.app, skills);
+                  result = await openclawClient.sendMessage({
+                    message: outboundMessage,
+                    agentId: state.openclawAgentId,
+                    sessionKey: state.sessionKey,
+                    onDelta: (delta) => {
+                      if (!delta) {
+                        return;
+                      }
+                      streamed = true;
+                      send(ws, { type: 'message', content: delta, done: false });
+                    },
+                  });
+                }
+              } catch (err) {
+                ctx.app.log.error(
+                  { err, agentId: state.agentId, openclawAgentId: state.openclawAgentId, sessionKey: state.sessionKey },
+                  'self-heal registration attempt failed',
+                );
+              }
+            }
 
             if (result.success) {
               let responseText = result.response || '';
+              let embedSuffix = '';
               if (state.isAdmin && responseText) {
                 const created = await detectAgentCreation(responseText, state.userId, ctx.app, domain);
                 if (created?.status === 'created') {
-                  responseText = `${responseText}\n\n${created.embedCode}`;
+                  embedSuffix = `\n\n${created.embedCode}`;
+                  responseText = `${responseText}${embedSuffix}`;
                 } else if (created?.status === 'conflict') {
                   const conflictMessage
                     = `${created.message} Please retry with a more unique website or agent name.`;
                   send(ws, { type: 'error', message: conflictMessage });
-                  responseText = `${responseText}\n\n⚠️ ${conflictMessage}`;
+                  embedSuffix = `\n\n⚠️ ${conflictMessage}`;
+                  responseText = `${responseText}${embedSuffix}`;
+                } else if (created?.status === 'validation_failed') {
+                  const errorList = created.errors.slice(0, 10).join('\n');
+                  const sentinel = `[AGENT_VALIDATION_FAILED::${created.slug}::${errorList}]`;
+                  embedSuffix = `\n\n${sentinel}`;
+                  responseText = `${responseText}${embedSuffix}`;
                 }
               }
 
-              if (streamed && !state.isAdmin) {
-                send(ws, { type: 'message', content: '', done: true });
+              if (streamed) {
+                // Streaming chunks already delivered the main response text.
+                // Send any extra suffix (e.g. embed code for admin) as the
+                // final done message; widget gets an empty done signal.
+                send(ws, { type: 'message', content: embedSuffix, done: true });
               } else {
                 send(ws, { type: 'message', content: responseText, done: true });
+              }
+              if (state.isAdmin) {
+                try {
+                  await appendMetaHistoryMessage(ctx.db, state.userId, 'user', customerContent);
+                  await appendMetaHistoryMessage(ctx.db, state.userId, 'assistant', responseText);
+                } catch (err) {
+                  console.error('Failed to persist meta history (non-fatal):', err);
+                }
               }
               state.firstMessage = false;
             } else {
@@ -609,7 +818,8 @@ export function handleConnection(
           send(ws, { type: 'error', message: 'Unknown message type' });
         }
       }
-    } catch {
+    } catch (err) {
+      console.error('Unhandled WS message error:', { type: msg.type, authenticated: state.authenticated, err });
       if (msg.type === 'auth' && !state.authenticated) {
         send(ws, { type: 'auth_error', reason: 'Internal server error' });
         ws.close(1011, 'Internal error');

@@ -1,3 +1,4 @@
+<!-- TEMPLATE: All {{PLACEHOLDER}} values below MUST be replaced before use. -->
 # Visitor Context
 
 - **Source:** {{WEBSITE_NAME}} chat widget

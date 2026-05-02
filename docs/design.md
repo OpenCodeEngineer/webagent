@@ -818,7 +818,10 @@ Full E2E verified: signup → meta-agent discovery → agent creation → embed 
 
 ---
 
-## Phase Next: LibreChat Integration (Admin UI)
+## Legacy (inactive): LibreChat Integration Plan
+
+This section is retained for historical context only.
+The active MVP runtime uses native `/create` chat (`CreateAgentChat`) and does not wire LibreChat routes.
 
 ### Why
 
@@ -859,7 +862,7 @@ chat UI and point it at our proxy via a custom endpoint.
                          └────────────────────────────────────┘
 ```
 
-### LibreChat custom endpoint config (`librechat.yaml`)
+### Legacy LibreChat custom endpoint config (`librechat.yaml`)
 
 ```yaml
 version: 1.2.1
@@ -867,7 +870,7 @@ cache: true
 endpoints:
   custom:
     - name: "Lamoom Agent Builder"
-      apiKey: "${PROXY_LIBRECHAT_KEY}"
+      apiKey: "${PROXY_API_TOKEN}"
       baseURL: "http://localhost:3001/v1"
       models:
         default: ["meta-agent"]
@@ -881,7 +884,7 @@ OpenAI-compatible wrapper that routes to the meta-agent:
 
 ```
 POST /v1/chat/completions
-Authorization: Bearer <PROXY_LIBRECHAT_KEY>
+Authorization: Bearer <PROXY_API_TOKEN>
 Content-Type: application/json
 
 {

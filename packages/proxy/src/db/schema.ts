@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, jsonb, bigserial, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, jsonb, bigserial, uniqueIndex, index } from 'drizzle-orm/pg-core';
 
 export const customers = pgTable('customers', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -65,3 +65,38 @@ export const auditLog = pgTable('audit_log', {
   details: jsonb('details'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 });
+
+export const metaAgentSessions = pgTable(
+  'meta_agent_sessions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    customerId: uuid('customer_id')
+      .notNull()
+      .references(() => customers.id, { onDelete: 'cascade' }),
+    openclawSessionKey: text('openclaw_session_key').notNull().unique(),
+    lastActiveAt: timestamp('last_active_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    metaAgentSessionsCustomerIdx: uniqueIndex('meta_agent_sessions_customer_idx').on(table.customerId),
+  }),
+);
+
+export const metaAgentMessages = pgTable(
+  'meta_agent_messages',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => metaAgentSessions.id, { onDelete: 'cascade' }),
+    role: text('role').notNull(),
+    content: text('content').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    metaAgentMessagesSessionCreatedIdx: index('meta_agent_messages_session_created_idx').on(
+      table.sessionId,
+      table.createdAt,
+    ),
+  }),
+);

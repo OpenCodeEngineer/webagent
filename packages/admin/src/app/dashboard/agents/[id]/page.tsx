@@ -1,11 +1,16 @@
 import { auth } from "@/lib/auth";
 import { serverGetAgent } from "@/lib/actions";
 import { redirect } from "next/navigation";
+import { normalizeCustomerIdToUuid } from "@/lib/customer-id";
 import { AgentDetailActions } from "@/components/agent-detail-actions";
 import { AgentEditForm } from "@/components/agent-edit-form";
+import { AgentAuthContext } from "@/components/agent-auth-context";
 import { WidgetPreview } from "@/components/widget-preview";
+import { CreateAgentChat } from "@/components/create-agent-chat";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { MessageCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const WIDGET_BASE_URL = process.env.NEXT_PUBLIC_APP_URL || process.env.AUTH_URL || "https://dev.lamoom.com";
@@ -25,6 +30,7 @@ export default async function AgentDetailPage({ params }: Props) {
 
   const { id } = await params;
   const agent = await serverGetAgent(id);
+  const customerId = normalizeCustomerIdToUuid(session.user.id, session.user.email);
 
   if (!agent) {
     return (
@@ -64,52 +70,98 @@ export default async function AgentDetailPage({ params }: Props) {
         </CardHeader>
       </Card>
 
-      {/* Embed code */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Embed Code</CardTitle>
-          <CardDescription>Add this snippet to your website.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <AgentDetailActions agentId={agent.id} embedCode={embedCode} />
-        </CardContent>
-      </Card>
+      <Tabs defaultValue="info" className="space-y-4">
+        <TabsList className="w-full justify-start sm:w-fit">
+          <TabsTrigger value="info">Agent info</TabsTrigger>
+          <TabsTrigger value="meta-chat">Meta-agent chat</TabsTrigger>
+          <TabsTrigger value="test-chat">Test chat</TabsTrigger>
+        </TabsList>
 
-      {/* Live widget preview */}
-      {agent.embedToken && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Test Your Widget</CardTitle>
-            <CardDescription>Try chatting with your agent below. This is exactly what your visitors will see.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <WidgetPreview agentToken={agent.embedToken} />
-          </CardContent>
-        </Card>
-      )}
+        <TabsContent value="info" className="space-y-6">
+          {/* Embed code */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Embed Code</CardTitle>
+              <CardDescription>Add this snippet to your website.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <AgentDetailActions agentId={agent.id} embedCode={embedCode} />
+            </CardContent>
+          </Card>
 
-      {/* Recent sessions */}
-      {agent.recentSessions && agent.recentSessions.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Recent Sessions</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="divide-y divide-border">
-              {agent.recentSessions.map((s) => (
-                <div key={s.id} className="flex items-center justify-between py-3">
-                  <span className="text-sm text-foreground">{s.visitorId ?? s.id}</span>
-                  {s.lastActive && (
-                    <span className="text-xs text-muted-foreground">
-                      {new Date(s.lastActive).toLocaleString()}
-                    </span>
-                  )}
+          {/* API Configuration */}
+          {agent.embedToken && (
+            <Card>
+              <CardContent className="pt-6">
+                <AgentAuthContext
+                  agentId={agent.id}
+                  initialApiToken={
+                    typeof agent.widgetConfig === "object" && agent.widgetConfig !== null
+                      ? (agent.widgetConfig as { authContext?: { apiToken?: string } }).authContext?.apiToken
+                      : undefined
+                  }
+                />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Recent sessions */}
+          {agent.recentSessions && agent.recentSessions.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Recent Sessions</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="divide-y divide-border">
+                  {agent.recentSessions.map((s) => (
+                    <div key={s.id} className="flex items-center justify-between py-3">
+                      <span className="text-sm text-foreground">{s.visitorId ?? s.id}</span>
+                      {s.lastActive && (
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(s.lastActive).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="meta-chat">
+          <Card className="overflow-hidden">
+            <CardHeader>
+              <CardTitle>Meta-agent chat</CardTitle>
+              <CardDescription>Chat with the meta-agent to modify this agent&apos;s behaviour, knowledge, or settings.</CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="h-[600px] rounded-b-xl overflow-hidden">
+                <CreateAgentChat customerId={customerId ?? undefined} />
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="test-chat">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <MessageCircle className="h-4 w-4 text-muted-foreground" />
+                <CardTitle>Test chat</CardTitle>
+              </div>
+              <CardDescription>Test the final embedded agent exactly as site visitors will see it.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {agent.embedToken ? (
+                <WidgetPreview agentToken={agent.embedToken} widgetBaseUrl={WIDGET_BASE_URL} />
+              ) : (
+                <p className="text-sm text-muted-foreground">No embed token is available for this agent yet.</p>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

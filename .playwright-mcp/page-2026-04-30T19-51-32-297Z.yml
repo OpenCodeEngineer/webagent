@@ -1,0 +1,40 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]:
+        - img [ref=e6]
+        - generic [ref=e9]: Lamoom
+      - paragraph [ref=e10]: Sign in to manage your AI agents
+    - generic [ref=e11]:
+      - generic [ref=e12]:
+        - generic [ref=e35]: Invalid email or password
+        - generic [ref=e13]:
+          - generic [ref=e14]: Email
+          - textbox "Email" [ref=e15]:
+            - /placeholder: you@example.com
+            - text: admin@lamoom.com
+        - generic [ref=e16]:
+          - generic [ref=e17]: Password
+          - textbox "Password" [ref=e18]:
+            - /placeholder: ••••••••
+            - text: demo1234
+        - button "Sign in" [ref=e19]
+      - generic [ref=e20]:
+        - separator [ref=e21]
+        - generic [ref=e22]: or continue with
+        - separator [ref=e23]
+      - generic [ref=e24]:
+        - button "Google" [ref=e25]:
+          - img
+          - text: Google
+        - button "GitHub" [ref=e26]:
+          - img
+          - text: GitHub
+      - generic [ref=e27]:
+        - separator [ref=e28]
+        - generic [ref=e29]: or use magic link
+        - separator [ref=e30]
+      - generic [ref=e32]:
+        - textbox "you@example.com" [ref=e33]
+        - button "Send link" [disabled]
+  - alert [ref=e34]

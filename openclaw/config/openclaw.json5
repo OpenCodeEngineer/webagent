@@ -1,5 +1,9 @@
 {
   // Multi-agent configuration for Web MCP Agent platform
+  // Only load plugins needed for a web agent platform (cuts startup by ~15s)
+  plugins: {
+    allow: ["acpx", "memory-core", "browser"],
+  },
   gateway: {
     mode: "local",
     auth: {

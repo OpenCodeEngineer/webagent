@@ -1,7 +1,27 @@
 import { timingSafeEqual } from 'node:crypto';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import { dirname, join } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { count, desc, eq, sql } from 'drizzle-orm';
 import { agents, auditLog, customers, widgetSessions } from '../db/schema.js';
+
+const WEBSITE_API_SKILL_RELATIVE_PATH = join('skills', 'website-api', 'SKILL.md');
+const WEBSITE_API_TEMPLATE_RELATIVE_PATH = join('templates', WEBSITE_API_SKILL_RELATIVE_PATH);
+const FALLBACK_ENDPOINTS_TABLE = [
+  '| Method | Path | Description | Request Body | Response |',
+  '|--------|------|-------------|-------------|----------|',
+].join('\n');
+
+type WorkspaceAgentConfig = {
+  agentName?: string;
+  websiteName?: string;
+  apiBaseUrl?: string;
+  apiAuthMethod?: string;
+  apiStyle?: string;
+  apiEndpoints?: string;
+  apiDescription?: string;
+};
 
 function sendError(reply: FastifyReply, statusCode: number, code: string, message: string) {
   return reply.status(statusCode).send({
@@ -57,6 +77,132 @@ function requireInternalAuth(request: FastifyRequest, reply: FastifyReply): bool
   }
 
   return true;
+}
+
+function resolveWorkspaceBaseDirs(): string[] {
+  const configured = process.env.OPENCLAW_WORKSPACES_DIR?.trim();
+  if (configured) {
+    return [configured];
+  }
+
+  const primary = join(process.cwd(), 'openclaw', 'workspaces');
+  const fallback = join(process.cwd(), '..', '..', 'openclaw', 'workspaces');
+  return primary === fallback ? [primary] : [primary, fallback];
+}
+
+function resolveAgentWorkspaceCandidates(slug: string): string[] {
+  return resolveWorkspaceBaseDirs().map((baseDir) => join(baseDir, slug));
+}
+
+async function resolveFirstExistingPath(paths: string[]): Promise<string | null> {
+  for (const candidatePath of paths) {
+    try {
+      await access(candidatePath, fsConstants.F_OK);
+      return candidatePath;
+    } catch {
+      // continue
+    }
+  }
+  return null;
+}
+
+function parseRenderedField(skillText: string, fieldName: string): string | null {
+  const escaped = fieldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = skillText.match(new RegExp(`- \\*\\*${escaped}:\\*\\*\\s*(.+)`, 'i'));
+  const value = match?.[1]?.trim();
+  return value ? value : null;
+}
+
+function extractRenderedApiEndpoints(skillText: string): string | null {
+  const sectionMatch = skillText.match(
+    /## Available Actions\s*\n+([\s\S]*?)(?:\n<!-- GENERATION NOTE:|\n## )/,
+  );
+  if (!sectionMatch?.[1]) return null;
+  const value = sectionMatch[1].trim();
+  if (!value || value.includes('{{API_ENDPOINTS}}')) return null;
+  return value;
+}
+
+function renderWebsiteApiSkillFromTemplate(params: {
+  templateText: string;
+  websiteName: string;
+  apiBaseUrl: string;
+  apiAuthMethod: string;
+  apiStyle: string;
+  apiEndpoints: string;
+}): string {
+  return params.templateText
+    .replaceAll('{{WEBSITE_NAME}}', params.websiteName)
+    .replaceAll('{{API_BASE_URL}}', params.apiBaseUrl)
+    .replaceAll('{{API_AUTH_METHOD}}', params.apiAuthMethod)
+    .replaceAll('{{API_STYLE}}', params.apiStyle)
+    .replaceAll('{{API_ENDPOINTS}}', params.apiEndpoints);
+}
+
+async function regenerateWebsiteApiSkill(params: {
+  agent: typeof agents.$inferSelect;
+  logger: FastifyRequest['log'];
+}): Promise<{ workspacePath: string; skillPath: string; templatePath: string }> {
+  const workspaceCandidates = resolveAgentWorkspaceCandidates(params.agent.openclawAgentId);
+  const workspacePath = await resolveFirstExistingPath(workspaceCandidates);
+  if (!workspacePath) {
+    throw new Error(`Workspace not found for agent slug "${params.agent.openclawAgentId}"`);
+  }
+
+  const skillPath = join(workspacePath, WEBSITE_API_SKILL_RELATIVE_PATH);
+  const agentConfigPath = join(workspacePath, 'agent-config.json');
+
+  const templateCandidates = [
+    join(workspacePath, '..', 'meta', WEBSITE_API_TEMPLATE_RELATIVE_PATH),
+    join(process.cwd(), 'openclaw', 'workspaces', 'meta', WEBSITE_API_TEMPLATE_RELATIVE_PATH),
+    join(process.cwd(), 'openclaw', WEBSITE_API_TEMPLATE_RELATIVE_PATH),
+  ];
+  const templatePath = await resolveFirstExistingPath(templateCandidates);
+  if (!templatePath) {
+    throw new Error('website-api skill template not found');
+  }
+
+  let existingSkillText = '';
+  try {
+    existingSkillText = await readFile(skillPath, 'utf8');
+  } catch {
+    existingSkillText = '';
+  }
+
+  let agentConfig: WorkspaceAgentConfig = {};
+  try {
+    const rawConfig = await readFile(agentConfigPath, 'utf8');
+    agentConfig = JSON.parse(rawConfig) as WorkspaceAgentConfig;
+  } catch (error) {
+    params.logger.warn({ error, agentConfigPath }, 'failed to read agent config for skill refresh');
+  }
+
+  const templateText = await readFile(templatePath, 'utf8');
+  const apiEndpoints = extractRenderedApiEndpoints(existingSkillText)
+    || agentConfig.apiEndpoints?.trim()
+    || agentConfig.apiDescription?.trim()
+    || FALLBACK_ENDPOINTS_TABLE;
+  const apiAuthMethod = parseRenderedField(existingSkillText, 'Auth')
+    || agentConfig.apiAuthMethod?.trim()
+    || 'Not specified';
+  const apiStyle = parseRenderedField(existingSkillText, 'Style')
+    || agentConfig.apiStyle?.trim()
+    || 'Not specified';
+  const apiBaseUrl = agentConfig.apiBaseUrl?.trim() || '';
+  const websiteName = agentConfig.websiteName?.trim() || params.agent.name;
+
+  const renderedSkill = renderWebsiteApiSkillFromTemplate({
+    templateText,
+    websiteName,
+    apiBaseUrl,
+    apiAuthMethod,
+    apiStyle,
+    apiEndpoints,
+  });
+
+  await mkdir(dirname(skillPath), { recursive: true });
+  await writeFile(skillPath, `${renderedSkill.trimEnd()}\n`, 'utf8');
+  return { workspacePath, skillPath, templatePath };
 }
 
 export function registerAdminApiRoutes(app: FastifyInstance) {
@@ -216,6 +362,44 @@ export function registerAdminApiRoutes(app: FastifyInstance) {
       const errMsg = error instanceof Error ? error.message : String(error);
       request.log.error({ error: errMsg, stack: error instanceof Error ? error.stack : undefined }, 'failed to list admin agents');
       return sendError(reply, 500, 'internal_error', 'Failed to list agents');
+    }
+  });
+
+  app.post('/api/admin/agents/:id/refresh-workspace', async (request, reply) => {
+    if (!requireInternalAuth(request, reply)) return;
+
+    const { id } = request.params as { id: string };
+
+    try {
+      const agentRows = await app.db
+        .select()
+        .from(agents)
+        .where(eq(agents.id, id))
+        .limit(1);
+
+      const agent = agentRows[0];
+      if (!agent) {
+        return sendError(reply, 404, 'not_found', 'Agent not found');
+      }
+
+      const refreshed = await regenerateWebsiteApiSkill({
+        agent,
+        logger: request.log,
+      });
+
+      return reply.send({
+        success: true,
+        data: {
+          agentId: agent.id,
+          openclawAgentId: agent.openclawAgentId,
+          workspacePath: refreshed.workspacePath,
+          skillPath: refreshed.skillPath,
+          templatePath: refreshed.templatePath,
+        },
+      });
+    } catch (error) {
+      request.log.error({ error, id }, 'failed to refresh agent workspace');
+      return sendError(reply, 500, 'internal_error', 'Failed to refresh agent workspace');
     }
   });
 

@@ -1,3 +1,4 @@
+<!-- TEMPLATE: All {{PLACEHOLDER}} values below MUST be replaced before use. -->
 # {{WEBSITE_NAME}} — Persona
 
 ## Core Identity

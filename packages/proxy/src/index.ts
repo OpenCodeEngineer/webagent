@@ -8,9 +8,9 @@ import { registerApiRoutes } from './routes/api.js';
 import { registerAdminApiRoutes } from './routes/admin-api.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerOpenAiCompatRoutes } from './routes/openai-compat.js';
-import { registerSsoRoutes } from './routes/sso.js';
 import { registerWidgetRoutes } from './routes/widget.js';
 import { handleConnection } from './ws/handler.js';
+import { reconcileOpenClawConfig } from './openclaw/reconciler.js';
 import { DEFAULT_WS_PATH } from '@webagent/shared/constants';
 
 interface ManagedSocket {
@@ -34,7 +34,6 @@ registerWidgetRoutes(app);
 registerApiRoutes(app);
 registerAdminApiRoutes(app);
 registerOpenAiCompatRoutes(app);
-registerSsoRoutes(app);
 
 app.get(DEFAULT_WS_PATH, { websocket: true }, (socket, request) => {
   const ip = request.ip;
@@ -93,9 +92,22 @@ process.once('SIGINT', () => {
 
 const start = async (): Promise<void> => {
   try {
-    await app.listen({ host: '0.0.0.0', port: config.port });
+    // Reconcile openclaw.json5 against on-disk agent workspaces. Non-fatal:
+    // a broken workspace must not block the server from coming up.
+    try {
+      const summary = await reconcileOpenClawConfig(app);
+      if (summary.errors.length > 0) {
+        app.log.warn({ summary }, 'openclaw reconciler completed with errors');
+      } else {
+        app.log.info({ summary }, 'openclaw reconciler completed');
+      }
+    } catch (err) {
+      app.log.error({ err }, 'openclaw reconciler crashed (continuing startup)');
+    }
+
+    await app.listen({ host: config.host, port: config.port });
     app.log.info(
-      { port: config.port, openClawGatewayUrl: config.openClawGatewayUrl },
+      { host: config.host, port: config.port, openClawGatewayUrl: config.openClawGatewayUrl },
       'proxy server started',
     );
   } catch (error) {

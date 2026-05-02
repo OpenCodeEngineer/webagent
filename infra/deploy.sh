@@ -7,12 +7,34 @@ set -euo pipefail
 HOST="${1:-${DEPLOY_HOST:-78.47.152.177}}"
 DEPLOY_USER="${DEPLOY_USER:-root}"
 APP_DIR="${APP_DIR:-/opt/webagent}"
+APP_USER="${APP_USER:-openclaw}"
 NGINX_SITE_PATH="${NGINX_SITE_PATH:-/etc/nginx/sites-enabled/openclaw}"
 SYNC_DELETE="${SYNC_DELETE:-1}"
 REMOTE="${DEPLOY_USER}@${HOST}"
+SSH_OPTS=(
+  -o ServerAliveInterval=20
+  -o ServerAliveCountMax=6
+  -o TCPKeepAlive=yes
+)
 RUNTIME_CONFIG_BACKUP="/tmp/webagent-openclaw-runtime.json5"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+run_rsync() {
+  local description="$1"
+  shift
+  local -a args=("$@")
+
+  echo "→ ${description} (attempt 1)..."
+  if rsync -e "ssh ${SSH_OPTS[*]}" "${args[@]}"; then
+    return 0
+  else
+    local rc=$?
+    echo "⚠️  rsync failed (exit ${rc}); retrying with resilient flags..."
+  fi
+  sleep 2
+  rsync -e "ssh ${SSH_OPTS[*]}" --no-compress --inplace --partial "${args[@]}"
+}
 
 if [[ ! -f "${REPO_ROOT}/pnpm-workspace.yaml" ]]; then
   echo "❌ Could not find repo root from ${SCRIPT_DIR}" >&2
@@ -29,10 +51,9 @@ done
 echo "── Deploying LOCAL repo to ${REMOTE}:${APP_DIR} ──"
 
 echo "→ Preparing remote directory and preserving runtime OpenClaw config..."
-ssh "${REMOTE}" "set -euo pipefail; install -d -m 0755 '${APP_DIR}'; \
+ssh "${SSH_OPTS[@]}" "${REMOTE}" "set -euo pipefail; install -d -m 0755 '${APP_DIR}'; \
   if [ -f '${APP_DIR}/openclaw/config/openclaw.json5' ]; then cp '${APP_DIR}/openclaw/config/openclaw.json5' '${RUNTIME_CONFIG_BACKUP}'; fi"
 
-echo "→ Syncing local repo (including openclaw workspaces/templates/agents files)..."
 RSYNC_ARGS=(
   -az
   --human-readable
@@ -54,19 +75,22 @@ if [[ "${SYNC_DELETE}" == "1" ]]; then
   RSYNC_ARGS+=(--delete)
 fi
 
-rsync "${RSYNC_ARGS[@]}" "${REPO_ROOT}/" "${REMOTE}:${APP_DIR}/"
+run_rsync "Syncing local repo" "${RSYNC_ARGS[@]}" "${REPO_ROOT}/" "${REMOTE}:${APP_DIR}/"
 
-echo "→ Syncing managed OpenClaw workspace(s) from local repo..."
-rsync -az --human-readable --delete \
+# Preserve runtime-generated meta workspace state on host (.openclaw/workspace-state.json).
+run_rsync "Syncing managed OpenClaw workspace(s) from local repo" -az --human-readable --delete \
+  --exclude '.openclaw/' \
   "${REPO_ROOT}/openclaw/workspaces/meta/" \
   "${REMOTE}:${APP_DIR}/openclaw/workspaces/meta/"
 
 echo "→ Running remote build/restart/apply steps..."
-ssh "${REMOTE}" bash -s "${APP_DIR}" "${RUNTIME_CONFIG_BACKUP}" "${NGINX_SITE_PATH}" <<'REMOTE'
+ssh "${SSH_OPTS[@]}" "${REMOTE}" bash -s "${APP_DIR}" "${RUNTIME_CONFIG_BACKUP}" "${NGINX_SITE_PATH}" "${APP_USER}" <<'REMOTE'
 set -euo pipefail
 APP_DIR="$1"
 RUNTIME_CONFIG_BACKUP="$2"
 NGINX_SITE_PATH="$3"
+APP_USER="$4"
+OVERRIDE_SRC="${APP_DIR}/infra/systemd/openclaw.service.d/override.conf"
 
 cd "${APP_DIR}"
 
@@ -117,110 +141,104 @@ fi
 rm -f "${RUNTIME_CONFIG_BACKUP}" || true
 
 echo "→ Fixing ownership..."
-chown -R openclaw:openclaw "${APP_DIR}" 2>/dev/null || true
+chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}" 2>/dev/null || true
 
 echo "→ Installing dependencies..."
-sudo -u openclaw bash -lc "cd '${APP_DIR}' && CI=1 pnpm install --frozen-lockfile --prod=false"
+sudo -u "${APP_USER}" bash -lc "cd '${APP_DIR}' && CI=1 pnpm install --frozen-lockfile --prod=false"
 
 echo "→ Cleaning stale tsbuildinfo caches..."
 find "${APP_DIR}/packages" -name 'tsconfig.tsbuildinfo' -delete 2>/dev/null || true
 
 echo "→ Building packages..."
-sudo -u openclaw bash -lc "cd '${APP_DIR}' && pnpm build"
+sudo -u "${APP_USER}" bash -lc "cd '${APP_DIR}' && pnpm build"
+
+echo "→ Applying OpenClaw gateway drop-in override (user-level service)..."
+OPENCLAW_USER_UNIT_DIR="/home/${APP_USER}/.config/systemd/user/openclaw-gateway.service.d"
+install -d -m 0755 "${OPENCLAW_USER_UNIT_DIR}"
+chown "${APP_USER}:${APP_USER}" "${OPENCLAW_USER_UNIT_DIR}"
+if [[ -f "${OVERRIDE_SRC}" ]]; then
+  sed "s|\${APP_DIR}|${APP_DIR}|g" "${OVERRIDE_SRC}" > "${OPENCLAW_USER_UNIT_DIR}/override.conf"
+  chown "${APP_USER}:${APP_USER}" "${OPENCLAW_USER_UNIT_DIR}/override.conf"
+else
+  echo "⚠️  Missing ${OVERRIDE_SRC} — skipping openclaw-gateway override"
+fi
+
+echo "→ Installing WebAgent service units from repo templates..."
+for unit in webagent-proxy webagent-admin; do
+  unit_src="${APP_DIR}/infra/systemd/${unit}.service"
+  unit_dst="/etc/systemd/system/${unit}.service"
+  if [[ -f "${unit_src}" ]]; then
+    sed -e "s|\${APP_DIR}|${APP_DIR}|g" -e "s|\${APP_USER}|${APP_USER}|g" "${unit_src}" > "${unit_dst}"
+  else
+    echo "⚠️  Missing ${unit_src} — keeping existing ${unit}.service"
+  fi
+done
 
 bash "${APP_DIR}/infra/admin-static-sync.sh" sync "${APP_DIR}"
 
 echo "→ Running DB migrations..."
-sudo -u openclaw bash -lc "cd '${APP_DIR}' && pnpm --filter @webagent/proxy db:migrate" || true
+if [[ -f "${APP_DIR}/.env" ]]; then
+  sudo -u "${APP_USER}" bash -lc "cd '${APP_DIR}' && set -a && source .env && set +a && pnpm --filter @webagent/proxy db:migrate" \
+    || echo "⚠️  DB migration failed (exit $?) — deployment continues but tables may be stale"
+else
+  echo "⚠️  No .env file at ${APP_DIR}/.env — skipping DB migrations"
+fi
 
-if [[ -f "${NGINX_SITE_PATH}" ]]; then
-  echo "→ Ensuring nginx /api auth routing + long-running API timeouts..."
-  python3 - "${NGINX_SITE_PATH}" <<'PY'
-import re
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-lines = text.splitlines()
-
-api_idx = None
-for i, line in enumerate(lines):
-    if re.search(r'^\s*location\s+/api/?\s*\{', line):
-        api_idx = i
-        break
-
-if api_idx is not None:
-    api_end = None
-    for j in range(api_idx + 1, len(lines)):
-        if lines[j].strip() == "}":
-            api_end = j
-            break
-    if api_end is not None:
-        block = lines[api_idx:api_end + 1]
-        has_read = any("proxy_read_timeout" in line for line in block)
-        has_send = any("proxy_send_timeout" in line for line in block)
-        insert_at = api_end
-        if not has_read:
-            lines.insert(insert_at, "        proxy_read_timeout 300s;")
-            insert_at += 1
-            api_end += 1
-        if not has_send:
-            lines.insert(insert_at, "        proxy_send_timeout 300s;")
-            api_end += 1
-
-if "location /api/auth/" not in "\n".join(lines):
-    admin_upstream = "admin_frontend" if "upstream admin_frontend" in text else "admin_upstream"
-    auth_block = [
-        "    # NextAuth routes -> Admin (inserted by infra/deploy.sh)",
-        "    location /api/auth/ {",
-        f"        proxy_pass http://{admin_upstream};",
-        "        proxy_http_version 1.1;",
-        "        proxy_set_header Host $host;",
-        "        proxy_set_header X-Real-IP $remote_addr;",
-        "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
-        "        proxy_set_header X-Forwarded-Proto $scheme;",
-        "    }",
-        "",
-    ]
-    insert_pos = 0
-    for i, line in enumerate(lines):
-        if re.search(r'^\s*location\s+/api/?\s*\{', line):
-            insert_pos = i
-            break
-    lines[insert_pos:insert_pos] = auth_block
-
-if "location /sso/" not in "\n".join(lines):
-    proxy_upstream = "proxy_upstream"
-    sso_block = [
-        "    # SSO / identity routes (inserted by infra/deploy.sh)",
-        "    location /sso/ {",
-        f"        proxy_pass http://{proxy_upstream};",
-        "        proxy_read_timeout 300s;",
-        "        proxy_send_timeout 300s;",
-        "        proxy_buffering on;",
-        "        limit_req zone=api_limit burst=60 nodelay;",
-        "        limit_req_status 429;",
-        "    }",
-        "",
-    ]
-    insert_pos = len(lines)
-    for i, line in enumerate(lines):
-        if re.search(r'^\s*location\s+/\s*\{', line):
-            insert_pos = i
-            break
-    lines[insert_pos:insert_pos] = sso_block
-
-new_text = "\n".join(lines) + "\n"
-if new_text != text:
-    path.write_text(new_text, encoding="utf-8")
-PY
+NGINX_TEMPLATE="${APP_DIR}/infra/nginx/webagent.conf"
+DOMAIN="${DOMAIN:-dev.lamoom.com}"
+if [[ -f "${NGINX_TEMPLATE}" ]]; then
+  echo "→ Installing nginx config from repo template..."
+  sed "s/\${DOMAIN}/${DOMAIN}/g" "${NGINX_TEMPLATE}" > "${NGINX_SITE_PATH}"
   nginx -t
   systemctl reload nginx
+else
+  echo "⚠️  Missing ${NGINX_TEMPLATE} — skipping nginx config"
+fi
+
+# ── DNS (BIND9) ──────────────────────────────────────────────────────────────
+BIND_DIR="${APP_DIR}/infra/bind"
+BIND_ZONE_DIR="${BIND_DIR}/zones"
+if [[ -d "${BIND_ZONE_DIR}" ]]; then
+  echo "→ Ensuring BIND9 is installed and running..."
+  if ! dpkg -s bind9 &>/dev/null; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::='--force-confold' bind9
+  fi
+  # Install BIND config from repo (never overwrite certbot-key.conf — it's a server secret)
+  install -d -m 0775 -g bind /etc/bind/zones
+  [[ -f "${BIND_DIR}/named.conf.local" ]] && cp "${BIND_DIR}/named.conf.local" /etc/bind/named.conf.local
+  [[ -f "${BIND_DIR}/named.conf.options" ]] && cp "${BIND_DIR}/named.conf.options" /etc/bind/named.conf.options
+  # Sync zone files from repo
+  cp "${BIND_ZONE_DIR}"/*.db /etc/bind/zones/ 2>/dev/null || true
+  # Fix permissions
+  chown -R bind:bind /var/cache/bind
+  chown -R root:bind /etc/bind/zones/
+  find /etc/bind/zones/ -type f -exec chmod 664 {} +
+  for f in /etc/bind/named.conf.options /etc/bind/named.conf.local /etc/bind/certbot-key.conf; do
+    [[ -f "$f" ]] && chown root:bind "$f" && chmod 640 "$f"
+  done
+  if ! systemctl is-active --quiet named; then
+    systemctl enable named
+    systemctl start named
+  else
+    rndc reload 2>/dev/null || systemctl reload named || true
+  fi
+  # Verify DNS is answering
+  if command -v dig &>/dev/null; then
+    DNS_RESULT="$(dig +short "${DOMAIN}" @127.0.0.1 2>/dev/null || true)"
+    if [[ -z "${DNS_RESULT}" ]]; then
+      echo "⚠️  BIND9 is running but not answering for ${DOMAIN}"
+    else
+      echo "✓ BIND9 resolves ${DOMAIN} → ${DNS_RESULT}"
+    fi
+  fi
+else
+  echo "⚠️  No BIND zone files at ${BIND_ZONE_DIR} — skipping DNS setup"
 fi
 
 echo "→ Restarting services..."
-systemctl restart openclaw-gateway || true
+systemctl daemon-reload
+# Restart OpenClaw gateway (user-level service)
+sudo -u "${APP_USER}" bash -lc "export XDG_RUNTIME_DIR=/run/user/\$(id -u); systemctl --user daemon-reload; systemctl --user restart openclaw-gateway.service" || true
 systemctl restart webagent-proxy
 systemctl restart webagent-admin
 sleep 4

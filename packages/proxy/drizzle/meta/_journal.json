@@ -8,6 +8,20 @@
       "when": 1776970257555,
       "tag": "0000_good_lady_deathstrike",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1777361479912,
+      "tag": "0001_public_electro",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1777362433050,
+      "tag": "0002_conscious_true_believers",
+      "breakpoints": true
     }
   ]
 }

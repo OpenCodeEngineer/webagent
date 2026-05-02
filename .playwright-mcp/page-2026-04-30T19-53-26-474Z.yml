@@ -1,0 +1,39 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - generic [ref=e4]:
+        - generic [ref=e5]:
+          - img [ref=e6]
+          - generic [ref=e9]: Lamoom
+        - separator [ref=e10]
+        - navigation [ref=e11]:
+          - link "Dashboard" [ref=e12] [cursor=pointer]:
+            - /url: /dashboard
+            - img
+            - text: Dashboard
+          - link "Create Agent" [ref=e13] [cursor=pointer]:
+            - /url: /create
+            - img
+            - text: Create Agent
+          - link "Settings" [ref=e14] [cursor=pointer]:
+            - /url: /dashboard/settings
+            - img
+            - text: Settings
+        - separator [ref=e15]
+        - generic [ref=e16]:
+          - generic [ref=e18]: D
+          - generic [ref=e19]: demo@lamoom.com
+          - button [ref=e20]:
+            - img
+    - generic [ref=e21]:
+      - banner [ref=e22]:
+        - generic [ref=e23]: demo@lamoom.com
+        - button "D" [ref=e24]:
+          - generic [ref=e26]: D
+      - main [ref=e27]:
+        - generic [ref=e29]:
+          - generic [ref=e31]:
+            - img [ref=e32]
+            - text: Settings
+          - paragraph [ref=e36]: Settings and configuration options coming soon.
+  - alert [ref=e37]

@@ -1,4 +1,7 @@
+<!-- TEMPLATE: All {{PLACEHOLDER}} values below MUST be replaced before use. -->
 # OpenClaw Console Knowledgebase
+
+Canonical API source for deterministic onboarding: `openclaw/workspaces/meta/knowledgebase/openclaw-console-api-surface.md`
 
 ## Product Summary
 OpenClaw Box is a managed AI assistant hosting platform. Users deploy their own OpenClaw instance
@@ -23,8 +26,10 @@ OpenClaw Box is a managed AI assistant hosting platform. Users deploy their own 
 1. `https://admin.openclaw.vibebrowser.app`
 2. `https://console.openclaw.vibebrowser.app`
 
-**Auth:** Bearer JWT. Obtain via `POST /api/v1/auth/login`. Pass as `Authorization: Bearer <token>`.
-Tokens auto-refresh via `POST /api/v1/auth/refresh` using the refresh token.
+**Auth:** Bearer JWT via `Authorization: Bearer <token>`.
+For this assistant, credentials must come from platform-provided session context (integration backend) — never from user-side browser token scraping.
+Resolve session auth context keys in this exact order: `Authorization`, `Bearer`, `apiToken`, `headers`.
+`POST /api/v1/auth/login` and `POST /api/v1/auth/refresh` are backend auth flows, not instructions for end users to extract tokens from DevTools/localStorage.
 
 ### Auth Endpoints
 | Method | Path | Description |
@@ -46,7 +51,7 @@ Tokens auto-refresh via `POST /api/v1/auth/refresh` using the refresh token.
 | GET | `/api/v1/tenants/:id` | Get single tenant details |
 | POST | `/api/v1/tenants` | Create tenant. Body: `{planId, tenantType: "personal"|"team", hostType: "container"|"vps", promoCode?, specialistPresets?: [...], vmProvider?: "hetzner"}`. Returns `{action: "created"}` or `{action: "payment_required", checkout: {...}}` |
 | DELETE | `/api/v1/tenants/:id` | Permanently delete tenant |
-| POST | `/api/v1/tenants/:id/restart` | Restart a running tenant |
+| POST | `/api/v1/tenants/:id/restart` | Restart a running tenant. Request body: none required (`{}` also accepted) |
 | GET | `/api/v1/tenants/:id/logs` | Get tenant logs. Query: `?tail=100` |
 
 ### Specialists
