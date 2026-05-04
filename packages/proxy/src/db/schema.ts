@@ -18,6 +18,7 @@ export const agents = pgTable('agents', {
     .notNull()
     .references(() => customers.id, { onDelete: 'cascade' }),
   openclawAgentId: text('openclaw_agent_id').notNull().unique(),
+  paperclipAgentId: text('paperclip_agent_id'),
   name: text('name').notNull(),
   websiteUrl: text('website_url'),
   description: text('description'),

@@ -13,6 +13,8 @@ export interface ProxyConfig {
   openClawGatewayUrl: string;
   openClawGatewayToken: string;
   openClawHooksToken: string;
+  paperclipEnabled: boolean;
+  paperclipUrl: string;
 }
 
 function getHost(): string {
@@ -77,5 +79,7 @@ export function loadConfig(): ProxyConfig {
     openClawGatewayUrl: getGatewayUrl(),
     openClawGatewayToken: gatewayToken,
     openClawHooksToken: getHooksToken(gatewayToken),
+    paperclipEnabled: process.env.PAPERCLIP_ENABLED?.trim().toLowerCase() === 'true',
+    paperclipUrl: process.env.PAPERCLIP_URL?.trim() || 'http://localhost:3100',
   };
 }

@@ -652,6 +652,14 @@ export async function detectAgentCreation(
   // Register agent in OpenClaw gateway config and restart gateway
   await registerAgentInOpenClaw(config.agentSlug, config.agentName, app, config.skills);
 
+  // Sync to Paperclip control plane (best-effort)
+  await syncAgentToPaperclip(app, {
+    id: createdAgent.id,
+    openclawAgentId: config.agentSlug,
+    name: config.agentName,
+    websiteUrl: config.websiteUrl ?? null,
+  });
+
   const existingEmbedRows = await app.db
     .select()
     .from(widgetEmbeds)
@@ -681,6 +689,43 @@ export async function detectAgentCreation(
     embedToken,
     embedCode,
   };
+}
+
+/**
+ * Best-effort sync of a newly-created agent to Paperclip.
+ * Failures are logged but never block the main flow.
+ */
+async function syncAgentToPaperclip(
+  app: FastifyInstance,
+  agentRow: { id: string; openclawAgentId: string; name: string; websiteUrl: string | null },
+): Promise<void> {
+  if (!app.paperclip?.isEnabled) return;
+  try {
+    const companyId = await app.paperclip.getDefaultCompanyId();
+    if (!companyId) {
+      app.log.warn('Paperclip: no company found — skipping agent sync');
+      return;
+    }
+    const result = await app.paperclip.upsertAgent({
+      companyId,
+      slug: agentRow.openclawAgentId,
+      name: agentRow.name,
+      openclawAgentId: agentRow.openclawAgentId,
+      websiteUrl: agentRow.websiteUrl,
+    });
+    if (result) {
+      // Store the Paperclip agent ID back in our DB
+      await app.db
+        .update(agents)
+        .set({ paperclipAgentId: result.id })
+        .where(eq(agents.id, agentRow.id));
+      app.log.info({ slug: agentRow.openclawAgentId, paperclipAgentId: result.id }, 'synced agent to Paperclip');
+    } else {
+      app.log.warn({ slug: agentRow.openclawAgentId }, 'Paperclip agent upsert returned null');
+    }
+  } catch (err) {
+    app.log.warn({ err, slug: agentRow.openclawAgentId }, 'failed to sync agent to Paperclip (non-fatal)');
+  }
 }
 
 export function registerApiRoutes(app: FastifyInstance) {
@@ -752,6 +797,18 @@ export function registerApiRoutes(app: FastifyInstance) {
           { err, openclawAgentId: body.openclawAgentId },
           'failed to register internal agent in openclaw — agent row created but gateway not updated',
         );
+      }
+
+      // Sync to Paperclip (best-effort)
+      try {
+        await syncAgentToPaperclip(app, {
+          id: createdAgent.id,
+          openclawAgentId: body.openclawAgentId,
+          name: body.name,
+          websiteUrl: body.websiteUrl ?? null,
+        });
+      } catch (err) {
+        request.log.warn({ err }, 'paperclip sync failed (non-fatal)');
       }
 
       const embedToken = randomUUID();
