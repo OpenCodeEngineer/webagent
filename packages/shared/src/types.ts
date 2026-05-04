@@ -12,6 +12,7 @@ export interface Agent {
   id: string;
   customerId: string;
   openclawAgentId: string;
+  paperclipAgentId: string | null;
   name: string;
   websiteUrl: string | null;
   description: string | null;

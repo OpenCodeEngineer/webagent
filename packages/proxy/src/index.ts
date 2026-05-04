@@ -4,6 +4,7 @@ import rateLimit from '@fastify/rate-limit';
 
 import { loadConfig } from './config.js';
 import { dbPlugin } from './db/plugin.js';
+import { paperclipPlugin } from './paperclip/plugin.js';
 import { registerApiRoutes } from './routes/api.js';
 import { registerAdminApiRoutes } from './routes/admin-api.js';
 import { registerHealthRoutes } from './routes/health.js';
@@ -28,6 +29,7 @@ const WS_MAX_PAYLOAD_BYTES = 12 * 1024 * 1024;
 await app.register(websocket, { options: { maxPayload: WS_MAX_PAYLOAD_BYTES } });
 await app.register(rateLimit, { max: 100, timeWindow: '1 minute' });
 await app.register(dbPlugin);
+await app.register(paperclipPlugin);
 
 registerHealthRoutes(app);
 registerWidgetRoutes(app);
