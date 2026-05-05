@@ -101,7 +101,8 @@ session key.
      │◄────────────────────┤                      │                      │
      │                     │                      │                      │
      │  <script src="https://dev.lamoom.com/widget.js"                   │
-     │    data-agent-token="<embedToken>" async></script>                │
+     │    data-agent-token="<embedToken>"                                │
+     │    data-user-id="<stable-or-random-visitor-id>" async></script>   │
      │                     │                      │                      │
      │  Customer pastes    │                      │                      │
      │  before </body>     │                      │                      │
@@ -1047,12 +1048,18 @@ actual `widget.js` bundle, so UI regressions in the real widget would not be vis
 
 ```html
 <script src="<widgetHost>/widget.js"
-        data-agent-token="<embedToken>" async></script>
+        data-agent-token="<embedToken>"
+        data-user-id="<stable-or-random-visitor-id>" async></script>
 ```
 
 The iframe's `srcDoc` is a minimal HTML document; `widgetHost` is resolved at runtime from
 `window.location.origin` (so it works on both dev and production without hardcoded URLs).
 This means the agent detail page now exercises the exact same code path a website visitor sees.
+
+Widget session identity contract:
+- If `data-user-id` is present, the widget sends that value in WS auth and the proxy maps it to a per-user session key.
+- If `data-user-id` is omitted, widget falls back to persisted `localStorage.lamoom_uid` for continuity.
+- For E2E isolation, inject a browser-generated UUID in `data-user-id` and cache-bust the script URL (`widget.js?cb=<ts>`).
 
 ---
 
