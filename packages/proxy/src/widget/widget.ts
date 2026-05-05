@@ -46,7 +46,11 @@
   const userTokenKey = activeScript?.getAttribute('data-user-token-key')?.trim();
   const userToken = userTokenDirect || (userTokenKey ? (win.localStorage?.getItem(userTokenKey)?.trim() ?? '') : '');
 
+  // Preferred: explicit user ID supplied by embed script.
+  // Backward compatibility: fall back to persisted lamoom_uid when absent.
+  const explicitUserId = activeScript?.getAttribute('data-user-id')?.trim();
   const userId = (() => {
+    if (explicitUserId) return explicitUserId;
     const existing = win.localStorage?.getItem('lamoom_uid')?.trim();
     if (existing) return existing;
     const generated =
