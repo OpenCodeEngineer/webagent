@@ -1,4 +1,4 @@
-import { integer, pgTable, primaryKey, text, timestamp } from 'drizzle-orm/pg-core';
+import { integer, pgTable, primaryKey, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id: text('id').primaryKey(),
@@ -51,5 +51,22 @@ export const verificationTokens = pgTable(
     compositePk: primaryKey({
       columns: [verificationToken.identifier, verificationToken.token],
     }),
+  }),
+);
+
+export const inviteCodes = pgTable(
+  'invite_codes',
+  {
+    id: text('id').primaryKey(),
+    code: text('code').notNull(),
+    createdBy: text('createdBy').references(() => users.id, { onDelete: 'cascade' }),
+    email: text('email'),
+    usedBy: text('usedBy').references(() => users.id, { onDelete: 'set null' }),
+    usedAt: timestamp('usedAt', { mode: 'date' }),
+    expiresAt: timestamp('expiresAt', { mode: 'date' }),
+    createdAt: timestamp('createdAt', { mode: 'date' }).defaultNow().notNull(),
+  },
+  (table) => ({
+    uniqueCode: uniqueIndex('invite_codes_code_unique').on(table.code),
   }),
 );

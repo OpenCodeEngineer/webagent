@@ -28,14 +28,24 @@
         currentScript?: unknown;
         createElement: (tag: string) => any;
         querySelector: (selector: string) => unknown;
+        querySelectorAll?: (selector: string) => ArrayLike<unknown>;
       }
     | undefined;
   if (!doc?.body || win.__lamoomWidgetLoaded) return;
   win.__lamoomWidgetLoaded = true;
 
-  const activeScript = (doc.currentScript ?? doc.querySelector('script[data-agent-token]')) as
-    | { getAttribute: (name: string) => string | null; src?: string }
-    | undefined;
+  const activeScript = (() => {
+    if (doc.currentScript) {
+      return doc.currentScript as { getAttribute: (name: string) => string | null; src?: string };
+    }
+
+    const scripts = Array.from(doc.querySelectorAll?.('script[data-agent-token]') ?? []) as Array<{
+      getAttribute: (name: string) => string | null;
+      src?: string;
+    }>;
+
+    return scripts.length > 0 ? scripts[scripts.length - 1] : undefined;
+  })();
   const agentToken = activeScript?.getAttribute('data-agent-token')?.trim();
   if (!agentToken) return;
 

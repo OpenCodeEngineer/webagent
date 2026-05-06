@@ -1,4 +1,5 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, rmdir, stat } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'node:os';
@@ -239,11 +240,16 @@ export function buildWidgetEmbedCode(domain: string, embedToken: string, userTok
  *        > ~/.openclaw/openclaw.json
  */
 export function resolveOpenClawConfigPath(): string {
-  return (
-    process.env.OPENCLAW_CONFIG_PATH?.trim()
-    || join(process.cwd(), 'openclaw', 'config', 'openclaw.json5')
-    || join(homedir(), '.openclaw', 'openclaw.json')
-  );
+  const configured = process.env.OPENCLAW_CONFIG_PATH?.trim();
+  if (configured) return configured;
+
+  const cwdPath = join(process.cwd(), 'openclaw', 'config', 'openclaw.json5');
+  if (existsSync(cwdPath)) return cwdPath;
+
+  const repoRootPath = join(process.cwd(), '..', '..', 'openclaw', 'config', 'openclaw.json5');
+  if (existsSync(repoRootPath)) return repoRootPath;
+
+  return join(homedir(), '.openclaw', 'openclaw.json');
 }
 
 /**
@@ -251,10 +257,16 @@ export function resolveOpenClawConfigPath(): string {
  * Mirrors the fallback logic in detectAgentCreation.
  */
 export function resolveOpenClawWorkspacesDir(): string {
-  return (
-    process.env.OPENCLAW_WORKSPACES_DIR?.trim()
-    || join(process.cwd(), 'openclaw', 'workspaces')
-  );
+  const configured = process.env.OPENCLAW_WORKSPACES_DIR?.trim();
+  if (configured) return configured;
+
+  const cwdPath = join(process.cwd(), 'openclaw', 'workspaces');
+  if (existsSync(cwdPath)) return cwdPath;
+
+  const repoRootPath = join(process.cwd(), '..', '..', 'openclaw', 'workspaces');
+  if (existsSync(repoRootPath)) return repoRootPath;
+
+  return join(homedir(), '.openclaw', 'workspaces');
 }
 
 /**
