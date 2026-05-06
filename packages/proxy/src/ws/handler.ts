@@ -244,6 +244,18 @@ function normalizeSessionAuthContext(rawContext: Record<string, unknown>): Recor
   return normalized;
 }
 
+function hasAuthCredentials(context: Record<string, unknown>): boolean {
+  const apiToken = typeof context.apiToken === 'string' ? context.apiToken.trim() : '';
+  const authHeader = typeof context.Authorization === 'string' ? context.Authorization.trim() : '';
+  const bearer = typeof context.Bearer === 'string' ? context.Bearer.trim() : '';
+  const token = typeof context.token === 'string' ? context.token.trim() : '';
+  const headers = isRecord(context.headers) ? context.headers : null;
+  const headerAuth = headers && typeof headers.Authorization === 'string'
+    ? headers.Authorization.trim()
+    : '';
+  return Boolean(apiToken || authHeader || bearer || token || headerAuth);
+}
+
 export function buildWidgetMessageWithSessionPolicy(userContext: Record<string, unknown>, customerContent: string): string {
   const credentialPolicy
     = 'Credential source: server-side session auth context provided by the widget/integration backend.\n'
@@ -605,17 +617,22 @@ export function handleConnection(
             state.userContext = normalizeSessionAuthContext(serverAuthCtx as Record<string, unknown>);
           }
 
-          // Client context: allow auth passthrough only when widgetConfig.allowClientAuth is true
+          const hasServerAuthCredentials = hasAuthCredentials(state.userContext);
+
+          // Client context: allow auth passthrough when explicitly enabled,
+          // or when no server-side auth context is configured.
           const allowClientAuth = !!(tokenData.widgetConfig as Record<string, unknown> | null)?.allowClientAuth;
+          const allowClientAuthFallback = allowClientAuth || !hasServerAuthCredentials;
           const rawContext = msg.context;
           if (rawContext && typeof rawContext === 'object' && !Array.isArray(rawContext)) {
             const clientCtx = rawContext as Record<string, unknown>;
             const AUTH_KEYS = new Set(['Authorization', 'Bearer', 'apiToken', 'token', 'headers']);
             for (const [k, v] of Object.entries(clientCtx)) {
-              if (allowClientAuth || !AUTH_KEYS.has(k)) {
+              if (allowClientAuthFallback || !AUTH_KEYS.has(k)) {
                 state.userContext[k] = v;
               }
             }
+            state.userContext = normalizeSessionAuthContext(state.userContext);
             if (Object.keys(state.userContext).length > 0) {
               state.firstMessage = true;
             }
@@ -698,6 +715,7 @@ export function handleConnection(
               message: outboundMessage,
               agentId: state.openclawAgentId,
               sessionKey: state.sessionKey,
+              timeoutSeconds: 180,
               onDelta: (delta) => {
                 if (!delta) {
                   return;
@@ -745,6 +763,7 @@ export function handleConnection(
                     message: outboundMessage,
                     agentId: state.openclawAgentId,
                     sessionKey: state.sessionKey,
+                    timeoutSeconds: 180,
                     onDelta: (delta) => {
                       if (!delta) {
                         return;

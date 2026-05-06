@@ -7,11 +7,16 @@
 
 SaaS platform where business owners create AI chat agents for their websites.
 Customers describe their site/API in natural language to a **meta-agent**, which
-provisions a dedicated OpenClaw agent, generates workspace files (`AGENTS.md`,
+provisions a dedicated OpenClaw **product-agent**, generates workspace files (`AGENTS.md`,
 `SOUL.md`, `IDENTITY.md`, `TOOLS.md`, `USER.md`) plus skills/knowledgebase files,
 and outputs an embeddable widget `<script>` tag. Website visitors chat through the
 widget; the proxy maps each `(agent, visitor)` pair to a deterministic OpenClaw
 session key.
+
+## Terminology
+
+- **Meta-agent**: the admin-facing agent used on `/create` to discover requirements and generate new agents.
+- **Product-agent**: the generated runtime agent that powers widget chat and executes domain tasks (for example, HubSpot CRM actions).
 
 **Repo:** `OpenCodeEngineer/webagent` (pnpm monorepo + Turborepo)
 
@@ -259,7 +264,7 @@ Customer logs in → Dashboard
 | Product concept | Persistent key(s) | Runtime mapping |
 |---|---|---|
 | Business owner (tenant) | `customers.id` (UUID) | Used for admin auth, audit, and meta session scoping |
-| Customer agent | `agents.id` + `agents.openclawAgentId` | `openclawAgentId` is the OpenClaw model slug (`openclaw/<openclawAgentId>`) |
+| Product-agent | `agents.id` + `agents.openclawAgentId` | `openclawAgentId` is the OpenClaw model slug (`openclaw/<openclawAgentId>`) |
 | Widget embed identity | `widget_embeds.embedToken` | Script token resolves to one active `agents` row |
 | Website visitor identity | `widget_sessions.externalUserId` | Provided by widget auth payload (`userId`) |
 | Widget chat session | `widget_sessions` row keyed by `(agentId, externalUserId)` | `openclawSessionKey = agent:<openclawAgentId>:widget-<openclawAgentId>-<externalUserId>` |
@@ -351,9 +356,9 @@ OpenClaw template references:
 
 The meta-agent is **not** a special OpenClaw concept — it's a regular agent with
 `id: "meta"` in the `agents.list` config. OpenClaw treats it the same as any
-customer agent. What makes it different is how we configure it:
+product-agent. What makes it different is how we configure it:
 
-| Property | Meta-agent | Customer agents |
+| Property | Meta-agent | Product-agents |
 |---|---|---|
 | `sandbox.mode` | `"off"` — can write files anywhere | `"off"` + workspace-scoped tools |
 | `tools.deny` | `["browser", "canvas"]` only | `["exec", "process", "browser", "canvas", "nodes", "gateway"]` |
@@ -364,7 +369,7 @@ customer agent. What makes it different is how we configure it:
 The meta-agent has `sandbox: "off"` because it needs filesystem access to create
 new workspace directories. It does NOT edit `openclaw.json` directly — the proxy
 handles agent registration automatically when it detects the `[AGENT_CREATED::]`
-marker. Customer agents are restricted to their own workspace via workspace-scoped
+marker. Product-agents are restricted to their own workspace via workspace-scoped
 tool access.
 
 ---
@@ -463,7 +468,7 @@ webagent/
 │
 ├── openclaw/
 │   ├── config/openclaw.json5         Multi-agent config (hooks, sandbox, cron, session)
-│   ├── templates/                    Base templates for new customer agents (AGENTS/SOUL/IDENTITY/TOOLS/USER.md)
+│   ├── templates/                    Base templates for new product-agents (AGENTS/SOUL/IDENTITY/TOOLS/USER.md)
 │   └── workspaces/
 │       └── meta/                     Meta-agent workspace + create-agent skill
 │
@@ -481,7 +486,7 @@ webagent/
 
 ### Proxy ↔ OpenClaw: Single WS Connection
 - Proxy maintains ONE persistent WebSocket to OpenClaw gateway (`:18789`)
-- Both admin (meta-agent) and widget (customer agent) traffic multiplexed on same WS
+- Both admin (meta-agent) and widget (product-agent) traffic multiplexed on same WS
 - Agent selected via `model: "openclaw/<agentId>"` in each request
 - Widget session key format:
   `agent:<openclawAgentId>:widget-<openclawAgentId>-<externalUserId>`

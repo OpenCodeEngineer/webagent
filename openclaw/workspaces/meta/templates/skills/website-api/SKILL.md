@@ -67,7 +67,10 @@ fetch("{{API_BASE_URL}}/endpoint", {
 
 ## Usage Rules
 
-1. **Always confirm** before performing actions that modify data (e.g., placing orders, updating profiles).
+1. **Confirmation policy:**
+   - For destructive/high-risk mutations (delete, irreversible state change, financial action), confirm first.
+   - For low-risk, unambiguous mutations with complete fields (for example create a contact with full required fields), execute directly.
+   - If you asked for confirmation and user says yes, execute the exact proposed API call immediately; do not reset context.
 2. **Never expose** API keys, tokens, or internal URLs to visitors.
 3. **Handle errors gracefully** — if an API call fails, explain what went wrong in plain language.
 4. **Rate limiting** — do not make more than 5 API calls per visitor message.

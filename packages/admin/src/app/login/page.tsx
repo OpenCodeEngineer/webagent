@@ -12,6 +12,7 @@ import { Separator } from "@/components/ui/separator";
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [magicEmail, setMagicEmail] = useState("");
@@ -24,6 +25,7 @@ export default function LoginPage() {
     const result = await signIn("credentials", {
       email,
       password,
+      inviteCode: inviteCode || undefined,
       redirect: false,
     });
     if (result?.error) {
@@ -73,6 +75,16 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="inviteCode">Invite Code (optional)</Label>
+              <Input
+                id="inviteCode"
+                type="text"
+                value={inviteCode}
+                onChange={(e) => setInviteCode(e.target.value)}
+                placeholder="Enter invite code if you have one"
               />
             </div>
             <Button type="submit" className="w-full" disabled={loading}>

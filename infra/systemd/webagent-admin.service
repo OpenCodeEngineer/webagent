@@ -9,9 +9,10 @@ Requires=webagent-proxy.service
 Type=simple
 User=${APP_USER}
 Group=${APP_USER}
-WorkingDirectory=${APP_DIR}
+WorkingDirectory=${APP_DIR}/packages/admin
 EnvironmentFile=-${APP_DIR}/.env
-ExecStart=/usr/bin/pnpm --filter @webagent/admin start
+Environment=PORT=3000
+ExecStart=/bin/bash -lc 'set -euo pipefail; if [[ ! -d "${APP_DIR}/packages/admin/.next/static" ]]; then echo "webagent-admin missing static assets directory: ${APP_DIR}/packages/admin/.next/static" >&2; exit 1; fi; if [[ -f "${APP_DIR}/packages/admin/.next/standalone/server.js" ]]; then exec /usr/bin/env PORT=3000 /usr/bin/node "${APP_DIR}/packages/admin/.next/standalone/server.js"; fi; if [[ -f "${APP_DIR}/packages/admin/.next/standalone/packages/admin/server.js" ]]; then exec /usr/bin/env PORT=3000 /usr/bin/node "${APP_DIR}/packages/admin/.next/standalone/packages/admin/server.js"; fi; echo "webagent-admin missing Next standalone entrypoint. Expected one of:" >&2; echo "  ${APP_DIR}/packages/admin/.next/standalone/server.js" >&2; echo "  ${APP_DIR}/packages/admin/.next/standalone/packages/admin/server.js" >&2; echo "Run build first: pnpm build" >&2; exit 1'
 
 Restart=on-failure
 RestartSec=5s
