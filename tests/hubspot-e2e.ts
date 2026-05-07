@@ -143,7 +143,7 @@ const MAIN_MODEL = {
 };
 const EVAL_MODEL = {
   providerID: process.env.OPENCODE_EVAL_PROVIDER ?? MAIN_MODEL.providerID,
-  modelID: process.env.OPENCODE_EVAL_MODEL ?? "claude-sonnet-4.5",
+  modelID: process.env.OPENCODE_EVAL_MODEL ?? MAIN_MODEL.modelID,
 };
 
 const LAMOOM_EMAIL = process.env.LAMOOM_EMAIL ?? getArg("lamoom-email") ?? "demo@lamoom.com";
@@ -448,6 +448,8 @@ Quality rules for the product-agent:
 - Keep responses concise and user-facing (no raw JSON dumps).
 - Never expose the Bearer token.
 - For ambiguous requests, always clarify before mutating data.
+- Never mention internal implementation details or tooling in end-user responses (for example curl/fetch/API call internals).
+- Present only outcome-focused language suitable for end users.
 
 Please create it now and return the embed script with data-agent-token.`;
 }
@@ -804,19 +806,42 @@ describe("HubSpot product-agent E2E", () => {
         `Scenario '${scenario.name}' final response was off-topic or reset`
       );
 
-      const evalSession = await createSession(`hubspot-eval: ${scenario.name}`);
-      console.log(`  Evaluator session: ${evalSession.id}`);
+      const evalAttempts = [
+        { model: EVAL_MODEL, suffix: "" },
+        ...(EVAL_MODEL.providerID !== MAIN_MODEL.providerID || EVAL_MODEL.modelID !== MAIN_MODEL.modelID
+          ? [{ model: MAIN_MODEL, suffix: " (retry-main-model)" }]
+          : []),
+      ];
 
-      await sendPromptAsync(evalSession.id, evalPrompt(scenario, execOutput, report), EVAL_MODEL);
-      console.log("  Evaluator prompt sent. Waiting...");
+      let evalResult: EvalResult | null = null;
+      let lastEvalOutput = "";
+      let lastEvalError = "";
 
-      const evalOutput = await waitForCompletion(evalSession.id, EVAL_TIMEOUT_MS);
+      for (const attempt of evalAttempts) {
+        const evalSession = await createSession(`hubspot-eval: ${scenario.name}${attempt.suffix}`);
+        console.log(
+          `  Evaluator session: ${evalSession.id} (${attempt.model.providerID}/${attempt.model.modelID})`
+        );
 
-      let evalResult: EvalResult;
-      try {
-        evalResult = parseJsonFromOutput<EvalResult>(evalOutput);
-      } catch (err) {
-        throw new Error(`Scenario '${scenario.name}' evaluator JSON parse failed: ${err instanceof Error ? err.message : String(err)}`);
+        await sendPromptAsync(evalSession.id, evalPrompt(scenario, execOutput, report), attempt.model);
+        console.log("  Evaluator prompt sent. Waiting...");
+
+        const evalOutput = await waitForCompletion(evalSession.id, EVAL_TIMEOUT_MS);
+        lastEvalOutput = evalOutput;
+
+        try {
+          evalResult = parseJsonFromOutput<EvalResult>(evalOutput);
+          break;
+        } catch (err) {
+          lastEvalError = err instanceof Error ? err.message : String(err);
+          console.warn(`  Evaluator parse failed on ${attempt.model.modelID}: ${lastEvalError}`);
+        }
+      }
+
+      if (!evalResult) {
+        throw new Error(
+          `Scenario '${scenario.name}' evaluator JSON parse failed after ${evalAttempts.length} attempt(s): ${lastEvalError}\n${lastEvalOutput.slice(-1000)}`
+        );
       }
 
       console.log(`  Score: ${evalResult.total}/6 — ${evalResult.pass ? "PASS" : "FAIL"}`);
