@@ -73,6 +73,21 @@ Use evaluator child sessions to score:
 
 Pass threshold: `>= 5/6` per scenario.
 
+## Evidence Requirements (Release Gate)
+
+- Capture **viewport screenshots** (`fullPage: false`) for the full pipeline; do not use long-page screenshots as primary proof.
+- Use a fixed viewport (recommended: `1366x768`) and keep it constant across the run.
+- Capture frames continuously (recommended: ~1 frame/second during wait periods) so response timing is visible.
+- Required pipeline coverage in evidence:
+  1. `dev.lamoom.com/login` (credentials entered and sign-in submitted)
+  2. `/create` meta-agent prompt sent
+  3. Meta-agent creation response / marker
+  4. Dashboard agent listing and agent details (embed token visible)
+  5. Test chat on details page
+  6. HubSpot context page with widget injected, message sent, response shown
+- Assemble a GIF from captured frames and store under `e2e-demo-output/<run-id>/`.
+- A harness PASS without screenshot/GIF artifacts is **not** a release-ready proof.
+
 ## Prohibited Shortcuts
 
 - Do not use direct HubSpot API calls (`curl`, SDK, raw fetch) to execute scenario actions.
@@ -104,7 +119,7 @@ Optional:
 Evaluator model overrides:
 
 - `OPENCODE_EVAL_PROVIDER` (defaults to `OPENCODE_PROVIDER`)
-- `OPENCODE_EVAL_MODEL` (defaults to `claude-sonnet-4.5`)
+- `OPENCODE_EVAL_MODEL` (defaults to `OPENCODE_MODEL`; harness retries with main model fallback on evaluator parse failures)
 
 Examples:
 
