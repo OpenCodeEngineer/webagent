@@ -61,6 +61,15 @@ export default async function AgentDetailPage({ params }: Props) {
             >
               {agent.status ?? "unknown"}
             </Badge>
+            {agent.paperclipAgentId ? (
+              <Badge variant="outline" className="shrink-0 border-blue-500 text-blue-600">
+                Paperclip synced
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="shrink-0 border-yellow-500 text-yellow-600">
+                Not synced
+              </Badge>
+            )}
           </div>
           {agent.createdAt && (
             <CardDescription>
@@ -86,6 +95,26 @@ export default async function AgentDetailPage({ params }: Props) {
             </CardHeader>
             <CardContent>
               <AgentDetailActions agentId={agent.id} embedCode={embedCode} />
+            </CardContent>
+          </Card>
+
+          {/* Paperclip Status */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Paperclip Integration</CardTitle>
+              <CardDescription>Control plane sync status.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+                <dt className="text-muted-foreground">Status</dt>
+                <dd>{agent.paperclipAgentId ? "Synced" : "Not synced"}</dd>
+                {Boolean(agent.paperclipAgentId) && (
+                  <>
+                    <dt className="text-muted-foreground">Paperclip Agent ID</dt>
+                    <dd className="font-mono text-xs break-all">{String(agent.paperclipAgentId)}</dd>
+                  </>
+                )}
+              </dl>
             </CardContent>
           </Card>
 

@@ -18,4 +18,12 @@ export function registerHealthRoutes(app: FastifyInstance) {
     const ok = await openclaw.ping();
     return { status: ok ? 'ok' : 'unreachable', timestamp: new Date().toISOString() };
   });
+
+  app.get('/health/paperclip', async () => {
+    if (!app.paperclip?.isEnabled) {
+      return { status: 'disabled', timestamp: new Date().toISOString() };
+    }
+    const ok = await app.paperclip.healthCheck();
+    return { status: ok ? 'ok' : 'unreachable', timestamp: new Date().toISOString() };
+  });
 }
