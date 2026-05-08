@@ -55,10 +55,12 @@ export class PaperclipClient {
    */
   async listCompanies(): Promise<PaperclipCompany[]> {
     if (!this.enabled) return [];
-    const res = await this.request('/api/v1/companies');
+    const res = await this.request('/api/companies');
     if (!res.ok) return [];
-    const data = (await res.json()) as { companies?: PaperclipCompany[] };
-    return data.companies ?? [];
+    const data = await res.json();
+    // Paperclip returns a raw array, not { companies: [...] }
+    const arr = Array.isArray(data) ? data : (data as { companies?: PaperclipCompany[] }).companies ?? [];
+    return arr as PaperclipCompany[];
   }
 
   /**
@@ -99,7 +101,7 @@ export class PaperclipClient {
     if (existing) {
       // Update
       const res = await this.request(
-        `/api/v1/companies/${params.companyId}/agents/${existing.id}`,
+        `/api/companies/${params.companyId}/agents/${existing.id}`,
         { method: 'PATCH', body: JSON.stringify(body) },
       );
       if (!res.ok) return null;
@@ -108,7 +110,7 @@ export class PaperclipClient {
 
     // Create
     const res = await this.request(
-      `/api/v1/companies/${params.companyId}/agents`,
+      `/api/companies/${params.companyId}/agents`,
       { method: 'POST', body: JSON.stringify(body) },
     );
     if (!res.ok) return null;
@@ -120,10 +122,12 @@ export class PaperclipClient {
    */
   async findAgentBySlug(companyId: string, slug: string): Promise<PaperclipAgent | null> {
     if (!this.enabled) return null;
-    const res = await this.request(`/api/v1/companies/${companyId}/agents?slug=${encodeURIComponent(slug)}`);
+    // Paperclip may not support slug query param — list all and filter locally
+    const res = await this.request(`/api/companies/${companyId}/agents`);
     if (!res.ok) return null;
-    const data = (await res.json()) as { agents?: PaperclipAgent[] };
-    return data.agents?.[0] ?? null;
+    const data = await res.json();
+    const arr: PaperclipAgent[] = Array.isArray(data) ? data : (data as { agents?: PaperclipAgent[] }).agents ?? [];
+    return arr.find((a) => a.slug === slug) ?? null;
   }
 
   /**
@@ -132,7 +136,7 @@ export class PaperclipClient {
   async deleteAgent(companyId: string, agentId: string): Promise<boolean> {
     if (!this.enabled) return false;
     const res = await this.request(
-      `/api/v1/companies/${companyId}/agents/${agentId}`,
+      `/api/companies/${companyId}/agents/${agentId}`,
       { method: 'DELETE' },
     );
     return res.ok;
@@ -148,7 +152,7 @@ export class PaperclipClient {
   }): Promise<boolean> {
     if (!this.enabled) return false;
     const res = await this.request(
-      `/api/v1/companies/${params.companyId}/adapters/openclaw-gateway`,
+      `/api/companies/${params.companyId}/adapters/openclaw-gateway`,
       {
         method: 'PUT',
         body: JSON.stringify({

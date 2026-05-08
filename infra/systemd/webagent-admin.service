@@ -11,7 +11,7 @@ User=${APP_USER}
 Group=${APP_USER}
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=-${APP_DIR}/.env
-ExecStart=/usr/bin/pnpm --filter @webagent/admin start
+ExecStart=/usr/bin/env PORT=3000 /usr/bin/pnpm --filter @webagent/admin exec -- next start -p 3000
 
 Restart=on-failure
 RestartSec=5s

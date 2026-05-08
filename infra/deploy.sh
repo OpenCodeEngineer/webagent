@@ -9,6 +9,7 @@ DEPLOY_USER="${DEPLOY_USER:-root}"
 APP_DIR="${APP_DIR:-/opt/webagent}"
 APP_USER="${APP_USER:-openclaw}"
 NGINX_SITE_PATH="${NGINX_SITE_PATH:-/etc/nginx/sites-enabled/openclaw}"
+DOMAIN="${DOMAIN:-dev.lamoom.com}"
 SYNC_DELETE="${SYNC_DELETE:-1}"
 REMOTE="${DEPLOY_USER}@${HOST}"
 SSH_OPTS=(
@@ -84,12 +85,13 @@ run_rsync "Syncing managed OpenClaw workspace(s) from local repo" -az --human-re
   "${REMOTE}:${APP_DIR}/openclaw/workspaces/meta/"
 
 echo "→ Running remote build/restart/apply steps..."
-ssh "${SSH_OPTS[@]}" "${REMOTE}" bash -s "${APP_DIR}" "${RUNTIME_CONFIG_BACKUP}" "${NGINX_SITE_PATH}" "${APP_USER}" <<'REMOTE'
+ssh "${SSH_OPTS[@]}" "${REMOTE}" bash -s "${APP_DIR}" "${RUNTIME_CONFIG_BACKUP}" "${NGINX_SITE_PATH}" "${APP_USER}" "${DOMAIN}" <<'REMOTE'
 set -euo pipefail
 APP_DIR="$1"
 RUNTIME_CONFIG_BACKUP="$2"
 NGINX_SITE_PATH="$3"
 APP_USER="$4"
+DOMAIN="$5"
 OVERRIDE_SRC="${APP_DIR}/infra/systemd/openclaw.service.d/override.conf"
 
 cd "${APP_DIR}"
@@ -185,7 +187,6 @@ else
 fi
 
 NGINX_TEMPLATE="${APP_DIR}/infra/nginx/webagent.conf"
-DOMAIN="${DOMAIN:-dev.lamoom.com}"
 if [[ -f "${NGINX_TEMPLATE}" ]]; then
   echo "→ Installing nginx config from repo template..."
   sed "s/\${DOMAIN}/${DOMAIN}/g" "${NGINX_TEMPLATE}" > "${NGINX_SITE_PATH}"
