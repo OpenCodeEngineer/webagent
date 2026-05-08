@@ -718,6 +718,16 @@ async function syncAgentToPaperclip(
       app.log.warn('Paperclip: no company found — skipping agent sync');
       return;
     }
+    // Ensure the openclaw-gateway adapter is configured for this company
+    const gatewayUrl = `http://127.0.0.1:${process.env.OPENCLAW_PORT ?? '18789'}`;
+    const adapterOk = await app.paperclip.configureAdapter({
+      companyId,
+      gatewayUrl,
+      gatewayToken: process.env.OPENCLAW_GATEWAY_TOKEN,
+    });
+    if (!adapterOk) {
+      app.log.warn('Paperclip: failed to configure openclaw-gateway adapter (continuing anyway)');
+    }
     const result = await app.paperclip.upsertAgent({
       companyId,
       slug: agentRow.openclawAgentId,
@@ -1116,6 +1126,25 @@ Customer: ${normalizedLatestMessage}`
         fields: Object.keys(body),
       });
 
+      // Best-effort Paperclip status sync
+      if (body.status && body.status !== existingAgent.status && app.paperclip?.isEnabled && updated.paperclipAgentId) {
+        try {
+          const companyId = await app.paperclip.getDefaultCompanyId();
+          if (companyId) {
+            await app.paperclip.upsertAgent({
+              companyId,
+              slug: updated.openclawAgentId,
+              name: updated.name,
+              openclawAgentId: updated.openclawAgentId,
+              websiteUrl: updated.websiteUrl,
+            });
+            app.log.info({ paperclipAgentId: updated.paperclipAgentId, newStatus: body.status }, 'synced agent status to Paperclip');
+          }
+        } catch (err) {
+          app.log.warn({ err, paperclipAgentId: updated.paperclipAgentId }, 'failed to sync agent status to Paperclip (non-fatal)');
+        }
+      }
+
       if (body.status && body.status !== existingAgent.status) {
         const embedRows = await app.db
           .select({ embedToken: widgetEmbeds.embedToken })
@@ -1178,6 +1207,19 @@ Customer: ${normalizedLatestMessage}`
         return sendError(reply, 404, 'not_found', 'Agent not found');
       }
       await insertAuditLog(app, customerId, 'agent.delete', { agentId: params.id });
+
+      // Best-effort Paperclip delete
+      if (app.paperclip?.isEnabled && updated.paperclipAgentId) {
+        try {
+          const companyId = await app.paperclip.getDefaultCompanyId();
+          if (companyId) {
+            await app.paperclip.deleteAgent(companyId, updated.paperclipAgentId);
+            app.log.info({ paperclipAgentId: updated.paperclipAgentId }, 'deleted agent from Paperclip');
+          }
+        } catch (err) {
+          app.log.warn({ err, paperclipAgentId: updated.paperclipAgentId }, 'failed to delete agent from Paperclip (non-fatal)');
+        }
+      }
 
       for (const embedRow of embedRows) {
         invalidateEmbedTokenCache(embedRow.embedToken);
