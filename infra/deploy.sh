@@ -10,6 +10,7 @@ APP_DIR="${APP_DIR:-/opt/webagent}"
 APP_USER="${APP_USER:-openclaw}"
 DOMAIN="${DOMAIN:-dev.lamoom.com}"
 NGINX_SITE_PATH="${NGINX_SITE_PATH:-/etc/nginx/sites-enabled/openclaw}"
+DOMAIN="${DOMAIN:-dev.lamoom.com}"
 SYNC_DELETE="${SYNC_DELETE:-1}"
 REMOTE="${DEPLOY_USER}@${HOST}"
 SSH_OPTS=(
