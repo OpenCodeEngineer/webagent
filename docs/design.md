@@ -477,7 +477,7 @@ webagent/
 ├── infra/
 │   ├── setup.sh                      Full VM provisioning (Node, pnpm, nginx, certbot, systemd, UFW)
 │   ├── nginx/webagent.conf           Rate limiting, SSL, WS upgrade, caching
-│   └── systemd/                      3 service units (openclaw-gateway, webagent-proxy, webagent-admin)
+│   └── systemd/                      2 service units (webagent-proxy, webagent-admin); openclaw-gateway is managed by `openclaw gateway install`
 │
 └── docs/design.md                    This file
 ```
@@ -767,7 +767,7 @@ openclaw agents list                   # List configured agents
 - **VM:** 2 ARM vCPU, 4GB RAM, 40GB SSD, ~€4.29/mo
 - **OS:** Ubuntu 24.04 ARM
 - **Provisioning:** `bash infra/setup.sh` (installs Node 24, pnpm, nginx, certbot, creates systemd services)
-- **Services:** openclaw-gateway → webagent-proxy → webagent-admin (dependency chain)
+- **Services:** webagent-proxy, webagent-admin (systemd); openclaw-gateway is installed/managed by `openclaw gateway install` (see docs/openclaw.md)
 - **SSL:** Let's Encrypt via certbot + nginx
 - **Firewall:** UFW (SSH + Nginx only)
 - **No Docker** — workspace-scoped tool sandboxing instead
