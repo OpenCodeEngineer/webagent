@@ -26,7 +26,6 @@ export const agents = pgTable('agents', {
   widgetConfig: jsonb('widget_config').default({}).notNull(),
   apiDescription: text('api_description'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  paperclipAgentId: text('paperclip_agent_id'),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
 });
 
