@@ -8,6 +8,7 @@ HOST="${1:-${DEPLOY_HOST:-78.47.152.177}}"
 DEPLOY_USER="${DEPLOY_USER:-root}"
 APP_DIR="${APP_DIR:-/opt/webagent}"
 APP_USER="${APP_USER:-openclaw}"
+DOMAIN="${DOMAIN:-dev.lamoom.com}"
 NGINX_SITE_PATH="${NGINX_SITE_PATH:-/etc/nginx/sites-enabled/openclaw}"
 SYNC_DELETE="${SYNC_DELETE:-1}"
 REMOTE="${DEPLOY_USER}@${HOST}"
@@ -17,6 +18,7 @@ SSH_OPTS=(
   -o TCPKeepAlive=yes
 )
 RUNTIME_CONFIG_BACKUP="/tmp/webagent-openclaw-runtime.json5"
+ROLLBACK_BASE_DIR="/tmp/webagent-admin-rollback"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
@@ -51,8 +53,13 @@ done
 echo "── Deploying LOCAL repo to ${REMOTE}:${APP_DIR} ──"
 
 echo "→ Preparing remote directory and preserving runtime OpenClaw config..."
-ssh "${SSH_OPTS[@]}" "${REMOTE}" "set -euo pipefail; install -d -m 0755 '${APP_DIR}'; \
-  if [ -f '${APP_DIR}/openclaw/config/openclaw.json5' ]; then cp '${APP_DIR}/openclaw/config/openclaw.json5' '${RUNTIME_CONFIG_BACKUP}'; fi"
+ROLLBACK_ID="$(date +%Y%m%d%H%M%S)"
+ROLLBACK_DIR="${ROLLBACK_BASE_DIR}-${ROLLBACK_ID}"
+ssh "${SSH_OPTS[@]}" "${REMOTE}" "set -euo pipefail; install -d -m 0755 '${APP_DIR}'; install -d -m 0755 '${ROLLBACK_DIR}'; \
+  if [ -f '${APP_DIR}/openclaw/config/openclaw.json5' ]; then cp '${APP_DIR}/openclaw/config/openclaw.json5' '${RUNTIME_CONFIG_BACKUP}'; fi; \
+  if [ -d '${APP_DIR}/packages/admin/.next/standalone' ]; then mkdir -p '${ROLLBACK_DIR}/admin-next'; cp -a '${APP_DIR}/packages/admin/.next/standalone' '${ROLLBACK_DIR}/admin-next/'; fi; \
+  if [ -d '${APP_DIR}/packages/admin/.next/static' ]; then mkdir -p '${ROLLBACK_DIR}/admin-next'; cp -a '${APP_DIR}/packages/admin/.next/static' '${ROLLBACK_DIR}/admin-next/'; fi; \
+  if [ -f '/etc/systemd/system/webagent-admin.service' ]; then cp '/etc/systemd/system/webagent-admin.service' '${ROLLBACK_DIR}/webagent-admin.service'; fi"
 
 RSYNC_ARGS=(
   -az
@@ -84,12 +91,14 @@ run_rsync "Syncing managed OpenClaw workspace(s) from local repo" -az --human-re
   "${REMOTE}:${APP_DIR}/openclaw/workspaces/meta/"
 
 echo "→ Running remote build/restart/apply steps..."
-ssh "${SSH_OPTS[@]}" "${REMOTE}" bash -s "${APP_DIR}" "${RUNTIME_CONFIG_BACKUP}" "${NGINX_SITE_PATH}" "${APP_USER}" <<'REMOTE'
+ssh "${SSH_OPTS[@]}" "${REMOTE}" bash -s "${APP_DIR}" "${RUNTIME_CONFIG_BACKUP}" "${NGINX_SITE_PATH}" "${APP_USER}" "${DOMAIN}" "${ROLLBACK_DIR}" <<'REMOTE'
 set -euo pipefail
 APP_DIR="$1"
 RUNTIME_CONFIG_BACKUP="$2"
 NGINX_SITE_PATH="$3"
 APP_USER="$4"
+DOMAIN="$5"
+ROLLBACK_DIR="$6"
 OVERRIDE_SRC="${APP_DIR}/infra/systemd/openclaw.service.d/override.conf"
 
 cd "${APP_DIR}"
@@ -185,7 +194,6 @@ else
 fi
 
 NGINX_TEMPLATE="${APP_DIR}/infra/nginx/webagent.conf"
-DOMAIN="${DOMAIN:-dev.lamoom.com}"
 if [[ -f "${NGINX_TEMPLATE}" ]]; then
   echo "→ Installing nginx config from repo template..."
   sed "s/\${DOMAIN}/${DOMAIN}/g" "${NGINX_TEMPLATE}" > "${NGINX_SITE_PATH}"
@@ -203,7 +211,14 @@ if [[ -d "${BIND_ZONE_DIR}" ]]; then
   if ! dpkg -s bind9 &>/dev/null; then
     DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::='--force-confold' bind9
   fi
-  # Install BIND config from repo (never overwrite certbot-key.conf — it's a server secret)
+  # Generate certbot TSIG key if missing (it's a server secret, not stored in repo)
+  if [[ ! -f /etc/bind/certbot-key.conf ]]; then
+    echo "→ Generating certbot TSIG key..."
+    tsig-keygen certbot-key > /etc/bind/certbot-key.conf
+    chown root:bind /etc/bind/certbot-key.conf
+    chmod 640 /etc/bind/certbot-key.conf
+  fi
+  # Install BIND config from repo
   install -d -m 0775 -g bind /etc/bind/zones
   [[ -f "${BIND_DIR}/named.conf.local" ]] && cp "${BIND_DIR}/named.conf.local" /etc/bind/named.conf.local
   [[ -f "${BIND_DIR}/named.conf.options" ]] && cp "${BIND_DIR}/named.conf.options" /etc/bind/named.conf.options
@@ -243,24 +258,89 @@ systemctl restart webagent-proxy
 systemctl restart webagent-admin
 sleep 4
 
-echo "→ Health checks..."
-curl -sf http://127.0.0.1:3001/health >/dev/null
-curl -sf http://127.0.0.1:3000/ >/dev/null
+rollback_admin_service() {
+  echo "⚠️  Running rollback for webagent-admin from ${ROLLBACK_DIR}..."
 
-echo "→ Blocking static asset smoke check..."
-bash "${APP_DIR}/infra/admin-static-sync.sh" check http://127.0.0.1:3000
-
-OPENCLAW_HEALTH=""
-for _ in $(seq 1 30); do
-  OPENCLAW_HEALTH="$(curl -sf http://127.0.0.1:3001/health/openclaw || true)"
-  if echo "${OPENCLAW_HEALTH}" | grep -q '"ok"'; then
-    break
+  if [[ -d "${ROLLBACK_DIR}/admin-next/standalone" ]]; then
+    rm -rf "${APP_DIR}/packages/admin/.next/standalone"
+    install -d -m 0755 "${APP_DIR}/packages/admin/.next"
+    cp -a "${ROLLBACK_DIR}/admin-next/standalone" "${APP_DIR}/packages/admin/.next/"
+    echo "→ Restored admin standalone artifact"
+  else
+    echo "⚠️  No standalone rollback artifact available"
   fi
-  sleep 2
-done
-echo "${OPENCLAW_HEALTH}"
-if ! echo "${OPENCLAW_HEALTH}" | grep -q '"ok"'; then
-  echo "❌ OpenClaw health failed"
+
+  if [[ -d "${ROLLBACK_DIR}/admin-next/static" ]]; then
+    rm -rf "${APP_DIR}/packages/admin/.next/static"
+    install -d -m 0755 "${APP_DIR}/packages/admin/.next"
+    cp -a "${ROLLBACK_DIR}/admin-next/static" "${APP_DIR}/packages/admin/.next/"
+    echo "→ Restored admin static assets"
+  else
+    echo "⚠️  No static rollback artifact available"
+  fi
+
+  if [[ -f "${ROLLBACK_DIR}/webagent-admin.service" ]]; then
+    cp "${ROLLBACK_DIR}/webagent-admin.service" /etc/systemd/system/webagent-admin.service
+    echo "→ Restored previous webagent-admin systemd unit"
+  else
+    echo "⚠️  No systemd unit rollback artifact available"
+  fi
+
+  chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}/packages/admin/.next" 2>/dev/null || true
+  systemctl daemon-reload
+  systemctl restart webagent-admin
+}
+
+run_post_deploy_checks() {
+  local external_status=""
+  local external_url="https://${DOMAIN}/"
+
+  echo "→ Health checks..."
+  curl -sf http://127.0.0.1:3001/health >/dev/null
+  curl -sf http://127.0.0.1:3000/ >/dev/null
+
+  echo "→ Blocking static asset smoke check..."
+  bash "${APP_DIR}/infra/admin-static-sync.sh" check http://127.0.0.1:3000
+
+  OPENCLAW_HEALTH=""
+  for _ in $(seq 1 30); do
+    OPENCLAW_HEALTH="$(curl -sf http://127.0.0.1:3001/health/openclaw || true)"
+    if echo "${OPENCLAW_HEALTH}" | grep -q '"ok"'; then
+      break
+    fi
+    sleep 2
+  done
+  echo "${OPENCLAW_HEALTH}"
+  if ! echo "${OPENCLAW_HEALTH}" | grep -q '"ok"'; then
+    echo "❌ OpenClaw health failed"
+    return 1
+  fi
+
+  echo "→ External availability check (${external_url})..."
+  external_status="$(curl -sS -L -o /dev/null -w '%{http_code}' --max-time 20 "${external_url}" || true)"
+  if [[ -z "${external_status}" || "${external_status}" == "000" ]]; then
+    echo "❌ External root URL check failed: no HTTP response"
+    return 1
+  fi
+  if [[ "${external_status}" =~ ^5 ]]; then
+    echo "❌ External root URL returned ${external_status}"
+    return 1
+  fi
+
+  echo "✓ External root URL returned ${external_status}"
+  return 0
+}
+
+if ! run_post_deploy_checks; then
+  echo "❌ Post-deploy validation failed"
+  rollback_admin_service || true
+
+  if curl -sf http://127.0.0.1:3000/ >/dev/null; then
+    echo "⚠️  Rollback completed; admin service responds locally"
+  else
+    echo "❌ Rollback attempted but admin local health is still failing"
+  fi
+
   exit 1
 fi
 
