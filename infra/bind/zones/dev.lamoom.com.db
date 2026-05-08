@@ -1,6 +1,6 @@
 $TTL    300
 @       IN      SOA     ns1.dev.lamoom.com. admin.dev.lamoom.com. (
-                        2026042401  ; Serial (YYYYMMDDNN)
+                        2026050801  ; Serial (YYYYMMDDNN)
                         3600        ; Refresh
                         600         ; Retry
                         86400       ; Expire

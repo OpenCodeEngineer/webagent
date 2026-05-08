@@ -211,7 +211,14 @@ if [[ -d "${BIND_ZONE_DIR}" ]]; then
   if ! dpkg -s bind9 &>/dev/null; then
     DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::='--force-confold' bind9
   fi
-  # Install BIND config from repo (never overwrite certbot-key.conf — it's a server secret)
+  # Generate certbot TSIG key if missing (it's a server secret, not stored in repo)
+  if [[ ! -f /etc/bind/certbot-key.conf ]]; then
+    echo "→ Generating certbot TSIG key..."
+    tsig-keygen certbot-key > /etc/bind/certbot-key.conf
+    chown root:bind /etc/bind/certbot-key.conf
+    chmod 640 /etc/bind/certbot-key.conf
+  fi
+  # Install BIND config from repo
   install -d -m 0775 -g bind /etc/bind/zones
   [[ -f "${BIND_DIR}/named.conf.local" ]] && cp "${BIND_DIR}/named.conf.local" /etc/bind/named.conf.local
   [[ -f "${BIND_DIR}/named.conf.options" ]] && cp "${BIND_DIR}/named.conf.options" /etc/bind/named.conf.options
