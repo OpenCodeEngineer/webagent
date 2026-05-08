@@ -63,7 +63,7 @@ export default async function AgentDetailPage({ params }: Props) {
             </Badge>
           </div>
           {agent.createdAt && (
-            <CardDescription>
+            <CardDescription suppressHydrationWarning>
               Created: {new Date(agent.createdAt).toLocaleString()}
             </CardDescription>
           )}
@@ -168,7 +168,7 @@ export default async function AgentDetailPage({ params }: Props) {
                     <div key={s.id} className="flex items-center justify-between py-3">
                       <span className="text-sm text-foreground">{s.visitorId ?? s.id}</span>
                       {s.lastActive && (
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-xs text-muted-foreground" suppressHydrationWarning>
                           {new Date(s.lastActive).toLocaleString()}
                         </span>
                       )}

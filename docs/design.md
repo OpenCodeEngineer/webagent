@@ -452,10 +452,12 @@ webagent/
 │   ├── admin/        Next.js 15 (App Router) + Tailwind — customer dashboard
 │   │   └── src/
 │   │       ├── lib/auth.ts           NextAuth v5 config (Google, GitHub, Credentials)
-│   │       ├── middleware.ts         Route protection (/dashboard/*, /create/*)
+│   │       ├── middleware.ts         Route protection (/dashboard/*, /create/*, /admin/*)
 │   │       └── app/
 │   │           ├── login/page.tsx    Login UI
-│   │           └── dashboard/page.tsx Dashboard
+│   │           ├── dashboard/page.tsx Dashboard
+│   │           ├── create/page.tsx   Create agent (meta-agent chat)
+│   │           └── admin/page.tsx    Internal CRM (admin-only)
 │   │
 │   ├── widget/       Embeddable JS chat — Vite IIFE bundle → widget.js
 │   │   └── src/index.ts
@@ -550,6 +552,7 @@ agents
   name            TEXT NOT NULL
   websiteUrl      TEXT
   status          TEXT DEFAULT 'active' (active | paused | deleted)
+  paperclipAgentId TEXT                  ← optional Paperclip integration ID
   widgetConfig    JSONB DEFAULT '{}'
   apiDescription  TEXT
   createdAt       TIMESTAMP
@@ -809,6 +812,13 @@ Criteria (all must pass — non-zero exit on any failure):
 
 Remediation hint on failure: re-run `admin-static-sync.sh sync` and restart
 `webagent-admin`, then re-check.
+
+#### 3. Nginx static asset location (blocking)
+
+The `webagent.conf` Nginx config includes a `location /_next/static/` block that
+serves Next.js static assets directly from disk. This is **required** because
+`output: "standalone"` mode does not serve static files from the Node.js server.
+Without this block, all CSS/JS chunks return 404 and the admin UI is blank.
 
 ---
 
@@ -1200,7 +1210,7 @@ DROP TABLE IF EXISTS meta_agent_sessions;
 33. No inline agent editing (name, URL, prompt) after creation.
 34. **(resolved 2026-04-28)** Conversation persistence in create-agent-chat across page refresh — now backed by `meta_agent_sessions` + `meta_agent_messages` (issue #164).
 35. Hardcoded `dev.lamoom.com` fallbacks in proxy and admin code.
-36. Settings page is a non-functional stub.
+36. Settings page returns 404 — route exists in nav but page is not implemented.
 37. No migration rollback strategy.
 38. Meta-agent `sandbox: "off"` — no sandboxing for the agent builder.
 
@@ -1214,4 +1224,5 @@ DROP TABLE IF EXISTS meta_agent_sessions;
 44. No loading skeleton / Suspense boundary on dashboard.
 45. Token cache in WS handler has no max size — unbounded map growth.
 46. No "forgot password" or "back to dashboard" link on /create page.
+48. Login page ignores `callbackUrl` query param set by middleware — always redirects to `/dashboard` after successful login.
 47. `next-auth@5.0.0-beta.31` — pre-release software in production.
