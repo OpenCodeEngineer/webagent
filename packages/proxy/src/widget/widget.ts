@@ -96,6 +96,10 @@
       .lamoom-inline-code { background: #424242; padding: 2px 6px; border-radius: 5px; font-family: 'Roboto Mono','SF Mono',Monaco,Consolas,monospace; font-size: 0.875em; font-weight: 600; color: #fff; }
       .lamoom-code-block { background: #171717; border: 1px solid #2f2f2f; border-radius: 12px; padding: 12px 14px; overflow-x: auto; font-family: 'Roboto Mono','SF Mono',Monaco,Consolas,monospace; font-size: 0.85em; margin: 8px 0; white-space: pre-wrap; color: #ececec; }
       .lamoom-code-block code { background: none; padding: 0; }
+      .lamoom-table { border: 1px solid #2f2f2f; border-radius: 8px; overflow: hidden; }
+      .lamoom-table th { background: #2f2f2f; color: #fff; padding: 6px 10px; text-align: left; font-size: 12px; font-weight: 600; }
+      .lamoom-table td { padding: 6px 10px; border-top: 1px solid #2f2f2f; color: #d4d4d4; }
+      .lamoom-table tr:hover td { background: #1a1a1a; }
       .lamoom-assistant ul, .lamoom-assistant ol { margin: 6px 0; padding-left: 20px; }
       .lamoom-assistant li { margin: 3px 0; }
       .lamoom-assistant li::marker { color: #4b5563; }
@@ -224,6 +228,29 @@
     escaped = escaped.replace(/(\*\*|__)([^\n*_]+?)\1/g, '<strong>$2</strong>');
     escaped = escaped.replace(/(\*|_)([^\n*_]+?)\1/g, '<em>$2</em>');
 
+    // --- Tables (extract before block-level processing) ---
+    const tables: Array<{ token: string; html: string }> = [];
+    escaped = escaped.replace(
+      /((?:^|\n)\|[^\n]+\|\s*\n\|[\s:|-]+\|\s*\n(?:\|[^\n]+\|\s*\n?)+)/g,
+      (match) => {
+        const rows = match.trim().split('\n').filter((r) => r.trim());
+        if (rows.length < 2) return match;
+        const parseRow = (row: string): string[] =>
+          row.replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+        const headers = parseRow(rows[0]!);
+        // rows[1] is the separator line, skip it
+        const bodyRows = rows.slice(2).map(parseRow);
+        const thead = `<thead><tr>${headers.map((h) => `<th>${h}</th>`).join('')}</tr></thead>`;
+        const tbody = `<tbody>${bodyRows.map((cells) => `<tr>${cells.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody>`;
+        const token = `@@LAMTBL${tables.length}@@`;
+        tables.push({
+          token,
+          html: `<table class="lamoom-table" style="width:100%;border-collapse:collapse;font-size:13px;margin:8px 0;">${thead}${tbody}</table>`,
+        });
+        return `\n${token}\n`;
+      },
+    );
+
     // --- Block-level rendering ---
     const paragraphHtml = escaped
       .split(/\n{2,}/)
@@ -254,8 +281,8 @@
             continue;
           }
 
-          // Code block token (pass through)
-          if (/^@@LAMBLK\d+@@$/.test(trimmed)) {
+          // Code block or table token (pass through)
+          if (/^@@LAM(BLK|TBL)\d+@@$/.test(trimmed)) {
             flushText();
             flushList();
             parts.push(trimmed);
@@ -278,7 +305,7 @@
           }
 
           // Blockquote
-          const bqMatch = trimmed.match(/^>\s*(.*)/);
+          const bqMatch = trimmed.match(/^&gt;\s*(.*)/);
           if (bqMatch) {
             flushText();
             flushList();
@@ -323,7 +350,7 @@
       })
       .join('');
 
-    return applyTokens(applyTokens(paragraphHtml, inlineCodes), codeBlocks);
+    return applyTokens(applyTokens(applyTokens(paragraphHtml, inlineCodes), codeBlocks), tables);
   };
 
   const createMessage = (
