@@ -1162,8 +1162,8 @@ DROP TABLE IF EXISTS meta_agent_sessions;
    `accounts.access_token` instead of a dedicated column. Semantically wrong and
    will break if adapter logic reads `access_token` expecting an OAuth token.
 
-9. **No JWT expiry configured** — NextAuth `session.strategy: "jwt"` but no
-   `maxAge`. Stolen JWTs persist indefinitely.
+9. **(resolved)** ~~No JWT expiry configured~~ — `maxAge: 30 * 24 * 60 * 60`
+   (30 days) is set in auth config (`packages/admin/src/lib/auth.ts`).
 
 12. **Agent registration TOCTOU race** — `registerAgentInOpenClaw` reads config,
     checks slug, writes. Two concurrent creates for same slug can both pass the
