@@ -156,8 +156,8 @@ const SETUP_TIMEOUT_MS = getIntArg("setup-timeout-ms", 12 * 60 * 1000);
 const SCENARIO_TIMEOUT_MS = getIntArg("scenario-timeout-ms", 10 * 60 * 1000);
 const EVAL_TIMEOUT_MS = getIntArg("eval-timeout-ms", 3 * 60 * 1000);
 
-const WIDGET_URL = "https://dev.lamoom.com/widget.js";
-const LAMOOM_BASE_URL = "https://dev.lamoom.com";
+const LAMOOM_BASE_URL = getArg("lamoom-base-url") ?? process.env.LAMOOM_BASE_URL ?? "https://dev.lamoom.com";
+const WIDGET_URL = getArg("widget-url") ?? process.env.WIDGET_URL ?? `${LAMOOM_BASE_URL}/widget.js`;
 const HUBSPOT_CONTEXT_URL =
   getArg("hubspot-context-url") ??
   process.env.HUBSPOT_CONTEXT_URL ??
