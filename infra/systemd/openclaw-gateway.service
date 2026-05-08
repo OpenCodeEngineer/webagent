@@ -1,0 +1,37 @@
+[Unit]
+Description=OpenClaw Gateway (port 18789)
+Documentation=https://github.com/OpenCodeEngineer/webagent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=openclaw
+Group=openclaw
+WorkingDirectory=/opt/webagent
+EnvironmentFile=-/opt/webagent/.env
+ExecStart=/home/openclaw/.npm-global/bin/openclaw gateway --port 18789
+
+Restart=always
+RestartSec=5s
+RestartForceExitStatus=SIGTERM SIGHUP
+StartLimitInterval=60s
+StartLimitBurst=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=openclaw-gateway
+
+Environment=OPENCLAW_CONFIG_PATH=/opt/webagent/openclaw/config/openclaw.json5
+Environment=HOME=/home/openclaw
+
+LimitNOFILE=65536
+LimitNPROC=4096
+MemoryMax=2G
+CPUQuota=200%
+
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

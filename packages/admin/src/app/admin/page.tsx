@@ -60,7 +60,7 @@ export default async function AdminPage() {
                   <td className="px-4 py-3 text-foreground">{user.email}</td>
                   <td className="px-4 py-3 text-muted-foreground">{user.name ?? "—"}</td>
                   <td className="px-4 py-3 text-right text-foreground">{user.agentCount ?? 0}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "—"}</td>
+                  <td className="px-4 py-3 text-muted-foreground" suppressHydrationWarning>{user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "—"}</td>
                 </tr>
               ))}
               {(!(users as any)?.data || (users as any).data.length === 0) && (
@@ -98,7 +98,7 @@ export default async function AdminPage() {
                     }`}>{agent.status}</span>
                   </td>
                   <td className="px-4 py-3 text-right text-foreground">{agent.sessionCount ?? 0}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{agent.createdAt ? new Date(agent.createdAt).toLocaleDateString() : "—"}</td>
+                  <td className="px-4 py-3 text-muted-foreground" suppressHydrationWarning>{agent.createdAt ? new Date(agent.createdAt).toLocaleDateString() : "—"}</td>
                 </tr>
               ))}
               {(!(recentAgents as any)?.data || (recentAgents as any).data.length === 0) && (
@@ -125,7 +125,7 @@ export default async function AdminPage() {
             <tbody className="divide-y divide-border">
               {((auditLog as any)?.data ?? []).map((entry: any, i: number) => (
                 <tr key={entry.id ?? i} className="hover:bg-muted/30">
-                  <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{entry.createdAt ? new Date(entry.createdAt).toLocaleString() : "—"}</td>
+                  <td className="px-4 py-3 text-muted-foreground whitespace-nowrap" suppressHydrationWarning>{entry.createdAt ? new Date(entry.createdAt).toLocaleString() : "—"}</td>
                   <td className="px-4 py-3 text-foreground font-mono text-xs">{entry.action}</td>
                   <td className="px-4 py-3 text-muted-foreground font-mono text-xs">{entry.customerId?.slice(0, 8) ?? "—"}</td>
                   <td className="px-4 py-3 text-muted-foreground text-xs max-w-xs truncate">{entry.details ? JSON.stringify(entry.details) : "—"}</td>

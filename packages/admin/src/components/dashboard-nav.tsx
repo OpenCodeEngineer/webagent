@@ -41,15 +41,10 @@ const navItems = [
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 
-const adminEmails = (process.env.ADMIN_EMAILS ?? "")
-  .split(",")
-  .map((email) => email.trim().toLowerCase())
-  .filter(Boolean);
-
 function NavContent({
   userEmail,
   userName,
-  isAdmin: serverIsAdmin = false,
+  isAdmin = false,
   onNavigate,
 }: {
   userEmail: string;
@@ -59,8 +54,6 @@ function NavContent({
 }) {
   const pathname = usePathname();
   const initial = (userName ?? userEmail).charAt(0).toUpperCase();
-  const isAdminFromEnv = adminEmails.includes(userEmail.toLowerCase());
-  const isAdmin = isAdminFromEnv || serverIsAdmin;
 
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">

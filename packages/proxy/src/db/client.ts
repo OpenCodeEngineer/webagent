@@ -3,6 +3,7 @@ import { drizzle as drizzlePg } from 'drizzle-orm/node-postgres';
 import * as schema from './schema.js';
 
 export function createDb(databaseUrl: string) {
+
   const pool = new pg.Pool({ connectionString: databaseUrl });
   return drizzlePg(pool, { schema });
 }

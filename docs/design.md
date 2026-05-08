@@ -452,10 +452,12 @@ webagent/
 │   ├── admin/        Next.js 15 (App Router) + Tailwind — customer dashboard
 │   │   └── src/
 │   │       ├── lib/auth.ts           NextAuth v5 config (Google, GitHub, Credentials)
-│   │       ├── middleware.ts         Route protection (/dashboard/*, /create/*)
+│   │       ├── middleware.ts         Route protection (/dashboard/*, /create/*, /admin/*)
 │   │       └── app/
 │   │           ├── login/page.tsx    Login UI
-│   │           └── dashboard/page.tsx Dashboard
+│   │           ├── dashboard/page.tsx Dashboard
+│   │           ├── create/page.tsx   Create agent (meta-agent chat)
+│   │           └── admin/page.tsx    Internal CRM (admin-only)
 │   │
 │   ├── widget/       Embeddable JS chat — Vite IIFE bundle → widget.js
 │   │   └── src/index.ts
@@ -550,6 +552,7 @@ agents
   name            TEXT NOT NULL
   websiteUrl      TEXT
   status          TEXT DEFAULT 'active' (active | paused | deleted)
+  paperclipAgentId TEXT                  ← optional Paperclip integration ID
   widgetConfig    JSONB DEFAULT '{}'
   apiDescription  TEXT
   createdAt       TIMESTAMP
@@ -809,6 +812,13 @@ Criteria (all must pass — non-zero exit on any failure):
 
 Remediation hint on failure: re-run `admin-static-sync.sh sync` and restart
 `webagent-admin`, then re-check.
+
+#### 3. Nginx static asset location (blocking)
+
+The `webagent.conf` Nginx config includes a `location /_next/static/` block that
+serves Next.js static assets directly from disk. This is **required** because
+`output: "standalone"` mode does not serve static files from the Node.js server.
+Without this block, all CSS/JS chunks return 404 and the admin UI is blank.
 
 ---
 
@@ -1137,11 +1147,11 @@ DROP TABLE IF EXISTS meta_agent_sessions;
 
 ### 🔴 BLOCKING — Must Fix Before Any Production Launch
 
-1. **API token exposed client-side** — `NEXT_PUBLIC_PROXY_API_TOKEN` is bundled into
-   browser JS. Anyone can extract it and call backend APIs directly with any
-   `customerId`. Client components (`AgentCards`, `AgentDetailActions`) call
-   mutating endpoints directly. **Fix:** Route all mutations through Next.js server
-   actions or API routes; remove `NEXT_PUBLIC_*` token vars.
+1. **(resolved)** ~~API token exposed client-side~~ — `NEXT_PUBLIC_PROXY_API_TOKEN` is no longer
+   used. All client mutations go through Next.js server actions with session auth
+   + HMAC signing. `api.ts` uses non-public `PROXY_API_TOKEN` (server-only).
+   Remaining hardening: add `"server-only"` import to `api.ts` once type exports
+   are moved to a shared module.
 
 2. **(resolved 2026-04-26)** Signup is invite-gated via `AUTH_INVITE_EMAILS`; existing users can still sign in.
 3. **(resolved 2026-04-26)** Customer routes require signed `x-customer-id` + `x-customer-sig` headers (deprecated bearer + `customerId` query fallback removed).
@@ -1152,8 +1162,8 @@ DROP TABLE IF EXISTS meta_agent_sessions;
    `accounts.access_token` instead of a dedicated column. Semantically wrong and
    will break if adapter logic reads `access_token` expecting an OAuth token.
 
-9. **No JWT expiry configured** — NextAuth `session.strategy: "jwt"` but no
-   `maxAge`. Stolen JWTs persist indefinitely.
+9. **(resolved)** ~~No JWT expiry configured~~ — `maxAge: 30 * 24 * 60 * 60`
+   (30 days) is set in auth config (`packages/admin/src/lib/auth.ts`).
 
 12. **Agent registration TOCTOU race** — `registerAgentInOpenClaw` reads config,
     checks slug, writes. Two concurrent creates for same slug can both pass the
@@ -1200,7 +1210,7 @@ DROP TABLE IF EXISTS meta_agent_sessions;
 33. No inline agent editing (name, URL, prompt) after creation.
 34. **(resolved 2026-04-28)** Conversation persistence in create-agent-chat across page refresh — now backed by `meta_agent_sessions` + `meta_agent_messages` (issue #164).
 35. Hardcoded `dev.lamoom.com` fallbacks in proxy and admin code.
-36. Settings page is a non-functional stub.
+36. Settings page at `/dashboard/settings` is a stub showing "coming soon".
 37. No migration rollback strategy.
 38. Meta-agent `sandbox: "off"` — no sandboxing for the agent builder.
 
@@ -1214,4 +1224,6 @@ DROP TABLE IF EXISTS meta_agent_sessions;
 44. No loading skeleton / Suspense boundary on dashboard.
 45. Token cache in WS handler has no max size — unbounded map growth.
 46. No "forgot password" or "back to dashboard" link on /create page.
+48. ~~Login page ignores `callbackUrl` query param~~ **(resolved)** — login now reads
+    `callbackUrl` from search params and uses it for credentials, Google, and GitHub flows.
 47. `next-auth@5.0.0-beta.31` — pre-release software in production.
