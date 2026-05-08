@@ -4,10 +4,10 @@ import Email from "next-auth/providers/email";
 import GitHub from "next-auth/providers/github";
 import Google from "next-auth/providers/google";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
-import { eq } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { getDb } from "./db";
-import { users, accounts, sessions, verificationTokens } from "./auth-schema";
+import { users, accounts, sessions, verificationTokens, inviteCodes } from "./auth-schema";
 
 const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
@@ -20,6 +20,31 @@ const getInvitedEmails = (): Set<string> =>
   );
 
 const isInvitedEmail = (email: string): boolean => getInvitedEmails().has(normalizeEmail(email));
+
+async function validateAndConsumeInviteCode(
+  code: string,
+  email: string,
+  userId: string,
+): Promise<boolean> {
+  const db = getDb();
+  const normalizedEmail = normalizeEmail(email);
+  const rows = await db
+    .select()
+    .from(inviteCodes)
+    .where(and(eq(inviteCodes.code, code), isNull(inviteCodes.usedBy)))
+    .limit(1);
+  const invite = rows[0];
+  if (!invite) return false;
+  if (invite.expiresAt && invite.expiresAt.getTime() < Date.now()) return false;
+  if (invite.email && normalizeEmail(invite.email) !== normalizedEmail) return false;
+
+  await db
+    .update(inviteCodes)
+    .set({ usedBy: userId, usedAt: new Date() })
+    .where(eq(inviteCodes.id, invite.id));
+
+  return true;
+}
 
 async function findUserByEmailVariants(email: string) {
   const rawEmail = email.trim();
@@ -112,10 +137,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       credentials: {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
+        inviteCode: { label: "Invite Code", type: "text" },
       },
       async authorize(credentials) {
         const email = credentials?.email;
         const password = credentials?.password;
+        const inviteCode = credentials?.inviteCode;
         if (typeof email !== "string" || typeof password !== "string") {
           return null;
         }
@@ -131,7 +158,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             .limit(10);
 
           const credAccount = credentialAccounts.find(
-            (a) => a.provider === "credentials"
+            (a: any) => a.provider === "credentials"
           );
 
           if (!credAccount?.access_token) {
@@ -151,12 +178,26 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           };
         }
 
-        if (!isInvitedEmail(normalizedEmail)) {
+        // New user registration: require allowlist OR valid invite code
+        const onAllowlist = isInvitedEmail(normalizedEmail);
+        if (!onAllowlist && typeof inviteCode !== "string") {
           return null;
         }
 
         const hashedPassword = await bcrypt.hash(password, 12);
         const userId = crypto.randomUUID();
+
+        // If not on allowlist, validate and consume the invite code before creating user
+        if (!onAllowlist) {
+          const codeValid = await validateAndConsumeInviteCode(
+            inviteCode as string,
+            normalizedEmail,
+            userId,
+          );
+          if (!codeValid) {
+            return null;
+          }
+        }
 
         await getDb().insert(users).values({
           id: userId,

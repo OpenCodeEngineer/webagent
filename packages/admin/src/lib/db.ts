@@ -1,4 +1,4 @@
-import { Pool } from "pg";
+import pg from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import * as authSchema from "./auth-schema";
 
@@ -9,7 +9,7 @@ export function getDb() {
   if (!_db) {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error("DATABASE_URL is required at runtime");
-    const pool = new Pool({ connectionString: url });
+    const pool = new pg.Pool({ connectionString: url });
     _db = drizzle(pool, { schema: authSchema });
   }
   return _db;

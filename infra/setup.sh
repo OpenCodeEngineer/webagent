@@ -92,9 +92,20 @@ systemctl enable --now webagent-proxy webagent-admin
 # After initial OpenClaw install, run as the openclaw user:
 #   openclaw gateway install --port 18789
 
-# ── 11. Firewall ──────────────────────────────────────────────────────────────
+# ── 11. SSH hardening ─────────────────────────────────────────────────────────
+echo "→ Hardening SSH: disabling password authentication..."
+sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+sed -i 's/^#\?ChallengeResponseAuthentication.*/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config
+systemctl reload sshd
+
+# ── 12. Firewall ──────────────────────────────────────────────────────────────
 ufw allow OpenSSH
 ufw allow 'Nginx Full'
 ufw --force enable
 
+# ── 13. fail2ban ──────────────────────────────────────────────────────────────
+if ! command -v fail2ban-server &>/dev/null; then
+  apt-get install -y fail2ban
+fi
+systemctl enable --now fail2ban
 echo "✅  Setup complete. Services running on ${DOMAIN}"

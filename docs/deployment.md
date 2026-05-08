@@ -39,6 +39,61 @@ Set in `agents.defaults.model` in openclaw.json5:
      -d '{"model":"kimi-k2.5-thinking","messages":[{"role":"user","content":"hi"}],"max_tokens":5}'
    ```
 
+## DNS (BIND9)
+
+DNS for `dev.lamoom.com` is self-hosted on the VM using BIND9.
+
+### Local repo config
+
+```
+infra/bind/
+├── named.conf.local       # Zone declaration + certbot TSIG key include
+├── named.conf.options      # BIND options (dnssec, listen addresses)
+└── zones/
+    └── dev.lamoom.com.db   # Zone file (A, NS, wildcard records)
+```
+
+The deploy script (`infra/deploy.sh`) copies these files to `/etc/bind/` on the VM.
+
+### certbot-key.conf
+
+`named.conf.local` includes `/etc/bind/certbot-key.conf` for DNS-01 ACME challenges. This file contains a TSIG secret and is **generated on the VM** (not stored in the repo). If it is missing, BIND9 will fail to start.
+
+Generate it manually:
+```bash
+ssh root@78.47.152.177 'tsig-keygen certbot-key > /etc/bind/certbot-key.conf && chmod 640 /etc/bind/certbot-key.conf && chown root:bind /etc/bind/certbot-key.conf'
+```
+
+### Route 53 NS delegation (required)
+
+The parent domain `lamoom.com` is hosted on AWS Route 53. For the self-hosted BIND9 to work, Route 53 **must** have delegation records pointing `dev.lamoom.com` to the VM:
+
+| Name | Type | Value |
+|---|---|---|
+| `dev.lamoom.com` | NS | `ns1.dev.lamoom.com.` |
+| `ns1.dev.lamoom.com` | A | `78.47.152.177` |
+
+Without these records, public DNS resolvers cannot find `dev.lamoom.com`.
+
+### Troubleshooting DNS
+
+```bash
+# Check BIND9 status on VM
+ssh root@78.47.152.177 "systemctl status named --no-pager"
+
+# Check BIND9 logs
+ssh root@78.47.152.177 "journalctl -u named --no-pager -n 30"
+
+# Query the VM directly
+dig dev.lamoom.com @78.47.152.177 A +short
+
+# Query public DNS (should return 78.47.152.177 if delegation is correct)
+dig dev.lamoom.com @8.8.8.8 A +short
+
+# Validate zone file
+named-checkzone dev.lamoom.com infra/bind/zones/dev.lamoom.com.db
+```
+
 ## Deploy
 
 ### Quick redeploy (existing VM)
