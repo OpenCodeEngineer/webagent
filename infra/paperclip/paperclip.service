@@ -1,0 +1,21 @@
+[Unit]
+Description=Paperclip Orchestration Server
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=${PAPERCLIP_USER}
+WorkingDirectory=${PAPERCLIP_DIR}
+Environment=NODE_ENV=production
+Environment=PAPERCLIP_DATA_DIR=${PAPERCLIP_DATA}
+# `run` handles onboard (first boot) + doctor + start automatically
+ExecStart=/usr/bin/npx paperclipai run --data-dir ${PAPERCLIP_DATA} --bind loopback
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=paperclip
+
+[Install]
+WantedBy=multi-user.target
