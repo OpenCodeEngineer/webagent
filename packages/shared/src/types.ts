@@ -41,7 +41,11 @@ export interface WidgetEmbed {
 }
 
 export interface HealthResponse {
-  status: 'ok';
+  status: 'ok' | 'degraded' | 'error';
   uptime: number;
   timestamp: string;
+  checks: {
+    db: 'ok' | 'error';
+    openclaw: 'ok' | 'unreachable';
+  };
 }
