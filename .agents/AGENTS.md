@@ -36,6 +36,20 @@
 - Current: `kimi-k2.5-thinking` (better agentic reasoning, cheaper)
 - Backup: `gpt-5.1`
 
+## Testing — what "test" actually means
+
+**"Test" = end-to-end browser test, not curl.** A `curl` against an endpoint proves the TCP socket and HTTP layer respond. It does NOT prove the site works. The site can return HTTP 200/307 while the app crashes mid-render, the CPU is pegged by a cryptominer, JS fails to hydrate, login is broken, or the agent flow is broken.
+
+When asked to "test the deployment" or "verify it works", you MUST:
+
+1. **Open a browser** (use chrome-devtools MCP tools or Playwright) and navigate to `https://dev.lamoom.com/`
+2. **Log in** through the actual login flow (Google/GitHub/email — whichever is wired up)
+3. **Create a new product-agent** via the meta-agent — use the `create-agent` skill (the meta-agent workspace owns this)
+4. **Verify the embed code is generated** and the new agent appears in `/dashboard`
+5. **Open the new agent's widget** and exchange at least one message — confirm the response renders
+
+If any of those steps fails, the deployment is NOT working. Reporting "site is up" based on curl is wrong and has burned us before. Do not declare a deploy done until the full E2E flow above completes in a real browser.
+
 ## Common Issues
 
 ### OpenClaw gateway can't fetch dev.lamoom.com
