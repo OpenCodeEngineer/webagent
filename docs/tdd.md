@@ -814,26 +814,37 @@ Two tables (`meta_agent_sessions`, `meta_agent_messages`) persist the meta-agent
 9. `detectAgentCreation` DB insert race — no `onConflictDoNothing` on agent insert; concurrent creation throws unhandled unique violation.
 10. Two widget implementations — `packages/widget/` (better, unused) vs `packages/proxy/src/widget/widget.ts` (simpler, actually served).
 
+### 🔴 BLOCKING (continued) — PRD Phase 1 MUST
+
+8. No inline agent editing — user must recreate an agent to change name, URL, or instructions. PRD Phase 1 MUST. See §Phase 1 Specs below.
+9. Pause / delete agent not wired end-to-end — dashboard UI may show buttons but backend action is unconfirmed. PRD Phase 1 MUST. Needs: `PATCH /api/agents/:id` (status), `DELETE /api/agents/:id`; proxy removes from openclaw.json5, SIGHUP.
+10. Settings page at `/dashboard/settings` is a stub — required for password change, invite management, API key display. PRD Phase 1 MUST. See §Phase 1 Specs below.
+
+### 🟠 HIGH — Should Fix Before Launch
+
+11. Agent registration TOCTOU race — `registerAgentInOpenClaw` reads config, checks slug, writes; two concurrent creates for same slug can both pass. Needs file locking.
+12. `detectAgentCreation` DB insert race — no `onConflictDoNothing` on agent insert; concurrent creation throws unhandled unique violation.
+13. Two widget implementations — `packages/widget/` (better, unused) vs `packages/proxy/src/widget/widget.ts` (simpler, actually served).
+14. Visitor analytics missing — dashboard shows no usage data (message count, session count). PRD Phase 2. Need: counter columns on `widget_sessions`; `GET /api/agents/:id/stats` route.
+
 ### 🟡 MEDIUM — Fix Soon After Launch
 
-11. Widget `userId` is client-generated — any user can impersonate another's session.
-12. No server-side WS heartbeat — stale sockets accumulate.
-13. No WS backpressure handling.
-14. `touchSessionLastActiveAt` await blocks message processing on DB failure.
-15. Magic link form shown even when `EMAIL_SERVER` is unset.
-16. No inline agent editing (name, URL, prompt) after creation.
-17. Widget preview has no auto-reconnect on disconnect.
-18. Settings page at `/dashboard/settings` is a stub.
-19. Hardcoded `dev.lamoom.com` fallbacks in proxy and admin code.
+15. Widget `userId` is client-generated — any user can impersonate another's session.
+16. No server-side WS heartbeat — stale sockets accumulate.
+17. No WS backpressure handling.
+18. `touchSessionLastActiveAt` await blocks message processing on DB failure.
+19. Magic link form shown even when `EMAIL_SERVER` is unset.
+20. Widget preview has no auto-reconnect on disconnect.
+21. Hardcoded `dev.lamoom.com` fallbacks in proxy and admin code.
+22. No forgot password / account recovery flow. PRD Phase 2.
 
 ### 🟢 Nice to Have
 
-20. Gateway config file divergence (json5 vs json) — configs drift as agents are created.
-21. Token cache in WS handler has no max size — unbounded map growth.
-22. No light/dark theme toggle.
-23. No loading skeleton / Suspense boundary on dashboard.
-24. No "forgot password" link on `/create` page.
-25. `next-auth@5.0.0-beta.31` — pre-release in production.
+23. Gateway config file divergence (json5 vs json) — configs drift as agents are created.
+24. Token cache in WS handler has no max size — unbounded map growth.
+25. No light/dark theme toggle.
+26. No loading skeleton / Suspense boundary on dashboard.
+27. `next-auth@5.0.0-beta.31` — pre-release in production.
 
 ---
 
@@ -1011,22 +1022,122 @@ Automated by `test-lamoom` skill Phase 0–1.
 
 ## Known Debt (priority-ranked)
 
-| # | Issue | Priority |
+Priority legend: **BLOCKING** = blocks launch per PRD Phase 1 MUST; **HIGH** = should fix before launch; **MEDIUM** = fix soon after; **LOW** = nice to have.
+
+| # | Issue | Priority | PRD |
+|---|---|---|---|
+| 1 | Password in `access_token` column | BLOCKING | Phase 1 |
+| 2 | No CI/CD | BLOCKING | Phase 1 |
+| 3 | No error tracking | BLOCKING | Phase 1 |
+| 4 | No uptime monitoring | BLOCKING | Phase 1 |
+| 5 | No inline agent editing | BLOCKING | Phase 1 |
+| 6 | Pause/delete not wired end-to-end | BLOCKING | Phase 1 |
+| 7 | Settings page is a stub | BLOCKING | Phase 1 |
+| 8 | Admin auth tables — no Drizzle migration | HIGH | Phase 2 |
+| 9 | Hardcoded `localhost:3001` in next.config.ts | HIGH | Phase 2 |
+| 10 | Secrets hardcoded in openclaw.json5 | HIGH | — |
+| 11 | Agent registration TOCTOU race | HIGH | Phase 2 |
+| 12 | Visitor analytics missing (message/session counts) | HIGH | Phase 2 |
+| 13 | Two widget implementations — better one unused | MEDIUM | — |
+| 14 | No server-side WS heartbeat | MEDIUM | — |
+| 15 | Widget `userId` client-generated (session hijack) | MEDIUM | — |
+| 16 | No WS backpressure handling | MEDIUM | — |
+| 17 | No forgot password flow | MEDIUM | Phase 2 |
+| 18 | Widget preview no auto-reconnect | MEDIUM | Phase 2 |
+| 19 | Token cache in WS handler unbounded | LOW | — |
+| 20 | Hardcoded `dev.lamoom.com` fallbacks | LOW | — |
+
+---
+
+## Phase 1 Implementation Specs
+
+These are the PRD Phase 1 MUST items that have no spec yet. Each must ship before launch.
+
+### CI/CD Pipeline
+
+**Provider:** GitHub Actions.  
+**Jobs:**
+
+| Job | Trigger | Steps |
 |---|---|---|
-| 1 | Password in `access_token` column | HIGH |
-| 2 | Admin auth tables — no Drizzle migration | HIGH |
-| 3 | No CI/CD | HIGH |
-| 4 | No error tracking | HIGH |
-| 5 | Agent registration TOCTOU race | HIGH |
-| 6 | Hardcoded `localhost:3001` in next.config.ts | HIGH |
-| 7 | No uptime monitoring | HIGH |
-| 8 | Secrets hardcoded in openclaw.json5 | HIGH |
-| 9 | Two widget implementations — better one unused | MEDIUM |
-| 10 | No server-side WS heartbeat | MEDIUM |
-| 11 | Widget `userId` client-generated (session hijack) | MEDIUM |
-| 12 | No WS backpressure handling | MEDIUM |
-| 13 | Token cache in WS handler unbounded | LOW |
-| 14 | Settings page is a stub | LOW |
+| `ci` | Every push + PR | `pnpm install` → `pnpm build` → `pnpm test` → widget bundle size check (fail if > 50 KB) |
+| `deploy` | Push to `main` | rsync to Hetzner → `db:migrate` → `admin-static-sync` → health checks |
+
+Required secrets in GitHub: `HETZNER_SSH_KEY`, `DATABASE_URL`, `AUTH_SECRET`, `OPENCLAW_GATEWAY_TOKEN`, `NEXT_PUBLIC_PROXY_URL`.
+
+### Error Tracking
+
+**Service:** Sentry (free tier sufficient for MVP).  
+**Integration points:**
+
+- `packages/proxy/src/index.ts` — Fastify Sentry plugin; capture unhandled rejections + route errors
+- `packages/admin/src/app/layout.tsx` — `@sentry/nextjs` init
+- Widget: no Sentry (bundle size constraint); console-log errors only
+
+Required env vars: `SENTRY_DSN` (proxy + admin), `NEXT_PUBLIC_SENTRY_DSN` (admin client).
+
+### Uptime Monitoring
+
+**Service:** Better Uptime or UptimeRobot (free tier).  
+**Monitors:**
+
+| Endpoint | Alert threshold | Alert channel |
+|---|---|---|
+| `https://dev.lamoom.com/health` | 1 min down | Email + Slack |
+| `https://dev.lamoom.com/health/openclaw` | 1 min down | Email + Slack |
+| `https://dev.lamoom.com/login` | 1 min down | Email + Slack |
+
+### Agent Editing
+
+PRD: "edit name, URL, instructions without full recreation."
+
+**Data model change:** No schema change needed. `agents.name`, `agents.websiteUrl` already exist. Add: update endpoint + workspace file rewrite.
+
+**API:** `PATCH /api/agents/:id` — body: `{ name?, websiteUrl?, instructions? }`. Auth: session. Side effects: rewrite `AGENTS.md` header section in workspace; SIGHUP gateway if agent config changes.
+
+**UI:** On agent detail page, add inline editable fields (name, URL) + a "Custom instructions" textarea. Save button calls PATCH. No new page.
+
+**Scope:** Name + URL edits do NOT re-crawl the site (crawl is expensive). Re-crawl = "update agent" in meta-agent chat (existing flow).
+
+### Pause / Delete Agent
+
+**API:**
+- `PATCH /api/agents/:id` with `{ status: "active" | "paused" }` — paused agents return 403 on widget WS auth.
+- `DELETE /api/agents/:id` — sets `status = "deleted"`, removes from openclaw.json5, SIGHUP.
+
+**UI:** Dashboard agent row — "Pause" / "Delete" buttons. Delete requires confirmation modal.
+
+**Widget behavior on paused agent:** WS auth returns `{ type: "auth_error", reason: "agent_paused" }`. Widget shows "This assistant is temporarily unavailable."
+
+### Settings Page (`/dashboard/settings`)
+
+Minimum viable content:
+
+| Section | Fields | Actions |
+|---|---|---|
+| Account | Email (read-only), display name | Save |
+| Security | Current password, new password, confirm | Change password |
+| Embed API | Customer API token (masked) | Copy, Rotate |
+| Danger zone | Delete account | Confirm + delete |
+
+**Password change:** `POST /api/auth/change-password` — validates current bcrypt hash, updates `users.hashedPassword`.  
+**Note:** This also fixes Known Debt #1 (password in wrong column) — migrate `access_token` → `hashedPassword` as part of this work.
+
+---
+
+## NFR Measurement Strategy
+
+PRD §5 defines 7 non-functional requirements. Here's how each gets measured.
+
+| NFR | Target | How to Measure | Where to Track |
+|---|---|---|---|
+| Time-to-first-agent | < 10 min | `test-e2e` Phase 6 timestamps; manual on every release | `e2e-output/<date>/` |
+| Widget first response | < 3s p95 | Proxy logs `ws_message_received_at` → `first_token_at`; `test-lamoom` Phase 5 | Proxy logs + Sentry perf |
+| Agent creation success rate | ≥ 95% | Proxy counter: `agent_creation_attempts` vs `agent_creation_success`; log to Sentry | Sentry custom metric |
+| Visitor satisfaction (G-Eval) | ≥ 3.5/5 | `test-lamoom` Phase 7 G-Eval scoring | `e2e-output/<date>/` |
+| Uptime | ≥ 99.5% | Better Uptime / UptimeRobot monthly report | External dashboard |
+| Widget load size | < 50 KB | CI job: `ls -la packages/proxy/public/widget.js` → fail build if > 51200 bytes | GitHub Actions `ci` job |
+| WS auth latency | < 500 ms | Proxy: log `ws_ticket_requested_at` → `auth_ok_at`; `test-lamoom` Phase 4 | Proxy logs + Sentry |
 
 ---
 
