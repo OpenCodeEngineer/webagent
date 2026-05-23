@@ -167,7 +167,12 @@ OPENCLAW_USER_UNIT_DIR="/home/${APP_USER}/.config/systemd/user/openclaw-gateway.
 install -d -m 0755 "${OPENCLAW_USER_UNIT_DIR}"
 chown "${APP_USER}:${APP_USER}" "${OPENCLAW_USER_UNIT_DIR}"
 if [[ -f "${OVERRIDE_SRC}" ]]; then
-  sed "s|\${APP_DIR}|${APP_DIR}|g" "${OVERRIDE_SRC}" > "${OPENCLAW_USER_UNIT_DIR}/override.conf"
+  # Source .env so ${VAR} placeholders in the template are resolved
+  if [[ -f "${APP_DIR}/.env" ]]; then
+    set -a; source "${APP_DIR}/.env"; set +a
+  fi
+  export APP_DIR
+  envsubst < "${OVERRIDE_SRC}" > "${OPENCLAW_USER_UNIT_DIR}/override.conf"
   chown "${APP_USER}:${APP_USER}" "${OPENCLAW_USER_UNIT_DIR}/override.conf"
 else
   echo "⚠️  Missing ${OVERRIDE_SRC} — skipping openclaw-gateway override"
@@ -197,9 +202,14 @@ fi
 NGINX_TEMPLATE="${APP_DIR}/infra/nginx/webagent.conf"
 if [[ -f "${NGINX_TEMPLATE}" ]]; then
   echo "→ Installing nginx config from repo template..."
-  sed "s/\${DOMAIN}/${DOMAIN}/g" "${NGINX_TEMPLATE}" > "${NGINX_SITE_PATH}"
-  nginx -t
-  systemctl reload nginx
+  CERT_PATH="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
+  if [[ ! -f "${CERT_PATH}" ]]; then
+    echo "⚠️  No SSL cert at ${CERT_PATH} — skipping nginx SSL config (nginx unchanged)"
+  else
+    sed "s/\${DOMAIN}/${DOMAIN}/g" "${NGINX_TEMPLATE}" > "${NGINX_SITE_PATH}"
+    nginx -t
+    systemctl reload nginx
+  fi
 else
   echo "⚠️  Missing ${NGINX_TEMPLATE} — skipping nginx config"
 fi

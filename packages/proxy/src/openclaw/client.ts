@@ -26,7 +26,7 @@ type PendingRequest = {
 
 type RunEventListener = (event: AgentEventPayload) => void;
 
-const PROTOCOL_VERSION = 3;
+const PROTOCOL_VERSION = 4;
 const CONNECT_CHALLENGE_TIMEOUT_MS = 10_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_CONCURRENT_REQUESTS = 5;

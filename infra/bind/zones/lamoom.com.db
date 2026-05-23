@@ -1,0 +1,23 @@
+$TTL    300
+@       IN      SOA     ns1.lamoom.com. admin.lamoom.com. (
+                        2026052301  ; Serial (YYYYMMDDNN)
+                        3600        ; Refresh
+                        600         ; Retry
+                        86400       ; Expire
+                        300 )       ; Negative cache TTL
+
+; Nameserver
+@       IN      NS      ns1.lamoom.com.
+
+; Glue record for in-zone NS
+ns1     IN      A       78.47.152.177
+
+; Root domain
+@       IN      A       78.47.152.177
+
+; Delegate dev.lamoom.com to same NS (VM runs both zones)
+dev     IN      NS      ns1.dev.lamoom.com.
+ns1.dev IN      A       78.47.152.177
+
+; Wildcard catch-all
+*       IN      A       78.47.152.177
