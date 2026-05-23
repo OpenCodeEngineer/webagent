@@ -15,6 +15,10 @@ Creates a fully configured customer agent after Phase 1 discovery.
 - `write` creates missing parent directories automatically.
 - **NEVER write literal `{{...}}` placeholder tokens in generated files.** All values must be filled with real, discovered data. The proxy will reject workspaces containing `{{` patterns and force a full retry.
 - **CRITICAL: NEVER write literal `{{placeholder}}` syntax in generated files. All template variables MUST be replaced with actual values discovered during research. After writing all files, re-read each one and verify no `{{` sequences remain.**
+- **MANDATORY MARKERS — validator-enforced, non-negotiable:**
+  - `AGENTS.md` MUST contain the literal heading text `Workflow-as-Code` and the literal string `workflows/`. The proxy greps for these exact strings and force-retries on miss — do not rephrase, summarize, or omit.
+  - `skills/website-api/SKILL.md` (when written) MUST contain `workflows/` AND `python3`.
+  - Copy the full **"Workflow-as-Code (Required for Actions)"** section verbatim from the template — do not LLM-rewrite it. Same for the "Workflow-first" rule line in the numbered Important Rules list. These survive generation only if you copy them literally.
 
 ## Inputs you must carry from discovery
 

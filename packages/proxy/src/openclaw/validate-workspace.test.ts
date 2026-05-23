@@ -19,7 +19,7 @@ describe('validateGeneratedWorkspace', () => {
   it('returns valid for a clean workspace', async () => {
     const ws = join(baseDir, 'clean');
     await mkdir(ws, { recursive: true });
-    await writeFile(join(ws, 'AGENTS.md'), '# Agent\nYou are a helpful assistant.');
+    await writeFile(join(ws, 'AGENTS.md'), '# Agent\nYou are a helpful assistant.\n## Workflow-as-Code\nWrite actions to workflows/<verb>-<noun>.py and exec.');
     await writeFile(join(ws, 'IDENTITY.md'), '# Identity\nName: TestBot');
     await writeFile(join(ws, 'SOUL.md'), '# Soul\nFriendly and professional.');
 
@@ -33,7 +33,7 @@ describe('validateGeneratedWorkspace', () => {
     await mkdir(ws, { recursive: true });
     await writeFile(
       join(ws, 'AGENTS.md'),
-      '# Agent\nWelcome to {{WEBSITE_NAME}}.\nAPI at {{API_BASE_URL}}.',
+      '# Agent\nWelcome to {{WEBSITE_NAME}}.\nAPI at {{API_BASE_URL}}.\n## Workflow-as-Code\nactions go to workflows/',
     );
     await writeFile(join(ws, 'IDENTITY.md'), '# Identity\nName: TestBot');
     await writeFile(join(ws, 'SOUL.md'), '# Soul\nFriendly.');
@@ -75,7 +75,7 @@ describe('validateGeneratedWorkspace', () => {
     await mkdir(ws, { recursive: true });
     await writeFile(
       join(ws, 'AGENTS.md'),
-      '# Agent\nReal content.\n```\n{{EXAMPLE_PLACEHOLDER}}\n```\n',
+      '# Agent\nReal content.\n## Workflow-as-Code\nactions go to workflows/\n```\n{{EXAMPLE_PLACEHOLDER}}\n```\n',
     );
     await writeFile(join(ws, 'IDENTITY.md'), '# Identity\nName: Bot');
     await writeFile(join(ws, 'SOUL.md'), '# Soul\nKind.');
@@ -88,7 +88,7 @@ describe('validateGeneratedWorkspace', () => {
   it('ignores files in templates/ subdirectory', async () => {
     const ws = join(baseDir, 'with-templates');
     await mkdir(join(ws, 'templates'), { recursive: true });
-    await writeFile(join(ws, 'AGENTS.md'), '# Agent\nReal content.');
+    await writeFile(join(ws, 'AGENTS.md'), '# Agent\nReal content.\n## Workflow-as-Code\nactions go to workflows/');
     await writeFile(join(ws, 'IDENTITY.md'), '# Identity\nName: Bot');
     await writeFile(join(ws, 'SOUL.md'), '# Soul\nKind.');
     await writeFile(join(ws, 'templates', 'AGENTS.md'), '# {{WEBSITE_NAME}}');
@@ -100,7 +100,7 @@ describe('validateGeneratedWorkspace', () => {
   it('ignores files in knowledgebase/ subdirectory', async () => {
     const ws = join(baseDir, 'with-knowledgebase');
     await mkdir(join(ws, 'knowledgebase'), { recursive: true });
-    await writeFile(join(ws, 'AGENTS.md'), '# Agent\nReal content.');
+    await writeFile(join(ws, 'AGENTS.md'), '# Agent\nReal content.\n## Workflow-as-Code\nactions go to workflows/');
     await writeFile(join(ws, 'IDENTITY.md'), '# Identity\nName: Bot');
     await writeFile(join(ws, 'SOUL.md'), '# Soul\nKind.');
     await writeFile(join(ws, 'knowledgebase', 'api-reference.md'), '# Template syntax: {{API_BASE_URL}}');
@@ -109,10 +109,62 @@ describe('validateGeneratedWorkspace', () => {
     assert.equal(result.valid, true);
   });
 
+  it('rejects AGENTS.md missing Workflow-as-Code marker', async () => {
+    const ws = join(baseDir, 'missing-workflow-marker');
+    await mkdir(ws, { recursive: true });
+    await writeFile(
+      join(ws, 'AGENTS.md'),
+      '# Agent\nGeneric assistant. No workflow rule mentioned.',
+    );
+    await writeFile(join(ws, 'IDENTITY.md'), '# Identity\nName: Bot');
+    await writeFile(join(ws, 'SOUL.md'), '# Soul\nKind.');
+
+    const result = await validateGeneratedWorkspace(ws);
+    assert.equal(result.valid, false);
+    assert.ok(
+      result.errors.some((e) => e.includes('Workflow-as-Code')),
+      `expected Workflow-as-Code marker error, got: ${result.errors.join('; ')}`,
+    );
+    assert.ok(
+      result.errors.some((e) => e.includes('workflows/')),
+      `expected workflows/ marker error, got: ${result.errors.join('; ')}`,
+    );
+  });
+
+  it('rejects website-api SKILL.md missing workflow-first markers', async () => {
+    const ws = join(baseDir, 'missing-api-skill-marker');
+    await mkdir(join(ws, 'skills', 'website-api'), { recursive: true });
+    await writeFile(
+      join(ws, 'AGENTS.md'),
+      '# Agent\nReal content.\n## Workflow-as-Code\nactions go to workflows/',
+    );
+    await writeFile(join(ws, 'IDENTITY.md'), '# Identity\nName: Bot');
+    await writeFile(join(ws, 'SOUL.md'), '# Soul\nKind.');
+    await writeFile(
+      join(ws, 'skills', 'website-api', 'SKILL.md'),
+      '# website-api\nMakes API calls via curl.',
+    );
+
+    const result = await validateGeneratedWorkspace(ws);
+    assert.equal(result.valid, false);
+    assert.ok(
+      result.errors.some((e) =>
+        e.includes('skills/website-api/SKILL.md') && e.includes('workflows/'),
+      ),
+      `expected workflows/ marker error in skill, got: ${result.errors.join('; ')}`,
+    );
+    assert.ok(
+      result.errors.some((e) =>
+        e.includes('skills/website-api/SKILL.md') && e.includes('python3'),
+      ),
+      `expected python3 marker error in skill, got: ${result.errors.join('; ')}`,
+    );
+  });
+
   it('detects {{PLACEHOLDER}} in .json files', async () => {
     const ws = join(baseDir, 'json-placeholder');
     await mkdir(ws, { recursive: true });
-    await writeFile(join(ws, 'AGENTS.md'), '# Agent\nReal content.');
+    await writeFile(join(ws, 'AGENTS.md'), '# Agent\nReal content.\n## Workflow-as-Code\nactions go to workflows/');
     await writeFile(join(ws, 'IDENTITY.md'), '# Identity\nName: Bot');
     await writeFile(join(ws, 'SOUL.md'), '# Soul\nKind.');
     await writeFile(

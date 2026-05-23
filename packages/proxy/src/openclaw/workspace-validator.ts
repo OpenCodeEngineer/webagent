@@ -10,6 +10,25 @@ export interface WorkspaceValidationResult {
 const REQUIRED_FILES = ['AGENTS.md', 'IDENTITY.md', 'SOUL.md'] as const;
 
 /**
+ * Substrings that MUST appear in the generated AGENTS.md. Meta-agent tends to
+ * rewrite templates via LLM and silently drop sections; this enforces the
+ * non-negotiable rules that templates exist to guarantee.
+ */
+const REQUIRED_AGENTS_MD_MARKERS = [
+  'Workflow-as-Code',
+  'workflows/',
+] as const;
+
+/**
+ * Same enforcement for skills/website-api/SKILL.md when the file is present.
+ * Ensures the workflow-first API call flow survives LLM regeneration.
+ */
+const REQUIRED_WEBSITE_API_MARKERS = [
+  'workflows/',
+  'python3',
+] as const;
+
+/**
  * Recursively scan all .md files in a workspace directory and return
  * validation results including unresolved {{PLACEHOLDER}} tokens and
  * missing/empty required files.
@@ -34,6 +53,33 @@ export async function validateGeneratedWorkspace(
     } catch {
       errors.push(`${requiredFile}: required file is missing`);
     }
+  }
+
+  // Enforce non-negotiable markers in AGENTS.md
+  try {
+    const agentsContent = await readFile(join(workspacePath, 'AGENTS.md'), 'utf8');
+    for (const marker of REQUIRED_AGENTS_MD_MARKERS) {
+      if (!agentsContent.includes(marker)) {
+        errors.push(`AGENTS.md: missing required marker "${marker}" — workflow-as-code rule must survive generation`);
+      }
+    }
+  } catch {
+    // AGENTS.md missing already reported above
+  }
+
+  // Enforce workflow-first markers in website-api skill when present
+  try {
+    const apiSkillContent = await readFile(
+      join(workspacePath, 'skills', 'website-api', 'SKILL.md'),
+      'utf8',
+    );
+    for (const marker of REQUIRED_WEBSITE_API_MARKERS) {
+      if (!apiSkillContent.includes(marker)) {
+        errors.push(`skills/website-api/SKILL.md: missing required marker "${marker}" — workflow-first API flow must be present`);
+      }
+    }
+  } catch {
+    // skill file may not exist for KB-only agents — ok
   }
 
   // Check for files that are byte-identical to their template counterpart
