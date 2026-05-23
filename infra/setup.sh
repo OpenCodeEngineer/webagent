@@ -108,4 +108,5 @@ if ! command -v fail2ban-server &>/dev/null; then
   apt-get install -y fail2ban
 fi
 systemctl enable --now fail2ban
+
 echo "✅  Setup complete. Services running on ${DOMAIN}"

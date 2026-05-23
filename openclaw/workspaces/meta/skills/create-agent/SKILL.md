@@ -82,7 +82,7 @@ In generated files, always include:
 **API quality bar (when API exists):**
 7. `knowledgebase/api-reference.md` must contain a **structured endpoint table** with columns: Method, Path, Description, Request Body (if applicable), Response Shape.
 8. The `website-api` skill's `Available Actions` section must list **every** API endpoint as a table row — never omit endpoints mentioned in the user prompt or discovered during due diligence.
-9. The `website-api` skill must include `fetch` tool usage examples specific to the API (correct base URL, auth header format, content type).
+9. The `website-api` skill must include method-capable HTTP usage examples specific to the API (correct base URL, auth header format, content type). Use `exec` with `curl` for POST/PATCH/PUT/DELETE examples.
 10. For mutating endpoints (POST, PUT, DELETE, PATCH), the skill must include the exact request body shape.
 11. Credential source policy must be explicit: use platform-provided session auth context; never instruct end users to scrape DevTools/localStorage/cookies for tokens.
 12. Missing-credential fallback must be concrete and safe: ask admin/integrator to configure backend session auth context keys in this exact order (`Authorization`, `Bearer`, `apiToken`, `headers`), then retry the named API call.

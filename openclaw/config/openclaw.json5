@@ -4,6 +4,7 @@
   plugins: {
     allow: ["acpx", "memory-core", "browser"],
   },
+  tools: { allow: ["group:fs", "group:web", "group:memory", "session_status", "exec"] },
   gateway: {
     mode: "local",
     auth: {

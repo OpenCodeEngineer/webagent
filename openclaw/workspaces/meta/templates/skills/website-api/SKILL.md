@@ -32,18 +32,17 @@ List EVERY endpoint from the API. Do not omit any. -->
 
 ## How to Call the API
 
-Use the **`fetch`** tool to make HTTP requests. Example:
+Use a method-capable HTTP tool for API requests. The `group:web` tools are for search and GET/read-only fetches; do not rely on them for POST/PATCH/PUT/DELETE mutations. Use `exec` with `curl` for mutations. Example:
 
-```
-fetch("{{API_BASE_URL}}/endpoint", {
-  method: "POST",
-  headers: { "Content-Type": "application/json", "Authorization": "Bearer <token>" },
-  body: JSON.stringify({ key: "value" })
-})
+```bash
+curl -sS -X POST "{{API_BASE_URL}}/endpoint" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  --data '{"key":"value"}'
 ```
 
-- For GET requests: `fetch("{{API_BASE_URL}}/resource")`
-- For POST/PUT/DELETE: include `method`, `headers`, and `body` as needed.
+- For GET requests: use web/fetch tooling when available, or `curl -sS "{{API_BASE_URL}}/resource"` via `exec`.
+- For POST/PATCH/PUT/DELETE: run `curl` via `exec` with the required method, headers, and JSON body.
 - Parse the JSON response and present results in plain language.
 
 ## Session Auth Context Contract
@@ -79,10 +78,10 @@ fetch("{{API_BASE_URL}}/endpoint", {
 ## Example Interaction
 
 Visitor: "What products do you have?"
-→ Use `fetch` to call `GET {{API_BASE_URL}}/products`
+→ Call `GET {{API_BASE_URL}}/products`
 → Format the response as a friendly list
 
 Visitor: "Add the blue shirt to my cart"
 → Confirm: "I'll add the Blue Shirt ($29.99) to your cart. Proceed?"
-→ On yes: Use `fetch` to call `POST {{API_BASE_URL}}/cart/items` with product ID
+→ On yes: call `POST {{API_BASE_URL}}/cart/items` with product ID
 → Respond: "Done! Blue Shirt added to your cart."
