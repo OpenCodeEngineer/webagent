@@ -6,6 +6,7 @@ export const users = pgTable('users', {
   email: text('email').notNull(),
   emailVerified: timestamp('emailVerified', { mode: 'date' }),
   image: text('image'),
+  hashedPassword: text('hashed_password'),
 });
 
 export const accounts = pgTable(
