@@ -1,6 +1,12 @@
 // TSIG key for certbot ACME DNS-01 challenges
 include "/etc/bind/certbot-key.conf";
 
+zone "lamoom.com" {
+    type master;
+    file "/etc/bind/zones/lamoom.com.db";
+    allow-query { any; };
+};
+
 zone "dev.lamoom.com" {
     type master;
     file "/etc/bind/zones/dev.lamoom.com.db";
