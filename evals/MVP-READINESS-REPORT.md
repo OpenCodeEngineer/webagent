@@ -166,6 +166,62 @@ Full per-prompt scorecard: `evals/product-agent/shopdemo-69a2de96-2026-05-23T213
 
 ---
 
+## Workflow-as-Code Live Test (Fresh Agent — Run 4, 2026-05-23)
+
+**Run ID:** workflow-as-code-run4-2026-05-23  
+**Fresh agent slug:** `httpbin-test`  
+**Target website:** https://httpbin.org  
+**Embed token:** `a3396907-7f9e-48b7-9578-f98e9cd872a6`  
+**Creation time:** 2026-05-23T22:02:00Z
+
+### Step 2: Workspace Audit
+
+| Check | Result | Detail |
+|---|---|---|
+| `workflows/` directory exists | PASS | `/opt/webagent/openclaw/workspaces/httpbin-test/workflows/` present |
+| `workflows/README.md` seeded | PASS | 877 bytes, correct naming convention and script requirements documented |
+| AGENTS.md contains "Workflow-as-Code" section | **FAIL** | `grep -c 'Workflow-as-Code'` returns `0`. Meta-agent generates AGENTS.md from scratch as LLM output, bypassing the template file entirely. The generated AGENTS.md is httpbin-specific prose (Mission/Core Behaviors) with no workflow rules. |
+| `website-api/SKILL.md` exists | PASS | Present at `skills/website-api/SKILL.md` |
+| `website-api/SKILL.md` contains workflow-as-code instructions | **FAIL** | `grep -c 'Workflow\|workflow\|workflows/'` returns `0`. Generated SKILL.md is a pure API endpoint listing with no workflow-based flow. |
+
+**Root cause for AGENTS.md/SKILL.md failures:** The meta-agent uses the template files as *reference material* only — it writes new AGENTS.md and SKILL.md as LLM-generated output tailored to the discovered site. The template content (including all Rule 12 Workflow-as-Code sections) is NOT copied/included in the output files. The template's `Workflow-first` rule and the entire "Workflow-as-Code" section are silently dropped.
+
+### Step 3: Action Prompt via Widget
+
+**Prompt sent:** "GET /uuid and tell me the result"  
+**Agent response:** "I would make this API call: GET https://httpbin.org/uuid ... However, **I cannot execute this request right now** because no API credentials are configured in this workspace."
+
+The agent described the intended API call but refused to execute it, citing missing credentials. The `/uuid` endpoint on httpbin.org requires no authentication and is a pure read-only GET request — this is a false blocker from the agent's perspective.
+
+### Step 4: Workflow Audit
+
+```
+ls -lat /opt/webagent/openclaw/workspaces/httpbin-test/workflows/
+total 12
+-rw-rw-r-- 1 openclaw openclaw  877 May 23 22:03 README.md
+(no .py files)
+```
+
+| Check | Result |
+|---|---|
+| `.py` file with mtime within 5 min | **FAIL** — no .py files written |
+| Filename matches `<verb>-<noun>-<YYYYMMDD-HHMMSS>.py` | **FAIL** — no file created |
+| File contains `requests`, prints JSON, exit code | **FAIL** — no file created |
+| Journal grep for `python3.*workflows` | **FAIL** — no entries |
+
+### Verdict
+
+**WORKFLOW-AS-CODE: BROKEN**
+
+Root causes:
+1. Meta-agent generates AGENTS.md and SKILL.md from LLM output, NOT from template files. The Workflow-as-Code rules in the template are never propagated to new agents.
+2. Product agent behavior: even for no-auth GET requests, the agent uses "missing credentials" as a reason not to execute. The SKILL.md has no workflow-first instruction telling it to write .py scripts before calling APIs.
+3. The `workflows/` directory and `README.md` ARE seeded correctly (create-agent skill works). The behavioral gap is purely the missing instruction in generated AGENTS.md / SKILL.md.
+
+**MVP-READY: NO** — the fresh-agent path still fails workflow discipline. The template files on disk are correct, but the meta-agent does not propagate them to new agent workspaces.
+
+---
+
 ## Run History
 
 | Run | Status | Gate 1 | Gate 2 | Gate 3 | Blocker |
@@ -173,3 +229,4 @@ Full per-prompt scorecard: `evals/product-agent/shopdemo-69a2de96-2026-05-23T213
 | mvp-2026-05-23 | NOT_RUN | — | BLOCKED | NOT_RUN | Missing DB column hashed_password |
 | mvp-2026-05-23-run2 | NOT_RUN | PASS | BLOCKED (Phase 1) | NOT_RUN | Stale server build — auth.ts read wrong column |
 | mvp-2026-05-23-run3 | PARTIAL | PASS | PARTIAL (Phase 4.5 fail) | PASS (4.62) | Workflow discipline not triggered — KB-only agent |
+| workflow-as-code-run4 | FAIL | PASS | FAIL (Phase 4.5) | NOT_RUN | Meta-agent does not propagate template rules to AGENTS.md/SKILL.md |
