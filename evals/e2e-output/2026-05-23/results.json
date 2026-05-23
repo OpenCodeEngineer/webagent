@@ -1,0 +1,10 @@
+{
+  "results": {
+    "phase0": "PASS",
+    "phase1": "FAIL: stuck at https://dev.lamoom.com/login",
+    "phase1_error": "Lamoom\n\nSign in to manage your AI agents\n\nInvalid email or password\nEmail\nPassword\nInvite Code (optional)\nSign in\nor continue with\nGoogle\nGitHub\nor use magic link\nSend link"
+  },
+  "timings": {
+    "T0": "20:38:53"
+  }
+}

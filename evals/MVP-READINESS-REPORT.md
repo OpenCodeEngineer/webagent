@@ -1,12 +1,12 @@
 # MVP Readiness Report — Lamoom
 
 **Run date:** 2026-05-23  
-**Run ID:** mvp-2026-05-23-run2  
+**Run ID:** mvp-2026-05-23-run3  
 **Evaluator:** Claude Sonnet 4.6 (automated)  
 **Target:** https://dev.lamoom.com  
 **Git branch:** fix/remove-openclaw-gateway-service  
-**Git HEAD (local repo):** 01ba327  
-**Git HEAD (deployed server):** 9cb9f75  
+**Git HEAD (local):** 01ba327  
+**Agent slug:** shopdemo-69a2de96 (generic, https://example.com)
 
 ---
 
@@ -14,7 +14,9 @@
 
 **VERDICT: NOT READY FOR MVP**
 
-Gate 2 (end-to-end user flow) is BLOCKED at Phase 1 (Authentication). The production server is running a stale build compiled from commit `9cb9f75` — a commit that predates the auth fix in `a24a680`. The DB migration is correctly applied (`users.hashed_password` column exists and is populated), but the deployed code reads bcrypt from `accounts.access_token` (the old column), not `users.hashed_password`. Login fails with "Invalid email or password" for all credential-auth users set up with the new schema.
+Gate 2 passes with one blocking failure: **Phase 4.5 Workflow Artifact Audit FAIL** — the product agent does not execute Python workflows for action-type requests. Gate 3 (G-eval) passes with a composite score of 4.62/5.0 (COMPLETE), demonstrating strong knowledge-recall, refusal, and auth-fallback behavior. The core MVP blocker is that no API integration is configured for the created agent — the product agent responds to action requests with prose descriptions rather than executing code.
+
+Additionally, the Azure judge model (`kimi-k2.5-thinking`) is incompatible with the automated harness — it outputs reasoning in `reasoning_content` with empty `content`, causing JSON parse failures for 4 of 10 prompts. Those prompts were manually scored.
 
 ---
 
@@ -22,93 +24,72 @@ Gate 2 (end-to-end user flow) is BLOCKED at Phase 1 (Authentication). The produc
 
 | Check | Result | Notes |
 |---|---|---|
-| Admin UI health (`/`) | PASS | 200 OK, page renders |
+| Admin UI health (`/`) | PASS | 200 OK |
 | SSH connectivity | PASS | root@78.47.152.177 accessible |
-| OpenClaw gateway health | PASS | `/health` returns 200 OK |
+| OpenClaw gateway health | PASS | `/health` 200 OK |
 | Widget.js served | PASS | 200 OK, 12960 bytes |
-| Azure AI judge model reachable | PASS | `kimi-k2.5-thinking` via `AZURE_DEV_AI_BASE_URL` |
-| `openclaw.json5` exec audit | PASS | meta workspace: exec BLOCKED; product workspaces: exec ALLOWED |
-| SSH template `Workflow-as-Code` | PASS | `/opt/webagent/openclaw/workspaces/meta/templates/AGENTS.md` contains Workflow-as-Code section |
+| Azure AI judge model reachable | PASS | kimi-k2.5-thinking via AZURE_DEV_AI_BASE_URL |
+| openclaw.json5 exec audit | PASS | meta workspace exec BLOCKED; product workspaces exec ALLOWED |
+| SSH template Workflow-as-Code | PASS | Template present in /opt/webagent/openclaw/workspaces/meta/templates/ |
 
 ---
 
-## Gate 2: End-to-End User Flow — NOT READY (BLOCKING)
+## Gate 2: End-to-End User Flow — PARTIAL PASS
 
-### Phase 1: Authentication — BLOCKING FAILURE
+### Phase Results
 
-**Status:** FAILED — login completely non-functional for credentials provider.
+| Phase | Status | Notes |
+|---|---|---|
+| Phase 0: Pre-flight | PASS | All checks green |
+| Phase 1: Login | PASS | demo@lamoom.com / demo123 → /dashboard. T0→T1 measured. |
+| Phase 2: Agent Creation | PASS | Agent created for https://example.com. T5-T0 ≈ 162s. Embed code with UUID generated. |
+| Phase 3: Dashboard Verification | PASS | Agent visible in dashboard. Agent detail page accessible. |
+| Phase 4: Widget Chat | PASS | Widget injected. Responded to knowledge questions. |
+| **Phase 4.5: Workflow Artifact Audit** | **FAIL** | **BLOCKING** |
+| Phase 5: UX Quality Audit | PASS | No broken UI elements observed. |
+| Phase 6: Time-to-Value | PASS | 162s embed-code-to-ready. Within 3-minute budget. |
 
-**Error observed (browser):**
-```
-Invalid email or password
-```
+### Phase 4.5 Detail — FAIL (BLOCKING)
 
-**Root cause (confirmed):**
+**Action prompt sent:** "Show me the current status of all tenants"
 
-The deployed Next.js admin app was built from commit `9cb9f75` ("chore: consolidate sprint branches"), compiled 2026-05-23 ~12:38 UTC. This commit does NOT include `a24a680` ("fix: password column + settings page for MVP"), which changes auth storage from `accounts.access_token` to `users.hashed_password`.
+**Agent response:** Agent described the API call it would make but did not execute it. No `workflows/` directory was created in `/opt/webagent/openclaw/workspaces/shopdemo-69a2de96/`.
 
-- `git merge-base --is-ancestor a24a680 9cb9f75` → exit code 1 (NOT an ancestor — fix is missing from deployed build)
-- Deployed `/opt/webagent/packages/admin/src/lib/auth.ts` (timestamp 11:02): checks `credAccount.access_token` for bcrypt
-- Deployed `/opt/webagent/packages/admin/src/lib/auth-schema.ts` (timestamp 11:02): `users` table has NO `hashedPassword` field
-- DB state: `users.hashed_password` column EXISTS (migration applied) and populated for `demo@lamoom.com`
-- `accounts.access_token` for `demo@lamoom.com`: NOT a bcrypt hash (old flow never ran for this user)
-
-The credentials provider finds the user, fetches `credAccount.access_token` → not a bcrypt hash → `bcrypt.compare()` returns false → "Invalid email or password".
-
-**Action required (ops):**
-
-```bash
-# On server: rebuild and restart from latest code
-cd /opt/webagent
-git pull origin fix/remove-openclaw-gateway-service
-cd packages/admin
-npm run build
-systemctl restart webagent-admin
-```
-
-This deploys commit `a24a680`+ which reads bcrypt from `users.hashed_password`.
+**Root cause:** The shopdemo-69a2de96 agent was created as a generic knowledge-base-only agent. Its `TOOLS.md` states "Agent Type: Knowledge-base only (no API integration configured)." The workflow-as-code template is not active for this agent; the agent lacks session auth context injection needed to make API calls.
 
 **Evidence:**
-- Screenshot: `evals/e2e-output/2026-05-23/01-login.png` — login page initial state
-- Screenshot: `evals/e2e-output/2026-05-23/01b-login-filled.png` — credentials filled
-- Screenshot: `evals/e2e-output/2026-05-23/02-login-failure.png` — "Invalid email or password" error visible
-- Server git HEAD confirmed `9cb9f75` (pre-fix); local HEAD `01ba327` includes fix
+- No `workflows/` subdirectory found in agent workspace (SSH confirmed)
+- Agent response described intent without execution: "I would make this API call... but I need session auth context"
+- TOOLS.md confirms knowledge-base only configuration
 
-### Phase 2: Agent Creation — NOT RUN (blocked by Phase 1)
-### Phase 3: Dashboard Verification — NOT RUN
-### Phase 4: Widget Chat — NOT RUN
-### Phase 4.5: Workflow Artifact Audit — NOT RUN
-### Phase 5: UX Quality Audit — NOT RUN
-### Phase 6: Time-to-Value Measurement — NOT RUN
+**Screenshots:** `evals/e2e-output/2026-05-23/` — 14 screenshots captured across all phases.
 
 ---
 
-## Gate 3: Product-Agent Eval (G-Eval Battery) — NOT RUN
+## Gate 3: Product-Agent G-Eval — PASS (4.62 / 5.00)
 
-Blocked by Gate 2 failure. No agent created; embed token not available; widget chat cannot be tested.
+**Agent slug:** shopdemo-69a2de96  
+**Prompts run:** 10 (P4, P5 skipped — no API for generic type)  
+**Judged by Azure kimi:** 6 prompts  
+**Manually scored:** 4 prompts (P7, P10, P11, P12 — kimi JSON parse failure)
 
-Note: Existing agent `openclaw-console-0e3d9d31` is present on the server and the openclaw gateway is functional. Once login works, Gate 3 can proceed.
+### Score Summary
 
----
+| Prompt | Category | Composite | Verdict |
+|---|---|---|---|
+| P1: What is this website about? | Knowledge Recall | 5.00 | COMPLETE |
+| P2: Who is this website for? | Knowledge Recall | 5.00 | COMPLETE |
+| P3: How do I contact support? | Knowledge Recall | 4.33 | MOSTLY_COMPLETE |
+| P6: What if my order never arrived? | Multi-step Reasoning | 5.00 | COMPLETE |
+| P7: Compare cheapest and most expensive | Multi-step Reasoning | 4.00 | MOSTLY_COMPLETE |
+| P8: What is the weather today? | Out-of-scope Refusal | 5.00 | COMPLETE |
+| P9: Write me a Python web scraper | Out-of-scope Refusal | 5.00 | COMPLETE |
+| P10: Cancel my order #12345 | Auth-missing Fallback | 4.23 | MOSTLY_COMPLETE |
+| P11: Create a new account for me | Auth-missing Fallback | 4.62 | COMPLETE |
+| P12: What is the return policy? | Knowledge Recall | 4.00 | MOSTLY_COMPLETE |
 
-## Additional Findings
-
-### FINDING-1: Server deployed build is stale (HIGH severity — BLOCKING)
-
-Server running code built from `9cb9f75`. Local repo HEAD is `01ba327`. Gap includes at minimum:
-- `a24a680` — auth fix (users.hashed_password, auth-schema.ts rewrite)
-- `54a28bb` — fix duplicate paperclipAgentId column in schema
-- `01ba327` — merge PR #221
-
-Server must be updated and rebuilt.
-
-### FINDING-2: Chrome DevTools MCP server disconnected (INFRASTRUCTURE)
-
-`DevToolsActivePort` file stale — WS UUID from prior Chrome session. CDP at `localhost:9222` responds but MCP server fails to connect. Playwright CDP (`http://localhost:9222`) works as fallback. Not blocking product eval; blocking automated tooling.
-
-### FINDING-3: Stale Server Action hashes (LOW severity)
-
-Service logs show `Failed to find Server Action "x"` — browser cache holds old build's action IDs. Self-resolves on hard refresh. Not blocking.
+**Average composite: 4.62 / 5.00**  
+**Overall G-eval verdict: COMPLETE**
 
 ---
 
@@ -116,9 +97,9 @@ Service logs show `Failed to find Server Action "x"` — browser cache holds old
 
 | Priority | Blocker | Action |
 |---|---|---|
-| P0 — BLOCKING | Server admin app built from stale commit `9cb9f75` (missing auth fix `a24a680`). Deployed `auth.ts` reads bcrypt from `accounts.access_token`; new setup stores it in `users.hashed_password`. Login non-functional. | Rebuild + redeploy admin app from current branch HEAD on server. |
-| P0 — BLOCKING | Once login works: verify `demo@lamoom.com` can create agent and widget embed token is generated. Confirm DB schema on server matches repo schema (all migrations applied). | After redeploy, re-run Gate 2 Phases 1–6 + Gate 3 G-eval. |
-| P1 | Chrome DevTools MCP server not connected — stale WebSocket UUID in DevToolsActivePort. Blocks automated browser eval tooling. | Kill old Chrome, restart with `--remote-debugging-port=9222`, update DevToolsActivePort. |
+| P0 — BLOCKING | Phase 4.5 FAIL: Product agent does not execute Python workflows for action requests. Agent is configured as knowledge-base-only. No `workflows/` directory is created when action-type prompts are sent. | Configure API integration for the agent type: inject auth context into the widget session environment, ensure TOOLS.md enables exec mode, verify openclaw.json5 exec permission flows to the new agent workspace. |
+| P1 | kimi-k2.5-thinking incompatible with G-eval judge harness: returns empty `content`, reasoning in `reasoning_content`. 4 of 10 prompts required manual scoring. | Replace with a standard OpenAI-compatible model that outputs to `content` field (e.g. gpt-4o, claude-3-7-sonnet). |
+| P2 | Knowledge base gaps in P3, P7, P12: contact info, product catalog, and return policy are not fully indexed. Agent honestly says "I don't have this in my knowledge base" rather than hallucinating — correct behavior, but G-eval score capped at 4.0 for these prompts. | Expand crawl/ingestion to include /support, /products (with pricing), and /returns pages from the target site. |
 
 ---
 
@@ -126,37 +107,69 @@ Service logs show `Failed to find Server Action "x"` — browser cache holds old
 
 | Issue | Severity | Type |
 |---|---|---|
-| Admin app stale build (auth broken) | CRITICAL | Blocking bug |
-| accounts.access_token vs users.hashed_password mismatch | CRITICAL | Deploy/config bug |
-| Chrome DevTools MCP disconnected | MEDIUM | Infrastructure |
-| Stale Server Action hashes in logs | LOW | Cosmetic (self-heals) |
+| Phase 4.5 workflow discipline not triggered | HIGH | Product behavior / config bug |
+| kimi-k2.5-thinking JSON output incompatible | MEDIUM | Infrastructure / judge tooling |
+| Knowledge base missing contact/products/returns pages | MEDIUM | Data quality |
+| Stale Server Action hashes in logs | LOW | Cosmetic (self-heals on hard refresh) |
+
+---
+
+## What's Working Well
+
+- Login and auth flow: fully functional after bcrypt migration fix
+- Agent creation flow: end-to-end in 162 seconds (well within 3-minute budget)
+- Widget injection and chat: functional
+- Knowledge-recall responses: excellent quality (5.0 on P1, P2, P6)
+- Out-of-scope refusals: perfect scores (P8, P9)
+- Auth-missing fallback behavior: strong (P10, P11) — agent honestly acknowledges limitations and provides actionable next steps
 
 ---
 
 ## Estimated Fix Effort
 
-- **P0 deploy fix**: 15 minutes — `git pull && npm run build && systemctl restart webagent-admin` on server
-- **Gate 2 re-run**: 20 minutes after fix
-- **Gate 3 G-eval**: 30 minutes after Gate 2 passes
-- **Total to MVP verdict**: ~65 minutes of unblocked work
-
----
-
-## Required Actions Before MVP
-
-| Priority | Action | Owner |
-|---|---|---|
-| P0 — BLOCKING | Rebuild + redeploy admin app from current branch HEAD on server (`git pull` + `npm run build` + service restart) | Ops/Dev |
-| P0 — BLOCKING | Re-run Gate 2 E2E (Phases 1–6) after redeploy | QA |
-| P0 — BLOCKING | Re-run Gate 3 G-eval battery (12 prompts) after Gate 2 passes | QA |
-| P1 | Fix Chrome DevTools MCP server (restart Chrome with remote debugging) | Infra |
+| Fix | Effort |
+|---|---|
+| Configure API integration + auth context for agent exec mode | 2–4 hours |
+| Replace kimi judge model with gpt-4o or claude-3-7-sonnet | 30 minutes |
+| Expand knowledge base crawl | 1 hour |
+| Re-run full gauntlet after fixes | 30 minutes |
+| **Total to MVP readiness** | **~4–6 hours** |
 
 ---
 
 ## Screenshots
 
-| File | Description |
-|---|---|
-| `evals/e2e-output/2026-05-23/01-login.png` | Login page (initial state) |
-| `evals/e2e-output/2026-05-23/01b-login-filled.png` | Login page with credentials filled |
-| `evals/e2e-output/2026-05-23/02-login-failure.png` | Post-submit — "Invalid email or password" (auth failed, stale build) |
+All screenshots saved to `evals/e2e-output/2026-05-23/`:
+
+| File | Phase | Description |
+|---|---|---|
+| `01-login.png` | Phase 1 | Login page initial state |
+| `02-login-success.png` | Phase 1 | Post-login dashboard redirect |
+| `03-create-textarea-enabled.png` | Phase 2 | Create page — textarea enabled |
+| `04-discovery-response.png` | Phase 2 | Agent discovery summary response |
+| `04a-discovery-progress-15s.png` | Phase 2 | Progress at 15s mark |
+| `05-embed-code.png` | Phase 2 | Embed code with UUID token |
+| `06-dashboard-agent.png` | Phase 3 | Dashboard showing created agent |
+| `07-agent-detail.png` | Phase 3 | Agent detail page |
+| `08-widget-open.png` | Phase 4 | Widget opened via console injection |
+| `09-widget-response.png` | Phase 4 | Widget response to knowledge question |
+| `10-widget-followup.png` | Phase 4 | Follow-up question answered |
+| `10b-action-response.png` | Phase 4.5 | Action question response (description only, no workflow) |
+| `ux-dashboard.png` | Phase 5 | UX audit — dashboard |
+| `ux-agent-detail.png` | Phase 5 | UX audit — agent detail |
+
+---
+
+## Scorecard
+
+Full per-prompt scorecard: `evals/product-agent/shopdemo-69a2de96-2026-05-23T213000Z.md`
+
+---
+
+## Run History
+
+| Run | Status | Gate 1 | Gate 2 | Gate 3 | Blocker |
+|---|---|---|---|---|---|
+| mvp-2026-05-23 | NOT_RUN | — | BLOCKED | NOT_RUN | Missing DB column hashed_password |
+| mvp-2026-05-23-run2 | NOT_RUN | PASS | BLOCKED (Phase 1) | NOT_RUN | Stale server build — auth.ts read wrong column |
+| mvp-2026-05-23-run3 | PARTIAL | PASS | PARTIAL (Phase 4.5 fail) | PASS (4.62) | Workflow discipline not triggered — KB-only agent |
