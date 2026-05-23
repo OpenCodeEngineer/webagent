@@ -62,6 +62,37 @@ Read templates from `templates/` directory as starting point (using specialized 
 - `<workspacePath>/knowledgebase/key-links.md` — canonical visitor links
 - `<workspacePath>/knowledgebase/use-cases.md` — concrete role/use-case examples
 - `<workspacePath>/knowledgebase/api-reference.md` — **required when API exists**: full endpoint table with method, path, request body, response shape, and auth requirements. For OpenClaw Console targets, use `openclaw/workspaces/meta/knowledgebase/openclaw-console-api-surface.md` first; otherwise use specialized template if found.
+- `<workspacePath>/workflows/README.md` — short doc explaining the workflows directory. Use the following template content verbatim:
+
+```markdown
+# workflows/
+
+This directory holds Python action scripts that the agent generates per visitor request.
+
+## Purpose
+
+Each time the agent takes an action (API call, mutation, or any credentialed request), it
+writes a self-contained Python script here before executing it. Scripts are an append-only
+audit trail and can be re-run for debugging or cron automation.
+
+## Naming convention
+
+  <verb>-<noun>-<YYYYMMDD-HHMMSS>.py
+
+Examples:
+  create-contact-20260523-143200.py
+  add-cart-item-20260523-151045.py
+  cancel-order-20260524-090300.py
+
+## Script requirements
+
+- Top-of-file docstring: action name, arguments, expected result.
+- Auth loaded from environment variables (never hardcoded).
+- Uses `requests` library for HTTP calls.
+- Prints structured JSON to stdout.
+- Exits 0 on success, non-zero on failure.
+- Idempotency key generated at script top when required by the API.
+```
 
 Fill all files with customer-specific values (website name, product, API details, tone, links).
 
@@ -91,6 +122,7 @@ In generated files, always include:
    - `POST /api/v1/tenants/:id/restart` (restart, no body required; `{}` accepted),
    plus exact auth context mapping for `Authorization`/`Bearer`/`apiToken`/`headers`.
 14. For OpenClaw Console targets, fail generation if output is vague (for example "I can manage instances") without endpoint+method details and concrete auth context guidance.
+15. Verify `workflows/` directory exists in the workspace with a `README.md` before emitting `[AGENT_CREATED::...]`.
 
 ### Step 3 — Write agent config file
 

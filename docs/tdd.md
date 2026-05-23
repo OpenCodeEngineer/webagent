@@ -351,13 +351,123 @@ The meta-agent is **not** a special OpenClaw concept — it's a regular agent wi
 | Property | Meta-agent | Product-agents |
 |---|---|---|
 | `sandbox.mode` | `"off"` — can write files anywhere | `"off"` + workspace-scoped tools |
-| `tools.deny` | `["browser", "canvas"]` only | `["exec", "process", "browser", "canvas", "nodes", "gateway"]` |
-| `skills` | `["create-agent"]` | `["website-api"]` (generated per customer) |
+| `tools.deny` | `["exec", "process", "browser", "canvas", "nodes", "gateway"]` | `["process", "browser", "canvas", "nodes", "gateway"]` (exec allowed) |
+| `skills` | `["create-agent", "manage-agents"]` | `["website-api", "website-knowledge", ...specialized]` |
 | `heartbeat` | `{ every: "0m" }` — on-demand only | `{ every: "30m" }` |
-| Purpose | Creates other agents | Serves website visitors |
+| Purpose | Creates other agents | Serves website visitors via workflow scripts |
 
 The meta-agent does NOT edit `openclaw.json` directly — the proxy handles agent registration
 automatically when it detects the `[AGENT_CREATED::]` marker.
+
+**Why product-agents allow `exec`:** product-agents implement actions as Python scripts under
+`workflows/` and execute them via `exec python3 workflows/<file>.py`. See "Workflow-as-Code"
+below. Meta-agent continues to deny `exec` (no need to run scripts; only writes workspace files).
+
+---
+
+## Workflow-as-Code (Product-Agent Action Pattern)
+
+**Rule:** any product-agent action that mutates state, calls an API, or requires credentials
+MUST be implemented as a Python script written to `workflows/<verb>-<noun>-<YYYYMMDD-HHMMSS>.py`
+and then executed via the `exec` tool. Read-only conversational answers may skip the workflow.
+
+### Why
+
+- **Auditability** — every action leaves an artifact on disk (workspace path persists across sessions).
+- **Reproducibility** — re-running a workflow gives the same result; supports rollback inspection.
+- **Composability** — workflows become building blocks for cron/automation (already wired in
+  openclaw.json5: `cron.enabled: true`).
+- **Quality signal** — judges/evals can deterministically check "did the agent produce a workflow?"
+  instead of guessing intent from natural-language replies.
+
+### Convention
+
+- **Path:** `<workspacePath>/workflows/<verb>-<noun>-<YYYYMMDD-HHMMSS>.py`
+  (example: `workflows/create-contact-20260523-143200.py`).
+- **Structure:** top docstring describes action + params; load auth from `os.environ`; use
+  `requests`; print structured JSON to stdout; exit 0 on success / non-zero on failure.
+- **Idempotency:** scripts must be safely re-runnable. Generate an idempotency key at the top
+  when the target API supports it.
+- **Workspace seeding:** `create-agent` writes `<workspacePath>/workflows/README.md` describing
+  the convention (Step 1 of the create-agent skill).
+
+### Source of truth
+
+- Rule baked into BOTH `openclaw/templates/AGENTS.md` and `openclaw/workspaces/meta/templates/AGENTS.md`
+  as a top-level "Workflow-as-Code (Required for Actions)" section + numbered "Workflow-first" rule.
+- API call flow rewritten in BOTH `openclaw/templates/skills/website-api/SKILL.md` and the meta
+  copy under `openclaw/workspaces/meta/templates/skills/website-api/SKILL.md`.
+- Reconciler (`packages/proxy/src/openclaw/reconciler.ts`) registers new product-agents WITHOUT
+  any `tools.deny` block — they inherit the global `tools.allow` which includes `exec`.
+
+### Verification
+
+- E2E judge (`.agents/skills/test-e2e/SKILL.md` Phase 4.5) SSHes to the gateway host and asserts
+  a `workflows/*.py` file exists with mtime within the action window AND that gateway logs show
+  `python3` was invoked on it.
+- Product-agent eval skill (`.agents/skills/product-agent-eval/SKILL.md`) scores "Workflow
+  Discipline" as a g-eval dimension (1–5).
+
+---
+
+## Product-Agent Evaluation (G-Eval)
+
+A deployed product-agent passes through three quality gates before being declared MVP-ready.
+
+### Gate 1 — Workspace validation (proxy-side)
+
+Runs at agent creation time. Validator (`packages/proxy/src/openclaw/workspace-validator.ts`)
+rejects workspaces containing unresolved `{{...}}` placeholders. Force-retries if found.
+
+### Gate 2 — E2E judge (`.agents/skills/test-e2e/SKILL.md`)
+
+User-journey test across 6 phases:
+- Phase 0: pre-flight health checks (proxy, gateway, widget bundle, admin UI).
+- Phase 1: login via UI succeeds.
+- Phase 2: agent created via meta-agent chat (< 3 min, embed code returned).
+- Phase 3: agent visible in dashboard with detail page + widget preview.
+- Phase 4: widget chat returns scored responses (rubric ≥ 3.0 avg).
+- **Phase 4.5: workflow artifact audit** — agent produced `workflows/*.py` for action question,
+  file present on host with valid structure, gateway logs show `python3` invocation.
+- Phase 5: UX audit checklist per page.
+- Phase 6: time-to-first-agent ≤ 10 min (PRD SLA).
+
+Verdicts: PASS / CONDITIONAL / NOT READY.
+
+### Gate 3 — Product-agent g-eval (`.agents/skills/product-agent-eval/SKILL.md`)
+
+12-prompt battery scored by LLM-as-judge across 6 dimensions (1–5):
+- **Task Completion** (weight 0.30) — did agent accomplish user goal?
+- **Workflow Discipline** (weight 0.20) — for action prompts, did it write+run a `workflows/*.py`?
+- **Factual Accuracy** (weight 0.20) — grounded in site/API knowledge, no hallucination?
+- **Tool Selection** (weight 0.15) — chose right endpoint / skill?
+- **Communication** (weight 0.10) — concise, on-brand, no exposed internals?
+- **Refusal Quality** (weight 0.05) — out-of-scope/missing-auth handled with actionable next step?
+
+Test battery covers: Knowledge Recall (3), API Action (2), Multi-step Reasoning (2),
+Out-of-scope Refusal (2), Auth-missing Fallback (2), Canonical-link probe (1).
+
+**Thresholds:**
+- ≥ 3.5 composite → ship to dev/staging.
+- ≥ 4.0 composite → mark "production ready" / public MVP eligible.
+
+**Output:**
+- Per-run scorecard at `evals/product-agent/<agentSlug>-<ISOdate>.md`.
+- Cumulative log at `evals/eval.csv` (header: run_id, timestamp, agent_slug, agent_type,
+  target_url, category, prompt, expected_behavior, response_summary, workflow_file,
+  workflow_ran, task_completion, workflow_discipline, factual_accuracy, tool_selection,
+  communication, refusal_quality, composite, verdict, notes).
+
+### Eval infrastructure dependencies (current gaps)
+
+1. **Judge LLM credentials** — `JUDGE_MODEL` + API key not yet in env. Bitwarden folder
+   `webagent` should hold `OPENAI_API_KEY` or `AZURE_OPENAI_KEY`; surface in proxy `.env`
+   for eval skill to consume.
+2. **Embed-token → agentSlug lookup** — eval skill needs to SSH-inspect `workflows/`; requires
+   either (a) new route `GET /api/agents/embed/:token/slug` or (b) DB query helper exposed in
+   admin. Currently must be derived manually from `agent-config.json`.
+3. **Workflow logs** — relies on `journalctl --user -u openclaw-gateway.service` grep for
+   `python3.*workflows`. If gateway log format changes, the assertion regex must update.
 
 ---
 
