@@ -1,9 +1,11 @@
+import { AUTH_ERROR_AGENT_PAUSED } from '@webagent/shared/protocol';
+
 export function formatAuthErrorMessage(message: {
   type?: string;
   reason?: string;
   message?: string;
 }): string {
-  if (message.reason === 'agent_paused') {
+  if (message.reason === AUTH_ERROR_AGENT_PAUSED) {
     return 'This assistant is temporarily unavailable.';
   }
   const detail = message.message || message.reason || 'Authentication error';
