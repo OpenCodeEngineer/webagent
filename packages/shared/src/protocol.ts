@@ -58,3 +58,7 @@ export type ServerMessage =
   | { type: 'message'; content: string; done: boolean }
   | { type: 'error'; message: string }
   | { type: 'pong' };
+
+// Distinct reason literal returned when the widget connects with a valid token
+// but the agent has been paused by its owner. Widget renders a specific UX.
+export const AUTH_ERROR_AGENT_PAUSED = 'agent_paused' as const;
