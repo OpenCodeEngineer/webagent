@@ -48,7 +48,7 @@
         workspace: "/opt/webagent/openclaw/workspaces/vibebrowser-app-0e3d9d31",
         sandbox: { mode: "off" },
         tools: {
-          deny: ["exec", "process", "browser", "canvas", "nodes", "gateway"]
+          deny: ["process", "browser", "canvas", "nodes", "gateway"]
         },
         heartbeat: { every: "0m" }
       },
@@ -58,7 +58,7 @@
         workspace: "/opt/webagent/openclaw/workspaces/vibebrowser-app-19811498",
         sandbox: { mode: "off" },
         tools: {
-          deny: ["exec", "process", "browser", "canvas", "nodes", "gateway"]
+          deny: ["process", "browser", "canvas", "nodes", "gateway"]
         },
         heartbeat: { every: "0m" }
       },

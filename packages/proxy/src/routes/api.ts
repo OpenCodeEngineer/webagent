@@ -11,6 +11,7 @@ import JSON5 from 'json5';
 import { OpenClawClient } from '../openclaw/client.js';
 import { validateGeneratedWorkspace } from '../openclaw/workspace-validator.js';
 import { atomicWriteFile } from '../openclaw/atomic-write.js';
+import { syncAgentWorkspaceFields, type SyncFields } from '../openclaw/workspace-writer.js';
 import {
   appendMetaHistoryMessage,
   extractEmbedCodeFromMessages,
@@ -750,6 +751,27 @@ async function syncAgentToPaperclip(
   }
 }
 
+/**
+ * Pick the subset of PATCH-body fields that need to be propagated into the
+ * agent's workspace files (AGENTS.md header + agent-config.json). Returns
+ * `null` when no workspace-relevant field changed, so the caller can skip
+ * the sync entirely.
+ *
+ * `apiDescription`, `widgetConfig`, and `status` are intentionally excluded:
+ * they live only on the agents row / gateway config and are not part of the
+ * customer-visible workspace header surface. If that contract changes, add
+ * the field here and update workspace-writer.ts to render it.
+ */
+export function pickWorkspaceSyncFieldsFromPatch(
+  body: { name?: string; websiteUrl?: string | null; description?: string | null; [k: string]: unknown },
+): SyncFields | null {
+  const out: SyncFields = {};
+  if (body.name !== undefined) out.name = body.name;
+  if (body.websiteUrl !== undefined) out.websiteUrl = body.websiteUrl;
+  if (body.description !== undefined) out.description = body.description;
+  return Object.keys(out).length > 0 ? out : null;
+}
+
 export function registerApiRoutes(app: FastifyInstance) {
   const mutationRateLimit = { max: 20, timeWindow: '1 minute' };
 
@@ -1125,6 +1147,22 @@ Customer: ${normalizedLatestMessage}`
         agentId: params.id,
         fields: Object.keys(body),
       });
+
+      const syncFields = pickWorkspaceSyncFieldsFromPatch(body);
+      if (syncFields) {
+        try {
+          await syncAgentWorkspaceFields({
+            workspacesDir: resolveOpenClawWorkspacesDir(),
+            slug: updated.openclawAgentId,
+            fields: syncFields,
+          });
+        } catch (err) {
+          request.log.warn(
+            { err, agentId: params.id, slug: updated.openclawAgentId },
+            'workspace file sync failed after PATCH; DB row updated regardless',
+          );
+        }
+      }
 
       // Best-effort Paperclip status sync
       if (body.status && body.status !== existingAgent.status && app.paperclip?.isEnabled && updated.paperclipAgentId) {

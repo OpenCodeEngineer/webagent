@@ -1,3 +1,17 @@
+import { AUTH_ERROR_AGENT_PAUSED } from '@webagent/shared/protocol';
+
+export function formatAuthErrorMessage(message: {
+  type?: string;
+  reason?: string;
+  message?: string;
+}): string {
+  if (message.reason === AUTH_ERROR_AGENT_PAUSED) {
+    return 'This assistant is temporarily unavailable.';
+  }
+  const detail = message.message || message.reason || 'Authentication error';
+  return `⚠️ Connection failed: ${detail}`;
+}
+
 (() => {
   interface LamoomWebSocket {
     readyState: number;
@@ -502,11 +516,7 @@
         socketAuthenticated = false;
         pendingMessages.length = 0;
         resetAssistantStream();
-        createMessage(
-          `⚠️ Connection failed: ${message.message || message.reason || 'Authentication error'}`,
-          'assistant',
-          true,
-        );
+        createMessage(formatAuthErrorMessage(message), 'assistant', true);
         manualClose = true;
         socket?.close();
         return;

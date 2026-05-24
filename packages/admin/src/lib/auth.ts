@@ -151,21 +151,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const existingUser = await findUserByEmailVariants(rawEmail);
 
         if (existingUser) {
-          const credentialAccounts = await getDb()
-            .select()
-            .from(accounts)
-            .where(eq(accounts.userId, existingUser.id))
-            .limit(10);
-
-          const credAccount = credentialAccounts.find(
-            (a: any) => a.provider === "credentials"
-          );
-
-          if (!credAccount?.access_token) {
+          if (!existingUser.hashedPassword) {
             return null;
           }
 
-          const isValid = await bcrypt.compare(password, credAccount.access_token);
+          const isValid = await bcrypt.compare(password, existingUser.hashedPassword);
           if (!isValid) {
             return null;
           }
@@ -203,6 +193,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           id: userId,
           email: normalizedEmail,
           name: normalizedEmail.split("@")[0],
+          hashedPassword,
         });
 
         await getDb().insert(accounts).values({
@@ -210,7 +201,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           type: "credentials",
           provider: "credentials",
           providerAccountId: normalizedEmail,
-          access_token: hashedPassword,
         });
 
         return {

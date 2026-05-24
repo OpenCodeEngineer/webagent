@@ -3,7 +3,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { ClientMessage, ServerMessage } from '@webagent/shared/protocol';
-import { and, eq } from 'drizzle-orm';
+import { AUTH_ERROR_AGENT_PAUSED } from '@webagent/shared/protocol';
+import { eq } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
 import { agents, widgetEmbeds } from '../db/schema.js';
 import { OpenClawClient } from '../openclaw/client.js';
@@ -440,38 +441,57 @@ ${relativePaths.map((relativePath) => `- ${relativePath}`).join('\n')}
 Use these files as source context.`;
 }
 
-async function lookupEmbedToken(db: Database, embedToken: string): Promise<TokenLookup | null> {
+export type TokenResolution =
+  | { kind: 'active'; agentId: string; openclawAgentId: string; allowedOrigins: string[] | null; widgetConfig: Record<string, unknown> | null }
+  | { kind: 'paused' }
+  | { kind: 'not_found' };
+
+interface TokenLookupRow {
+  agentId: string;
+  openclawAgentId: string;
+  status: string;
+  allowedOrigins: string[] | null;
+  widgetConfig: unknown;
+}
+
+export function classifyTokenLookupRow(row: TokenLookupRow | null): TokenResolution {
+  if (!row) return { kind: 'not_found' };
+  if (row.status === 'deleted') return { kind: 'not_found' };
+  if (row.status === 'paused') return { kind: 'paused' };
+  return {
+    kind: 'active',
+    agentId: row.agentId,
+    openclawAgentId: row.openclawAgentId,
+    allowedOrigins: row.allowedOrigins,
+    widgetConfig: (row.widgetConfig ?? null) as Record<string, unknown> | null,
+  };
+}
+
+async function lookupEmbedToken(db: Database, embedToken: string): Promise<TokenResolution> {
   const cached = getCachedTokenLookup(embedToken);
   if (cached) {
-    return cached;
+    return { kind: 'active', ...cached };
   }
 
   const rows = await db
     .select({
       agentId: agents.id,
       openclawAgentId: agents.openclawAgentId,
+      status: agents.status,
       allowedOrigins: widgetEmbeds.allowedOrigins,
       widgetConfig: agents.widgetConfig,
     })
     .from(widgetEmbeds)
     .innerJoin(agents, eq(widgetEmbeds.agentId, agents.id))
-    .where(and(eq(widgetEmbeds.embedToken, embedToken), eq(agents.status, 'active')))
+    .where(eq(widgetEmbeds.embedToken, embedToken))
     .limit(1);
 
-  const row = rows[0];
-  if (!row) {
-    return null;
+  const resolution = classifyTokenLookupRow(rows[0] ?? null);
+  if (resolution.kind === 'active') {
+    const { kind: _kind, ...value } = resolution;
+    setCachedTokenLookup(embedToken, value);
   }
-
-  const value = {
-    agentId: row.agentId,
-    openclawAgentId: row.openclawAgentId,
-    allowedOrigins: row.allowedOrigins,
-    widgetConfig: row.widgetConfig as Record<string, unknown> | null,
-  };
-
-  setCachedTokenLookup(embedToken, value);
-  return value;
+  return resolution;
 }
 
 export function handleConnection(
@@ -578,20 +598,28 @@ export function handleConnection(
             return;
           }
 
-          let tokenData: TokenLookup | null;
+          let resolution: TokenResolution;
           try {
-            tokenData = await lookupEmbedToken(ctx.db, authToken);
+            resolution = await lookupEmbedToken(ctx.db, authToken);
           } catch {
             send(ws, { type: 'auth_error', reason: 'Internal server error' });
             ws.close(1011, 'Internal error');
             return;
           }
 
-          if (!tokenData) {
+          if (resolution.kind === 'paused') {
+            send(ws, { type: 'auth_error', reason: AUTH_ERROR_AGENT_PAUSED });
+            ws.close(4003, 'Agent paused');
+            return;
+          }
+
+          if (resolution.kind === 'not_found') {
             send(ws, { type: 'auth_error', reason: 'Invalid agent token' });
             ws.close(4003, 'Invalid token');
             return;
           }
+
+          const tokenData = resolution; // kind: 'active'
 
           if (!isOriginAllowed(ctx.origin, tokenData.allowedOrigins)) {
             send(ws, { type: 'auth_error', reason: 'Origin not allowed' });
