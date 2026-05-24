@@ -756,6 +756,11 @@ async function syncAgentToPaperclip(
  * agent's workspace files (AGENTS.md header + agent-config.json). Returns
  * `null` when no workspace-relevant field changed, so the caller can skip
  * the sync entirely.
+ *
+ * `apiDescription`, `widgetConfig`, and `status` are intentionally excluded:
+ * they live only on the agents row / gateway config and are not part of the
+ * customer-visible workspace header surface. If that contract changes, add
+ * the field here and update workspace-writer.ts to render it.
  */
 export function pickWorkspaceSyncFieldsFromPatch(
   body: { name?: string; websiteUrl?: string | null; description?: string | null; [k: string]: unknown },
