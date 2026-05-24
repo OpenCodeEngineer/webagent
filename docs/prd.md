@@ -201,8 +201,8 @@ Agent calls HubSpot API → returns results conversationally
 | Error tracking (Sentry or similar) | MUST | No visibility into production errors |
 | CI/CD pipeline | MUST | Deploy is fully manual today |
 | Uptime monitoring | MUST | No alerting if site goes down |
-| Settings page (`/dashboard/settings`) | MUST | Currently a "coming soon" stub |
-| Password stored correctly in DB | MUST | Currently in `access_token` column (wrong) |
+| Settings page (`/dashboard/settings`) | MUST | Currently a "coming soon" stub. Acceptance: Account (email/name), Security (change password), Embed API (token mask/copy/rotate), Danger Zone (delete account). Detail in tdd.md §Phase 1 Specs → Settings Page |
+| Migrate password from `access_token` to `password_hash` column | MUST | Bcrypt hash currently in OAuth `access_token` slot; ship via Settings page password-change flow (tdd.md §Phase 1 Specs → Settings Page) |
 
 ### Phase 2 — Post-Launch (🟠 High)
 
@@ -226,7 +226,7 @@ Agent calls HubSpot API → returns results conversationally
 | Analytics dashboard | Visitor heatmaps, top questions, drop-off |
 | Light/dark theme toggle | Dark hardcoded |
 | SSO / SAML | Enterprise requirement |
-| Paperclip governance integration | Phase 2-5 plan in design.paperclip.md |
+| Paperclip governance integration | Multi-phase plan in docs/design.paperclip.md (agent registration → governance → policy enforcement). First slice (Phase 2: agent registration via Paperclip) is the entry point — see PRD §7 Open Questions #5 for ship-date decision |
 
 ---
 
@@ -239,8 +239,10 @@ Agent calls HubSpot API → returns results conversationally
 | Agent creation success rate | ≥ 95% |
 | Visitor satisfaction (G-Eval) | ≥ 3.5/5 average |
 | Uptime | ≥ 99.5% monthly |
-| Widget load size | < 50 KB (current IIFE bundle) |
+| Widget load size | < 50 KiB / 51200 bytes (current IIFE bundle) |
 | WS auth latency | < 500 ms (ws-ticket round trip) |
+
+Measurement strategy + ownership for each NFR is captured in tdd.md §NFR Measurement Strategy.
 
 ---
 
@@ -256,8 +258,10 @@ Agent calls HubSpot API → returns results conversationally
 
 ## 7. Open Questions
 
-1. **Pricing model**: Per-agent flat fee? Per-message metered? Freemium with usage cap?
-2. **Invite gate**: When do we open public signup?
-3. **Multi-tenancy**: Should each Lamoom customer be a separate OpenClaw workspace, or can we pack more into one gateway?
-4. **Custom domains for widget**: Should `widget.js` be servable from customer's own CDN?
-5. **Paperclip integration**: When does Phase 2 (agent registration in Paperclip) ship?
+| # | Question | Owner | Decision needed by |
+|---|---|---|---|
+| 1 | Pricing model — per-agent flat / per-message metered / freemium with cap | Product | Pre-launch |
+| 2 | Invite gate — when do we open public signup? | Product | Post-launch + 30d data |
+| 3 | Multi-tenancy — workspace-per-customer vs packed gateway | Eng | Before 100-agent scale |
+| 4 | Custom domains for widget — serve `widget.js` from customer CDN? | Eng | Phase 3 |
+| 5 | Paperclip integration — when does Phase 2 (registration) ship? | Eng | After Phase 1 launch |

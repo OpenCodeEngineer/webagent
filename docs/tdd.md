@@ -466,8 +466,12 @@ Out-of-scope Refusal (2), Auth-missing Fallback (2), Canonical-link probe (1).
 2. **Embed-token → agentSlug lookup** — eval skill needs to SSH-inspect `workflows/`; requires
    either (a) new route `GET /api/agents/embed/:token/slug` or (b) DB query helper exposed in
    admin. Currently must be derived manually from `agent-config.json`.
-3. **Workflow logs** — relies on `journalctl --user -u openclaw-gateway.service` grep for
-   `python3.*workflows`. If gateway log format changes, the assertion regex must update.
+3. **Workflow execution evidence** — current judge greps `journalctl --user -u openclaw-gateway.service`
+   for `python3.*workflows`. Fragile to log format drift. **Preferred replacement:** have the
+   `create-agent` template wrap workflow execution in a short shell prelude that appends an
+   audit line to `<workspace>/workflows/.exec.log` (`<ISO-timestamp>\t<script>\t<exit_code>`),
+   then have the judge read that file. Removes dependency on journald and survives gateway
+   log-format changes. Track as eval-infra task; not in Phase 1.
 
 ---
 
@@ -594,16 +598,23 @@ webagent/
 ### OpenClaw Session Persistence
 
 - Each `sessionKey` maintains isolated multi-turn conversation state
-- `hooks.allowRequestSessionKey: true` in config
-- Constrained with `allowedSessionKeyPrefixes: ["agent:", "widget-", "admin-", "hook:"]`
+- `hooks.allowRequestSessionKey: true` in `openclaw.json5`
+- `allowedSessionKeyPrefixes: ["agent:", "widget-", "admin-", "hook:"]` — OpenClaw matches any of these as the leading substring. In practice all production keys begin with `agent:` (widget: `agent:<id>:widget-...`, admin/meta: `agent:meta:admin-...`); the bare `widget-`/`admin-` entries exist for backward compatibility with pre-`agent:` namespacing and may be pruned once no live sessions use them.
 - Widget session mapping persisted in DB (`widget_sessions.openclawSessionKey`)
 
 ### Sandbox Model (NO Docker)
 
-- `sandbox.mode: "off"` — no containers
-- `tools.deny: ["exec", "process", "browser", "canvas", "nodes", "gateway"]`
+- `sandbox.mode: "off"` for all agents — no containers
 - Agent read/write/edit tools are workspace-scoped by default in OpenClaw
-- Meta-agent is the exception: `sandbox: { mode: "off" }` with minimal deny list
+- **Tool deny lists vary by agent role:**
+
+| Agent role | `tools.deny` | Why |
+|---|---|---|
+| Meta-agent | `["exec", "process", "browser", "canvas", "nodes", "gateway"]` | Only writes workspace files; no need to run scripts |
+| Product-agent | `["process", "browser", "canvas", "nodes", "gateway"]` (no `exec`) | Must execute `workflows/*.py` scripts (see Workflow-as-Code) |
+| Global `tools.allow` | `["group:fs", "group:web", "group:memory", "session_status", "exec"]` | Inherited by product-agents that omit a deny block |
+
+See cross-reference: "Meta-Agent vs Product-Agent" table above and "Workflow-as-Code" section.
 
 ### Agent Creation: No Callback Required
 
@@ -622,70 +633,93 @@ webagent/
 
 ## Database Schema (Drizzle ORM)
 
+Source of truth: `packages/proxy/src/db/schema.ts`. Tables below mirror the live Drizzle schema.
+
 ```
 customers
   id            UUID PK
   email         TEXT UNIQUE NOT NULL
   name          TEXT
-  passwordHash  TEXT
+  passwordHash  TEXT                       ← bcrypt hash; see Known Debt #1 for migration from access_token
   oauthProvider TEXT (google | github | email)
   oauthId       TEXT
-  plan          TEXT DEFAULT 'free'
-  createdAt     TIMESTAMP
-  updatedAt     TIMESTAMP
+  plan          TEXT NOT NULL DEFAULT 'free'
+  createdAt     TIMESTAMPTZ
+  updatedAt     TIMESTAMPTZ
 
 agents
-  id              UUID PK
-  customerId      UUID FK → customers.id (CASCADE)
-  openclawAgentId TEXT UNIQUE NOT NULL    ← matches agent.id in openclaw.json5
-  name            TEXT NOT NULL
-  websiteUrl      TEXT
-  status          TEXT DEFAULT 'active' (active | paused | deleted)
-  paperclipAgentId TEXT                  ← optional Paperclip integration ID
-  widgetConfig    JSONB DEFAULT '{}'
-  apiDescription  TEXT
-  createdAt       TIMESTAMP
-  updatedAt       TIMESTAMP
+  id                 UUID PK
+  customerId         UUID NOT NULL FK → customers.id (CASCADE)
+  openclawAgentId    TEXT UNIQUE NOT NULL    ← matches agent.id in openclaw.json5
+  paperclipAgentId   TEXT                    ← optional Paperclip integration ID
+  name               TEXT NOT NULL
+  websiteUrl         TEXT
+  description        TEXT                    ← customer-supplied instructions (used by PATCH /api/agents/:id)
+  status             TEXT NOT NULL DEFAULT 'provisioning'  ← provisioning | active | paused | deleted
+  widgetConfig       JSONB NOT NULL DEFAULT '{}'
+  apiDescription     TEXT
+  createdAt          TIMESTAMPTZ
+  updatedAt          TIMESTAMPTZ
 
 widget_sessions
-  id                UUID PK
-  agentId           UUID FK → agents.id (CASCADE)
-  externalUserId    TEXT NOT NULL          ← visitor's userId from widget
-  openclawSessionKey TEXT NOT NULL
-  lastActiveAt      TIMESTAMP
-  createdAt         TIMESTAMP
-  UNIQUE(agentId, externalUserId)
+  id                  UUID PK
+  agentId             UUID NOT NULL FK → agents.id (CASCADE)
+  externalUserId      TEXT NOT NULL          ← visitor's userId from widget
+  openclawSessionKey  TEXT NOT NULL
+  lastActiveAt        TIMESTAMPTZ
+  createdAt           TIMESTAMPTZ
+  UNIQUE INDEX widget_sessions_agent_user_idx (agentId, externalUserId)
 
 widget_embeds
   id              UUID PK
-  agentId         UUID FK → agents.id (CASCADE)
+  agentId         UUID NOT NULL FK → agents.id (CASCADE)
   embedToken      TEXT UNIQUE NOT NULL    ← used in <script data-agent-token="...">
   allowedOrigins  TEXT[]
-  createdAt       TIMESTAMP
+  createdAt       TIMESTAMPTZ
 
 audit_log
   id          BIGSERIAL PK
   customerId  UUID FK → customers.id
   action      TEXT NOT NULL
-  details     JSONB DEFAULT '{}'
-  createdAt   TIMESTAMP
+  details     JSONB
+  createdAt   TIMESTAMPTZ
 
 meta_agent_sessions                        ← one per customer
   id                  UUID PK
-  customerId          UUID FK → customers.id (CASCADE)
+  customerId          UUID NOT NULL FK → customers.id (CASCADE)
   openclawSessionKey  TEXT UNIQUE NOT NULL  ← "agent:meta:admin-<customerId>"
-  lastActiveAt        TIMESTAMP
-  createdAt           TIMESTAMP
-  UNIQUE(customerId)
+  lastActiveAt        TIMESTAMPTZ
+  createdAt           TIMESTAMPTZ
+  UNIQUE INDEX meta_agent_sessions_customer_idx (customerId)
 
 meta_agent_messages                        ← ordered message log
   id          UUID PK
-  sessionId   UUID FK → meta_agent_sessions.id (CASCADE)
+  sessionId   UUID NOT NULL FK → meta_agent_sessions.id (CASCADE)
   role        TEXT NOT NULL                ← 'user' | 'assistant'
   content     TEXT NOT NULL
-  createdAt   TIMESTAMP
-  INDEX(sessionId, createdAt)
+  createdAt   TIMESTAMPTZ
+  INDEX meta_agent_messages_session_created_idx (sessionId, createdAt)
 ```
+
+### NextAuth adapter tables (managed by adapter, no Drizzle migration yet — see Known Debt #8)
+
+Defined in `packages/admin/src/lib/auth-schema.ts`. NextAuth `DrizzleAdapter` auto-creates these on first run; production should ship a checked-in migration before launch.
+
+```
+users                    ← admin user identity (separate from customers row)
+  id, email, emailVerified, name, image, hashedPassword
+
+accounts                 ← OAuth provider links (Google, GitHub)
+  userId, type, provider, providerAccountId, access_token, refresh_token, ...
+
+sessions                 ← active NextAuth sessions
+  sessionToken, userId, expires
+
+verification_tokens      ← magic-link / email verification
+  identifier, token, expires
+```
+
+**Identity model note:** `customers` is the business-tenant row used by the proxy/widget pipeline. `users` is the NextAuth row used by the admin UI. Both are keyed by email; production reconciliation between the two is tracked in Known Debt #8.
 
 ---
 
@@ -772,6 +806,18 @@ EMAIL_FROM=
 OPENCLAW_GATEWAY_URL=ws://127.0.0.1:18789
 PROXY_PORT=3001
 ADMIN_PORT=3000
+
+# Phase 1 launch-critical (see §Phase 1 Implementation Specs)
+SENTRY_DSN=                # Proxy + admin server-side error tracking
+NEXT_PUBLIC_SENTRY_DSN=    # Admin client-side error tracking
+NEXT_PUBLIC_PROXY_URL=     # Replaces hardcoded localhost:3001 in next.config.ts (Known Debt #9)
+
+# Eval infrastructure (see §Product-Agent Evaluation gaps)
+JUDGE_MODEL=               # e.g. gpt-4o, gpt-4.1
+OPENAI_API_KEY=            # or AZURE_OPENAI_KEY; consumed by product-agent-eval skill
+
+# CI/CD (stored as GitHub Actions secrets, not on the VM)
+HETZNER_SSH_KEY=           # GitHub Actions secret only
 ```
 
 ---
@@ -908,45 +954,38 @@ Two tables (`meta_agent_sessions`, `meta_agent_messages`) persist the meta-agent
 - CORS: widget embed origin validation enforced in WS auth handshake
 - E2E: Full agent creation flow verified (multiple agents created and tested)
 
-### 🔴 BLOCKING — Must Fix Before Production Launch
+> **Single source of truth for issue IDs:** the numbers below are referenced from the Known Debt table (§Known Debt) and the Phase 1 Implementation Specs. Do NOT renumber without updating both.
 
-1. Password stored in `access_token` column — bcrypt hash in wrong column; breaks if adapter reads `access_token` for OAuth token.
-2. No CI/CD pipeline — deploy is fully manual.
-3. No error tracking — no Sentry, Datadog, or equivalent.
-4. No external uptime monitoring.
-5. Admin auth tables have no migration — `users`, `accounts`, `sessions`, `verification_tokens` rely on adapter auto-creation (fragile).
-6. Hardcoded `localhost:3001` rewrite in `next.config.ts` — must be configurable via env var.
-7. Hardcoded secrets in `openclaw.json5` — gateway token and hooks secret are inline strings.
+### 🔴 BLOCKING — Must Fix Before Production Launch (PRD Phase 1 MUST)
 
-### 🟠 HIGH — Should Fix Before Launch
-
-8. Agent registration TOCTOU race — `registerAgentInOpenClaw` reads config, checks slug, writes; two concurrent creates for same slug can both pass. Needs file locking.
-9. `detectAgentCreation` DB insert race — no `onConflictDoNothing` on agent insert; concurrent creation throws unhandled unique violation.
-10. Two widget implementations — `packages/widget/` (better, unused) vs `packages/proxy/src/widget/widget.ts` (simpler, actually served).
-
-### 🔴 BLOCKING (continued) — PRD Phase 1 MUST
-
-8. No inline agent editing — user must recreate an agent to change name, URL, or instructions. PRD Phase 1 MUST. See §Phase 1 Specs below.
-9. Pause / delete agent not wired end-to-end — dashboard UI may show buttons but backend action is unconfirmed. PRD Phase 1 MUST. Needs: `PATCH /api/agents/:id` (status), `DELETE /api/agents/:id`; proxy removes from openclaw.json5, SIGHUP.
-10. Settings page at `/dashboard/settings` is a stub — required for password change, invite management, API key display. PRD Phase 1 MUST. See §Phase 1 Specs below.
+1. **Password stored in `access_token` column** — bcrypt hash in wrong column; breaks if adapter reads `access_token` for OAuth token. Fix shipped together with §Settings Page (`POST /api/auth/change-password` migrates value).
+2. **No CI/CD pipeline** — deploy is fully manual. See §Phase 1 Specs → CI/CD Pipeline.
+3. **No error tracking** — no Sentry, Datadog, or equivalent. See §Phase 1 Specs → Error Tracking.
+4. **No external uptime monitoring.** See §Phase 1 Specs → Uptime Monitoring.
+5. **No inline agent editing** — user must recreate an agent to change name, URL, or instructions. See §Phase 1 Specs → Agent Editing.
+6. **Pause / delete agent not wired end-to-end** — backend handlers unverified; `PATCH /api/agents/:id` (status) + `DELETE /api/agents/:id` must remove from openclaw.json5 and SIGHUP. See §Phase 1 Specs → Pause / Delete Agent.
+7. **Settings page at `/dashboard/settings` is a stub** — required for password change, invite management, API key display. See §Phase 1 Specs → Settings Page.
 
 ### 🟠 HIGH — Should Fix Before Launch
 
-11. Agent registration TOCTOU race — `registerAgentInOpenClaw` reads config, checks slug, writes; two concurrent creates for same slug can both pass. Needs file locking.
-12. `detectAgentCreation` DB insert race — no `onConflictDoNothing` on agent insert; concurrent creation throws unhandled unique violation.
-13. Two widget implementations — `packages/widget/` (better, unused) vs `packages/proxy/src/widget/widget.ts` (simpler, actually served).
-14. Visitor analytics missing — dashboard shows no usage data (message count, session count). PRD Phase 2. Need: counter columns on `widget_sessions`; `GET /api/agents/:id/stats` route.
+8. **Admin auth tables have no migration** — `users`, `accounts`, `sessions`, `verification_tokens` rely on adapter auto-creation (fragile). Production reconciliation between `customers` and NextAuth `users` also unresolved.
+9. **Hardcoded `localhost:3001` rewrite in `next.config.ts`** — must be configurable via `NEXT_PUBLIC_PROXY_URL`.
+10. **Hardcoded secrets in `openclaw.json5`** — gateway token and hooks secret are inline strings. Move to env.
+11. **Agent registration TOCTOU race** — `registerAgentInOpenClaw` reads config, checks slug, writes; two concurrent creates for same slug can both pass. Needs file locking.
+12. **`detectAgentCreation` DB insert race** — no `onConflictDoNothing` on agent insert; concurrent creation throws unhandled unique violation.
+13. **Visitor analytics missing** — dashboard shows no usage data (message count, session count). PRD Phase 2. Need: counter columns on `widget_sessions`; `GET /api/agents/:id/stats` route.
 
 ### 🟡 MEDIUM — Fix Soon After Launch
 
-15. Widget `userId` is client-generated — any user can impersonate another's session.
-16. No server-side WS heartbeat — stale sockets accumulate.
-17. No WS backpressure handling.
-18. `touchSessionLastActiveAt` await blocks message processing on DB failure.
-19. Magic link form shown even when `EMAIL_SERVER` is unset.
-20. Widget preview has no auto-reconnect on disconnect.
-21. Hardcoded `dev.lamoom.com` fallbacks in proxy and admin code.
-22. No forgot password / account recovery flow. PRD Phase 2.
+14. **Two widget implementations** — `packages/widget/` (better, unused) vs `packages/proxy/src/widget/widget.ts` (simpler, actually served). Decide one, delete the other.
+15. **Widget `userId` is client-generated** — any visitor can impersonate another's session by guessing `userId`. Cross-ref: §Real Widget Embed (`data-user-id` fallback to `localStorage.lamoom_uid`). Mitigation: server-side signed visitor tokens.
+16. **No server-side WS heartbeat** — stale sockets accumulate.
+17. **No WS backpressure handling.**
+18. **`touchSessionLastActiveAt` await blocks message processing on DB failure** — should be fire-and-forget with error log.
+19. **Magic link form shown even when `EMAIL_SERVER` is unset.**
+20. **Widget preview has no auto-reconnect on disconnect.**
+21. **Hardcoded `dev.lamoom.com` fallbacks in proxy and admin code.**
+22. **No forgot password / account recovery flow.** PRD Phase 2.
 
 ### 🟢 Nice to Have
 
@@ -1049,10 +1088,12 @@ pnpm --filter @webagent/proxy db:migrate    # apply to DB
 
 ### WebSocket Auth Flow
 
-1. Client sends `{ type: "auth", userId, token }` within 30s
-2. Server responds `auth_ok` or `auth_error`
-3. Admin mode: server immediately sends `{ type: "history", messages[], embedCode? }`
-4. Messages stream as `{ type: "message", content, done: boolean }`
+1. Client sends auth message within 30s. Shape varies by mode (full type in `packages/shared/src/protocol.ts`):
+   - **Widget** (visitor): `{ type: "auth", mode: "widget", userId, agentToken, token }` — `agentToken` is the `data-agent-token` from the `<script>` embed; `token` is the customer-API HMAC-derived value.
+   - **Admin** (dashboard): `{ type: "auth", mode: "admin", userId, ticket }` — `ticket` is a short-lived value from `GET /api/auth/ws-ticket` (NextAuth session → ticket exchange).
+2. Server responds `{ type: "auth_ok", sessionId }` or `{ type: "auth_error", reason }`. Reason `agent_paused` on paused agents (Phase 1 spec).
+3. Admin mode: server immediately sends `{ type: "history", sessionId, messages[], embedCode? }`.
+4. Messages stream as `{ type: "message", content, done: boolean }`. For admin sessions that just created an agent, the `done: true` message includes `embedCode` suffix.
 
 ---
 
@@ -1134,6 +1175,8 @@ Automated by `test-lamoom` skill Phase 0–1.
 
 Priority legend: **BLOCKING** = blocks launch per PRD Phase 1 MUST; **HIGH** = should fix before launch; **MEDIUM** = fix soon after; **LOW** = nice to have.
 
+> IDs match §Production Status. Update both when adding/removing items.
+
 | # | Issue | Priority | PRD |
 |---|---|---|---|
 | 1 | Password in `access_token` column | BLOCKING | Phase 1 |
@@ -1147,15 +1190,22 @@ Priority legend: **BLOCKING** = blocks launch per PRD Phase 1 MUST; **HIGH** = s
 | 9 | Hardcoded `localhost:3001` in next.config.ts | HIGH | Phase 2 |
 | 10 | Secrets hardcoded in openclaw.json5 | HIGH | — |
 | 11 | Agent registration TOCTOU race | HIGH | Phase 2 |
-| 12 | Visitor analytics missing (message/session counts) | HIGH | Phase 2 |
-| 13 | Two widget implementations — better one unused | MEDIUM | — |
-| 14 | No server-side WS heartbeat | MEDIUM | — |
+| 12 | `detectAgentCreation` DB insert race | HIGH | Phase 2 |
+| 13 | Visitor analytics missing (message/session counts) | HIGH | Phase 2 |
+| 14 | Two widget implementations — better one unused | MEDIUM | — |
 | 15 | Widget `userId` client-generated (session hijack) | MEDIUM | — |
-| 16 | No WS backpressure handling | MEDIUM | — |
-| 17 | No forgot password flow | MEDIUM | Phase 2 |
-| 18 | Widget preview no auto-reconnect | MEDIUM | Phase 2 |
-| 19 | Token cache in WS handler unbounded | LOW | — |
-| 20 | Hardcoded `dev.lamoom.com` fallbacks | LOW | — |
+| 16 | No server-side WS heartbeat | MEDIUM | — |
+| 17 | No WS backpressure handling | MEDIUM | — |
+| 18 | `touchSessionLastActiveAt` blocks on DB failure | MEDIUM | — |
+| 19 | Magic-link form shown when `EMAIL_SERVER` unset | MEDIUM | — |
+| 20 | Widget preview no auto-reconnect | MEDIUM | Phase 2 |
+| 21 | Hardcoded `dev.lamoom.com` fallbacks | MEDIUM | — |
+| 22 | No forgot password flow | MEDIUM | Phase 2 |
+| 23 | Gateway config file divergence (json5 vs json) | LOW | — |
+| 24 | Token cache in WS handler unbounded | LOW | — |
+| 25 | No light/dark theme toggle | LOW | — |
+| 26 | No loading skeleton / Suspense boundary on dashboard | LOW | — |
+| 27 | `next-auth@5.0.0-beta.31` pre-release in production | LOW | — |
 
 ---
 
@@ -1170,7 +1220,7 @@ These are the PRD Phase 1 MUST items that have no spec yet. Each must ship befor
 
 | Job | Trigger | Steps |
 |---|---|---|
-| `ci` | Every push + PR | `pnpm install` → `pnpm build` → `pnpm test` → widget bundle size check (fail if > 50 KB) |
+| `ci` | Every push + PR | `pnpm install` → `pnpm build` → `pnpm test` → widget bundle size check (fail if `wc -c packages/proxy/public/widget.js` > 51200 bytes / 50 KiB; matches PRD §5 NFR) |
 | `deploy` | Push to `main` | rsync to Hetzner → `db:migrate` → `admin-static-sync` → health checks |
 
 Required secrets in GitHub: `HETZNER_SSH_KEY`, `DATABASE_URL`, `AUTH_SECRET`, `OPENCLAW_GATEWAY_TOKEN`, `NEXT_PUBLIC_PROXY_URL`.
@@ -1201,11 +1251,15 @@ Required env vars: `SENTRY_DSN` (proxy + admin), `NEXT_PUBLIC_SENTRY_DSN` (admin
 
 PRD: "edit name, URL, instructions without full recreation."
 
-**Data model change:** No schema change needed. `agents.name`, `agents.websiteUrl` already exist. Add: update endpoint + workspace file rewrite.
+**Data model:** No new column required. `agents.name`, `agents.websiteUrl`, `agents.description` already exist. The PRD's "instructions" field maps to `agents.description` — rename the API parameter or alias it in the validator. (If a longer free-form instructions field is later needed, add `agents.custom_instructions TEXT` in a follow-up migration.)
 
-**API:** `PATCH /api/agents/:id` — body: `{ name?, websiteUrl?, instructions? }`. Auth: session. Side effects: rewrite `AGENTS.md` header section in workspace; SIGHUP gateway if agent config changes.
+**API:** `PATCH /api/agents/:id` — body: `{ name?, websiteUrl?, description? }` (Zod-validated). Auth: NextAuth session (admin) OR HMAC headers (customer API). Side effects:
+1. UPDATE the `agents` row.
+2. Rewrite `AGENTS.md` header + `<workspace>/agent-config.json` to reflect new name/URL/description.
+3. SIGHUP gateway only if `name` or workspace-resident metadata changed (`websiteUrl`/`description` edits alone do not require reload).
+4. Append `audit_log` entry with action `agent.updated` and a diff of changed fields.
 
-**UI:** On agent detail page, add inline editable fields (name, URL) + a "Custom instructions" textarea. Save button calls PATCH. No new page.
+**UI:** On agent detail page (`/dashboard/agents/[id]`), add inline editable fields (name, URL) + a "Custom instructions" textarea. Save button calls PATCH. No new page.
 
 **Scope:** Name + URL edits do NOT re-crawl the site (crawl is expensive). Re-crawl = "update agent" in meta-agent chat (existing flow).
 
@@ -1281,4 +1335,18 @@ PRD §5 defines 7 non-functional requirements. Here's how each gets measured.
 
 **Decision:** Single `.js` IIFE served from proxy at `/widget.js`.  
 **Rationale:** Zero dependencies for the website owner — one `<script>` tag, no npm install.  
-**Consequences:** Bundle must stay < 50 KB. No React in widget code.
+**Consequences:** Bundle must stay < 50 KiB (51200 bytes). No React in widget code.
+
+### ADR-006: Workflow-as-Code for Product-Agent Actions
+
+**Decision:** Any product-agent action that mutates state, calls an external API, or uses credentials MUST be implemented as a Python script written to `<workspace>/workflows/<verb>-<noun>-<timestamp>.py` and executed via the `exec` tool. Read-only conversational answers MAY skip this.  
+**Rationale:**
+- **Auditability** — every action leaves a disk artifact, persistent across sessions.
+- **Reproducibility** — a workflow can be re-run with the same inputs.
+- **Composability** — workflows become building blocks for cron/automation already enabled in `openclaw.json5`.
+- **Deterministic eval signal** — Phase 4.5 E2E judge + G-Eval `Workflow Discipline` dimension assert artifact presence rather than parsing intent from natural-language replies.
+
+**Consequences:**
+- Product-agents must allow the `exec` tool (see Sandbox Model table); meta-agent continues to deny `exec`.
+- `create-agent` seeds `<workspace>/workflows/README.md` and the workflow-first rule into BOTH base templates and meta `templates/` copies (validator in `packages/proxy/src/openclaw/workspace-validator.ts` enforces marker presence on creation).
+- Verification depends on filesystem inspection + gateway logs; failure modes here drive the eval gaps listed under §Product-Agent Evaluation.
