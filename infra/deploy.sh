@@ -328,19 +328,22 @@ run_post_deploy_checks() {
   fi
 
   # External availability check.
-  # First try via public DNS (the user's path). If that fails — usually because
-  # the deploy runner cannot resolve our self-hosted dev.lamoom.com — fall back
-  # to a --resolve probe via the VM's loopback so we still exercise nginx + TLS
-  # + the app stack end-to-end without depending on the runner's resolver.
-  echo "→ External availability check (${external_url})..."
+  #
+  # MUST use the unmodified public path. NO --resolve, NO -k, NO --dns-servers.
+  # A previous version of this script fell back to --resolve dev.lamoom.com:443:127.0.0.1
+  # when public DNS failed; that hid a real public-reachability outage for ~21h
+  # because the deploy kept reporting ✓ while https://dev.lamoom.com/ was NXDOMAIN
+  # for every real user. If the deploy host cannot reach its own public URL,
+  # the correct signal is a deploy failure — fix DNS/firewall/cert, do not
+  # bypass them.
+  echo "→ External availability check (${external_url}) — public path only, no --resolve, no -k..."
   external_status="$(curl -sS -L -o /dev/null -w '%{http_code}' --max-time 20 "${external_url}" 2>/dev/null || true)"
-  if [[ -z "${external_status}" || "${external_status}" == "000" ]]; then
-    echo "⚠️  Public-DNS external check could not reach ${external_url} from this host; retrying via --resolve to 127.0.0.1"
-    external_status="$(curl -sS -L --resolve "dev.lamoom.com:443:127.0.0.1" -o /dev/null -w '%{http_code}' --max-time 20 "${external_url}" 2>/dev/null || true)"
-  fi
 
   if [[ -z "${external_status}" || "${external_status}" == "000" ]]; then
-    echo "❌ External root URL check failed: no HTTP response (even via loopback)"
+    echo "❌ External root URL check failed: ${external_url} unreachable from this host via the public path."
+    echo "   Diagnose: dig +short dev.lamoom.com @8.8.8.8 ; nc -vz 78.47.152.177 443"
+    echo "   Likely causes (one of): public DNS delegation broken (Route 53 / registrar NS), 443 firewalled, or TLS cert invalid."
+    echo "   DO NOT add a --resolve fallback to silence this — that is what caused the prior 21h outage."
     return 1
   fi
   if [[ "${external_status}" =~ ^5 ]]; then
