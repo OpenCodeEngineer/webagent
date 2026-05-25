@@ -37,12 +37,11 @@ A business owner can provision a live, site-specific AI support agent for their 
 
 ### Active
 
-- [ ] Sentry / error tracking (proxy + admin) — no production visibility today
-- [ ] External uptime monitoring — no alert if site goes down
-- [ ] Widget bundle size check in CI — NFR enforcement currently only manual
-- [ ] Password column reconciliation (`customers.passwordHash` vs `users.hashedPassword`)
-- [ ] Test skill aligned to PRD §4 user loop steps ①–⑭
-- [ ] AI subagent-driven execution for each gap item
+- [ ] E2E product flow works on staging — onboarding loop (PRD §4 ①–⑦), runtime loop (⑨–⑬), retention (⑭)
+- [ ] Meta-agent crawls site, creates agent, widget answers correctly (FLOW-01 through FLOW-09)
+- [ ] Test skill covers full PRD §4 user loop with per-step PASS/FAIL
+- [ ] G-Eval gate enforced (widget answers ≥ 3/5)
+- [ ] AI subagent execution pattern documented in test skill
 
 ### Out of Scope
 
@@ -85,11 +84,11 @@ A business owner can provision a live, site-specific AI support agent for their 
 **Goal:** Close implementation gaps (Phase 1 PRD blockers), align test skill to PRD user journeys, drive completion via AI subagents, reach READY verdict from test-lamoom QA.
 
 **Target features:**
-- Sentry error tracking (proxy + admin)
-- External uptime monitoring
-- Widget bundle size CI check
-- Password column reconciliation
-- Test skill gap closure (PRD §4 loop coverage, G-Eval gate, subagent execution)
+- E2E product flow working on staging (PRD §4 full user loop)
+- Test skill covers all PRD §4 steps ①–⑭ with PASS/FAIL per step
+- G-Eval scoring gate enforced (≥ 3/5 both questions)
+- AI subagent execution pattern documented for autonomous test runs
+- Achieve READY verdict from test-lamoom QA
 
 ## Evolution
 

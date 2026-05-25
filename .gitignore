@@ -1,5 +1,9 @@
 # dependencies
 .*
+!.planning
+!.gitignore
+!.github
+!.claude
 node_modules/
 .pnpm-store/
 
