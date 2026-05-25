@@ -25,7 +25,6 @@ const REQUIRED_AGENTS_MD_MARKERS = [
  */
 const REQUIRED_WEBSITE_API_MARKERS = [
   'workflows/',
-  'python3',
 ] as const;
 
 /**
