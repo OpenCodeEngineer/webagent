@@ -91,6 +91,27 @@ export async function getEmbedApiCredentials(): Promise<{
   };
 }
 
+export async function getOrCreateApiToken(): Promise<{ apiToken: string }> {
+  const session = await requireSession();
+  const db = getDb();
+  const rows = await db
+    .select({ apiToken: users.apiToken })
+    .from(users)
+    .where(eq(users.id, session.user.id))
+    .limit(1);
+  if (rows[0]?.apiToken) return { apiToken: rows[0].apiToken };
+  const newToken = `lm_${crypto.randomUUID().replace(/-/g, "")}`;
+  await db.update(users).set({ apiToken: newToken }).where(eq(users.id, session.user.id));
+  return { apiToken: newToken };
+}
+
+export async function rotateApiToken(): Promise<{ apiToken: string }> {
+  const session = await requireSession();
+  const newToken = `lm_${crypto.randomUUID().replace(/-/g, "")}`;
+  await getDb().update(users).set({ apiToken: newToken }).where(eq(users.id, session.user.id));
+  return { apiToken: newToken };
+}
+
 // ── Account detection ─────────────────────────────────────────────────────────
 
 export async function getAccountProviders(): Promise<{

@@ -42,10 +42,10 @@ Run these checks IN ORDER using vibebrowser tools. Take a screenshot after each 
 
 ### Phase 0: Infrastructure (curl, not browser)
 ```
-curl -sk https://dev.lamoom.com/health → 200 {"status":"ok"}
-curl -sk https://dev.lamoom.com/health/openclaw → 200 {"status":"ok"}  
-curl -sk https://dev.lamoom.com/widget.js → 200, non-empty JS
-curl -sk https://dev.lamoom.com/v1/models → 200 {"data":[...]} (OpenAI-compat endpoint)
+curl -sk https://webagent-dev.duckdns.org/health → 200 {"status":"ok"}
+curl -sk https://webagent-dev.duckdns.org/health/openclaw → 200 {"status":"ok"}  
+curl -sk https://webagent-dev.duckdns.org/widget.js → 200, non-empty JS
+curl -sk https://webagent-dev.duckdns.org/v1/models → 200 {"data":[...]} (OpenAI-compat endpoint)
 ssh root@78.47.152.177 "systemctl is-active webagent-admin webagent-proxy openclaw-gateway nginx ssh" → all active
 ```
 
@@ -56,8 +56,8 @@ Catch intermittent login/provider failures that one-off checks can miss.
 1. Run repeated probes:
    ```
    for i in 1 2 3; do
-     curl -sk --max-time 20 -o /tmp/login-$i.html -w "login[$i] http=%{http_code} total=%{time_total}\n" https://dev.lamoom.com/login
-     curl -sk --max-time 20 -o /tmp/providers-$i.json -w "providers[$i] http=%{http_code} total=%{time_total}\n" https://dev.lamoom.com/api/auth/providers
+     curl -sk --max-time 20 -o /tmp/login-$i.html -w "login[$i] http=%{http_code} total=%{time_total}\n" https://webagent-dev.duckdns.org/login
+     curl -sk --max-time 20 -o /tmp/providers-$i.json -w "providers[$i] http=%{http_code} total=%{time_total}\n" https://webagent-dev.duckdns.org/api/auth/providers
    done
    ```
 2. **CHECK**: all `/login` probes return HTTP 200 and non-error HTML (not 5xx page).
@@ -71,18 +71,18 @@ Next.js standalone mode does NOT auto-include `_next/static/`. If this fails, AL
 
 1. Fetch the login page HTML and extract CSS paths:
    ```
-   CSS_PATH=$(curl -sk https://dev.lamoom.com/login | grep -oE '_next/static/css/[^"]+' | head -1)
+   CSS_PATH=$(curl -sk https://webagent-dev.duckdns.org/login | grep -oE '_next/static/css/[^"]+' | head -1)
    ```
 2. **CHECK**: `CSS_PATH` is non-empty (CSS link exists in HTML)
 3. Fetch the CSS file:
    ```
-   curl -sk -o /dev/null -w "%{http_code} size:%{size_download}" "https://dev.lamoom.com/$CSS_PATH"
+   curl -sk -o /dev/null -w "%{http_code} size:%{size_download}" "https://webagent-dev.duckdns.org/$CSS_PATH"
    ```
 4. **CHECK**: HTTP 200 AND size > 1000 bytes (real CSS, not error page)
 5. Extract and check a JS chunk too:
    ```
-   JS_PATH=$(curl -sk https://dev.lamoom.com/login | grep -oE '_next/static/chunks/[^"]+' | head -1)
-   curl -sk -o /dev/null -w "%{http_code}" "https://dev.lamoom.com/$JS_PATH"
+   JS_PATH=$(curl -sk https://webagent-dev.duckdns.org/login | grep -oE '_next/static/chunks/[^"]+' | head -1)
+   curl -sk -o /dev/null -w "%{http_code}" "https://webagent-dev.duckdns.org/$JS_PATH"
    ```
 6. **CHECK**: HTTP 200
 
@@ -95,7 +95,7 @@ Verify NextAuth providers are correctly configured and the DrizzleAdapter connec
 
 1. Fetch the providers endpoint:
    ```
-   curl -sk https://dev.lamoom.com/api/auth/providers
+   curl -sk https://webagent-dev.duckdns.org/api/auth/providers
    ```
 2. **CHECK**: Response is valid JSON (not HTML error page)
 3. **CHECK**: `google` provider exists with `callbackUrl` containing `/api/auth/callback/google`
@@ -124,7 +124,7 @@ Catch runtime corruption/compromise indicators that make QA results invalid.
 
 ### Phase 1: Login & Dashboard — RELEASE-CRITICAL
 
-1. **Navigate** to `https://dev.lamoom.com`
+1. **Navigate** to `https://webagent-dev.duckdns.org`
 2. **CHECK**: Redirects to `/login` or `/dashboard` (if already logged in)
 3. If on `/login`:
    - **CHECK UI**: Dark theme, centered card, Google OAuth button visible
@@ -138,7 +138,7 @@ Catch runtime corruption/compromise indicators that make QA results invalid.
 
 ### Phase 2: Create Agent Chat — Native WebSocket Integration — BLOCKING
 
-1. **Navigate** to `https://dev.lamoom.com/create`
+1. **Navigate** to `https://webagent-dev.duckdns.org/create`
 2. **CHECK**: Page loads with dark background (#171717), header bar shows "Create Agent"
 3. **CHECK**: Native chat authenticates via `/api/auth/ws-ticket` and `/ws`
 4. **CHECK**: Chat interface is visible without iframe, external login, or SSO bridge
@@ -196,7 +196,7 @@ The meta-agent should be able to call OpenClaw Console internal APIs. Verify:
 
 ### Phase 4: Verify Created Agent
 
-1. **Navigate** to `https://dev.lamoom.com/dashboard`
+1. **Navigate** to `https://webagent-dev.duckdns.org/dashboard`
 2. **CHECK**: New agent (openclaw or similar) appears in the agent list
 3. **CHECK**: Agent shows "active" status
 4. **CHECK**: "View" link works → agent detail page shows embed code
@@ -222,7 +222,7 @@ If the widget preview shows an error, debug via WebSocket directly:
 1. From the agent detail page, copy the embed token from the embed code
 2. Use `curl` or Node.js to test WebSocket:
    ```
-   Connect to wss://dev.lamoom.com/ws
+   Connect to wss://webagent-dev.duckdns.org/ws
    Send: {"type":"auth","agentToken":"<TOKEN>","userId":"e2e-test"}
    Expect: {"type":"auth_ok",...}
    Send: {"type":"message","content":"I am evaluating Vibe Browser. How do I install the extension? Please include the direct install link and docs link."}
@@ -268,7 +268,7 @@ Test the widget as an actual customer would embed it:
 
 ### Phase 7: Agent Management — Delete
 
-1. **Navigate** to `https://dev.lamoom.com/dashboard`
+1. **Navigate** to `https://webagent-dev.duckdns.org/dashboard`
 2. Find an agent with a "Delete" button (pick one that's not important, or the test agent from Phase 3)
 3. Note the agent name
 4. **Click** Delete
@@ -280,7 +280,7 @@ Test the widget as an actual customer would embed it:
 
 ### Phase 8: Agent Detail — Actions
 
-1. **Navigate** to `https://dev.lamoom.com/dashboard`
+1. **Navigate** to `https://webagent-dev.duckdns.org/dashboard`
 2. **Click** "View" on any active agent
 3. On the agent detail page:
    - **CHECK**: Embed code section visible with `<script>` tag
@@ -293,7 +293,7 @@ Test the widget as an actual customer would embed it:
 
 ### Phase 9: Admin CRM (requires ADMIN_EMAILS match)
 
-1. **Navigate** to `https://dev.lamoom.com/admin`
+1. **Navigate** to `https://webagent-dev.duckdns.org/admin`
 2. **CHECK**: Page loads (not 403/redirect — if it does, note and skip)
 3. **CHECK**: Stats cards visible: Total Users, Total Agents, Active Agents, Total Sessions
 4. **CHECK**: Users table visible with at least 1 row
@@ -433,7 +433,7 @@ When QA is running as part of a deployment (not a standalone spot-check), this p
 2. **Wait** 15 s for services to stabilize.
 3. **Re-run Phase 0** (all health endpoints). Every check MUST return the expected result.
 4. **Re-run Phase 0b** (static assets). CSS and JS MUST still resolve to 200.
-5. **Navigate** to `https://dev.lamoom.com/dashboard` in the browser.
+5. **Navigate** to `https://webagent-dev.duckdns.org/dashboard` in the browser.
 6. **CHECK**: Dashboard loads within 10 s with no errors.
 7. **CHECK**: An existing agent is still visible (data persistence across restart).
 
@@ -499,7 +499,7 @@ salt: '__Secure-authjs.session-token'
 
 ### `ignoreHTTPSErrors` on new context only
 
-Self-signed cert on `dev.lamoom.com`. Chrome CDP existing contexts cannot be reconfigured. Must use:
+Self-signed cert on `webagent-dev.duckdns.org`. Chrome CDP existing contexts cannot be reconfigured. Must use:
 ```javascript
 const context = await browser.newContext({ ignoreHTTPSErrors: true });
 ```
