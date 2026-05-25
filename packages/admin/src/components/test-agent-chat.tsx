@@ -117,9 +117,12 @@ export function TestAgentChat({ agentToken, widgetBaseUrl, className }: TestAgen
           const reason = typeof data.reason === "string" ? data.reason : "Authentication failed";
           shouldReconnectRef.current = false;
           setIsAuthed(false);
+          const message = reason === "agent_paused"
+            ? "This assistant is temporarily unavailable."
+            : `Unable to connect: ${reason}`;
           setMessages((prev) => [
             ...prev,
-            { role: "assistant", content: `Unable to connect: ${reason}` },
+            { role: "assistant", content: message },
           ]);
           ws.close();
           return;

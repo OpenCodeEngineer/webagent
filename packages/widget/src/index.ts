@@ -422,8 +422,9 @@ class WebAgentWidget {
         this.isAuthenticated = false;
         this.updateInputState();
         const reason = (parsed.reason ?? '').toLowerCase();
+        const isAgentPaused = reason === 'agent_paused';
         const isTransientAuthError = reason.includes('not authenticated') || reason.includes('unauth');
-        const isFatalAuthError = reason.includes('invalid') || reason.includes('token') || reason.includes('config');
+        const isFatalAuthError = reason.includes('invalid') || reason.includes('token') || reason.includes('config') || isAgentPaused;
 
         if (isTransientAuthError) {
           this.hasFatalAuthError = false;
@@ -438,7 +439,12 @@ class WebAgentWidget {
               this.ws = null;
             }
           }
-          this.setBanner('Invalid configuration. Contact site owner.', 'error');
+          this.setBanner(
+            isAgentPaused
+              ? 'This assistant is temporarily unavailable.'
+              : 'Invalid configuration. Contact site owner.',
+            'error',
+          );
         }
         break;
       }
