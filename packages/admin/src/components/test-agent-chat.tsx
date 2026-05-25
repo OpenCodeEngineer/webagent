@@ -136,6 +136,14 @@ export function TestAgentChat({ agentToken, widgetBaseUrl, className }: TestAgen
           return;
         }
 
+        if (data.type === "thinking") {
+          if (!streamingIdRef.current) {
+            streamingIdRef.current = `s-${Date.now()}`;
+            setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+          }
+          return;
+        }
+
         if (data.type === "message" && typeof data.done === "boolean") {
           const content = typeof data.content === "string" ? data.content : "";
           if (!data.done) {

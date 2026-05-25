@@ -820,6 +820,7 @@ export class OpenClawClient {
     name?: string;
     timeoutSeconds?: number;
     onDelta?: (delta: string) => void;
+    onThinkingStart?: () => void;
   }): Promise<AgentResponse> {
     const UNKNOWN_AGENT_RETRY_DELAY_MS = 3_000;
     const MAX_UNKNOWN_AGENT_RETRIES = 2;
@@ -850,6 +851,7 @@ export class OpenClawClient {
     name?: string;
     timeoutSeconds?: number;
     onDelta?: (delta: string) => void;
+    onThinkingStart?: () => void;
   }): Promise<AgentResponse> {
     const timeoutMs = (opts.timeoutSeconds ?? 300) * 1000;
     let lastError = '';
@@ -859,7 +861,15 @@ export class OpenClawClient {
       const runId = crypto.randomUUID();
       const transport = getSharedGatewayTransport(this.gatewayWsUrl, token);
       let streamedText = '';
+      let thinkingStartFired = false;
       const unsubscribe = transport.subscribeToRun(runId, (event) => {
+        if (event.stream === 'thinking') {
+          if (!thinkingStartFired) {
+            thinkingStartFired = true;
+            opts.onThinkingStart?.();
+          }
+          return;
+        }
         if (event.stream !== 'assistant') {
           return;
         }

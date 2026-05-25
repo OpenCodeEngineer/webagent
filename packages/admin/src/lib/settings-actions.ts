@@ -38,8 +38,8 @@ export async function changePassword(formData: FormData): Promise<{ error?: stri
   if (newPassword !== confirmPassword) {
     return { error: "New passwords do not match." };
   }
-  if (newPassword.length < 8) {
-    return { error: "New password must be at least 8 characters." };
+  if (newPassword.length < 6) {
+    return { error: "New password must be at least 6 characters." };
   }
 
   const db = getDb();
