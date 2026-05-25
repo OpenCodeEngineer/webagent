@@ -80,25 +80,25 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| OBS-01 | — | Pending |
-| OBS-02 | — | Pending |
-| OBS-03 | — | Pending |
-| CI-01 | — | Pending |
-| CI-02 | — | Pending |
-| DB-01 | — | Pending |
-| TEST-01 | — | Pending |
-| TEST-02 | — | Pending |
-| TEST-03 | — | Pending |
-| TEST-04 | — | Pending |
-| TEST-05 | — | Pending |
-| DOC-01 | — | Pending |
-| DOC-02 | — | Pending |
+| OBS-01 | Phase 3 | Pending |
+| OBS-02 | Phase 3 | Pending |
+| OBS-03 | Phase 3 | Pending |
+| CI-01 | Phase 2 | Pending |
+| CI-02 | Phase 2 | Pending |
+| DB-01 | Phase 4 | Pending |
+| TEST-01 | Phase 5 | Pending |
+| TEST-02 | Phase 5 | Pending |
+| TEST-03 | Phase 5 | Pending |
+| TEST-04 | Phase 5 | Pending |
+| TEST-05 | Phase 5 | Pending |
+| DOC-01 | Phase 1 | Pending |
+| DOC-02 | Phase 1 | Pending |
 
 **Coverage:**
 - v1.0 requirements: 13 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 13 ⚠️
+- Mapped to phases: 13 (roadmap complete)
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-05-25*  
-*Last updated: 2026-05-25 after initial definition*
+*Last updated: 2026-05-25 after roadmap creation — all 13 requirements mapped*
