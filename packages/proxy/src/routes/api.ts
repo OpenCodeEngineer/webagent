@@ -1,6 +1,6 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, rmdir, stat } from 'fs/promises';
+import { mkdir, readFile, readdir, rmdir, stat } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'node:os';
 import { execFile } from 'node:child_process';
@@ -498,11 +498,51 @@ export async function detectAgentCreation(
   | null
 > {
   const markerMatch = responseText.match(/\[AGENT_CREATED::\s*<?([a-z0-9_-]+)>?\s*\]/i);
-  if (!markerMatch?.[1]) return null;
 
-  const slug = markerMatch[1];
   const configuredWorkspacesDir = process.env.OPENCLAW_WORKSPACES_DIR?.trim();
   const primaryWorkspacesDir = configuredWorkspacesDir || join(process.cwd(), 'openclaw', 'workspaces');
+
+  let slug: string;
+  if (markerMatch?.[1]) {
+    slug = markerMatch[1];
+  } else {
+    // Fallback: if the LLM omitted the marker, scan for a workspace created in the
+    // last 5 minutes whose slug ends with this customer's first-8-char suffix.
+    const customerSuffix = customerId.replace(/-/g, '').slice(0, 8).toLowerCase();
+    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+    const scanDirs = [primaryWorkspacesDir];
+    if (!configuredWorkspacesDir) {
+      scanDirs.push(join(process.cwd(), '..', '..', 'openclaw', 'workspaces'));
+    }
+    let fallbackSlug: string | null = null;
+    outer: for (const wsDir of scanDirs) {
+      let entries: string[];
+      try {
+        entries = await readdir(wsDir);
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        if (!entry.endsWith(customerSuffix)) continue;
+        try {
+          const raw = await readFile(join(wsDir, entry, 'agent-config.json'), 'utf8');
+          const parsed = JSON.parse(raw) as { createdAt?: string };
+          if (parsed.createdAt && new Date(parsed.createdAt).getTime() >= fiveMinutesAgo) {
+            fallbackSlug = entry;
+            break outer;
+          }
+        } catch {
+          // not a valid config, skip
+        }
+      }
+    }
+    if (!fallbackSlug) return null;
+    app.log.warn(
+      { customerId, fallbackSlug },
+      'detectAgentCreation: no [AGENT_CREATED::] marker in response; recovered via recent workspace scan',
+    );
+    slug = fallbackSlug;
+  }
   const configPaths = [join(primaryWorkspacesDir, slug, 'agent-config.json')];
   if (!configuredWorkspacesDir) {
     const fallbackWorkspacesDir = join(process.cwd(), '..', '..', 'openclaw', 'workspaces');
