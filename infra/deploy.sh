@@ -4,13 +4,15 @@ set -euo pipefail
 # Deploy current LOCAL repo state to the Lamoom VM (not git-pull based).
 # Usage: ./infra/deploy.sh [host]
 
+SCRIPT_DIR_EARLY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=infra/config.env
+[ -f "${SCRIPT_DIR_EARLY}/config.env" ] && source "${SCRIPT_DIR_EARLY}/config.env"
+
 HOST="${1:-${DEPLOY_HOST:-78.47.152.177}}"
 DEPLOY_USER="${DEPLOY_USER:-root}"
 APP_DIR="${APP_DIR:-/opt/webagent}"
 APP_USER="${APP_USER:-openclaw}"
-DOMAIN="${DOMAIN:-dev.lamoom.com}"
 NGINX_SITE_PATH="${NGINX_SITE_PATH:-/etc/nginx/sites-enabled/openclaw}"
-DOMAIN="${DOMAIN:-dev.lamoom.com}"
 SYNC_DELETE="${SYNC_DELETE:-1}"
 REMOTE="${DEPLOY_USER}@${HOST}"
 SSH_OPTS=(
@@ -20,7 +22,7 @@ SSH_OPTS=(
 )
 RUNTIME_CONFIG_BACKUP="/tmp/webagent-openclaw-runtime.json5"
 ROLLBACK_BASE_DIR="/tmp/webagent-admin-rollback"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="${SCRIPT_DIR_EARLY}"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 run_rsync() {
@@ -327,10 +329,23 @@ run_post_deploy_checks() {
     return 1
   fi
 
-  echo "→ External availability check (${external_url})..."
-  external_status="$(curl -sS -L -o /dev/null -w '%{http_code}' --max-time 20 "${external_url}" || true)"
+  # External availability check.
+  #
+  # MUST use the unmodified public path. NO --resolve, NO -k, NO --dns-servers.
+  # A previous version of this script fell back to --resolve dev.lamoom.com:443:127.0.0.1
+  # when public DNS failed; that hid a real public-reachability outage for ~21h
+  # because the deploy kept reporting ✓ while https://dev.lamoom.com/ was NXDOMAIN
+  # for every real user. If the deploy host cannot reach its own public URL,
+  # the correct signal is a deploy failure — fix DNS/firewall/cert, do not
+  # bypass them.
+  echo "→ External availability check (${external_url}) — public path only, no --resolve, no -k..."
+  external_status="$(curl -sS -L -o /dev/null -w '%{http_code}' --max-time 20 "${external_url}" 2>/dev/null || true)"
+
   if [[ -z "${external_status}" || "${external_status}" == "000" ]]; then
-    echo "❌ External root URL check failed: no HTTP response"
+    echo "❌ External root URL check failed: ${external_url} unreachable from this host via the public path."
+    echo "   Diagnose: dig +short dev.lamoom.com @8.8.8.8 ; nc -vz 78.47.152.177 443"
+    echo "   Likely causes (one of): public DNS delegation broken (Route 53 / registrar NS), 443 firewalled, or TLS cert invalid."
+    echo "   DO NOT add a --resolve fallback to silence this — that is what caused the prior 21h outage."
     return 1
   fi
   if [[ "${external_status}" =~ ^5 ]]; then

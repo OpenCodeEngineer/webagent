@@ -1,20 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { Copy, Check, RefreshCw } from "lucide-react";
-import { serverRegenerateToken } from "@/lib/actions";
+import { Copy, Check, RefreshCw, Pause, Play } from "lucide-react";
+import { serverRegenerateToken, serverUpdateAgent } from "@/lib/actions";
 import { useToast } from "@/components/toast";
 import { Button } from "@/components/ui/button";
 
 interface AgentDetailActionsProps {
   agentId: string;
   embedCode: string;
+  status?: string | null;
 }
 
-export function AgentDetailActions({ agentId, embedCode: initialEmbedCode }: AgentDetailActionsProps) {
+export function AgentDetailActions({ agentId, embedCode: initialEmbedCode, status: initialStatus }: AgentDetailActionsProps) {
   const [embedCode, setEmbedCode] = useState(initialEmbedCode);
   const [copied, setCopied] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [status, setStatus] = useState(initialStatus ?? "active");
+  const [togglingStatus, setTogglingStatus] = useState(false);
   const { toast } = useToast();
 
   const handleCopy = async () => {
@@ -49,6 +52,24 @@ export function AgentDetailActions({ agentId, embedCode: initialEmbedCode }: Age
     }
   };
 
+  const handleTogglePause = async () => {
+    const newStatus = status === "paused" ? "active" : "paused";
+    setTogglingStatus(true);
+    try {
+      const updated = await serverUpdateAgent(agentId, { status: newStatus });
+      if (updated) {
+        setStatus(updated.status ?? newStatus);
+        toast({ message: `Agent ${newStatus === "active" ? "resumed" : "paused"}.`, type: "success" });
+      }
+    } catch (err) {
+      toast({ message: err instanceof Error ? err.message : "Failed to update agent.", type: "error" });
+    } finally {
+      setTogglingStatus(false);
+    }
+  };
+
+  const isPaused = status === "paused";
+
   return (
     <div className="space-y-3">
       <div className="overflow-x-auto rounded-lg bg-zinc-900 p-4">
@@ -73,6 +94,24 @@ export function AgentDetailActions({ agentId, embedCode: initialEmbedCode }: Age
         <Button variant="outline" size="sm" onClick={handleRegenerate} disabled={regenerating}>
           <RefreshCw className={`mr-2 h-4 w-4 ${regenerating ? "animate-spin" : ""}`} />
           {regenerating ? "Regenerating…" : "Regenerate Token"}
+        </Button>
+        <Button
+          variant={isPaused ? "default" : "outline"}
+          size="sm"
+          onClick={handleTogglePause}
+          disabled={togglingStatus || status === "deleted"}
+        >
+          {isPaused ? (
+            <>
+              <Play className="mr-2 h-4 w-4" />
+              {togglingStatus ? "Resuming…" : "Resume"}
+            </>
+          ) : (
+            <>
+              <Pause className="mr-2 h-4 w-4" />
+              {togglingStatus ? "Pausing…" : "Pause"}
+            </>
+          )}
         </Button>
       </div>
     </div>

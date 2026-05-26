@@ -94,7 +94,7 @@ export default async function AgentDetailPage({ params }: Props) {
               <CardDescription>Add this snippet to your website.</CardDescription>
             </CardHeader>
             <CardContent>
-              <AgentDetailActions agentId={agent.id} embedCode={embedCode} />
+              <AgentDetailActions agentId={agent.id} embedCode={embedCode} status={agent.status} />
             </CardContent>
           </Card>
 

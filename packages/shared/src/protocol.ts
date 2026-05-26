@@ -55,6 +55,7 @@ export type ServerMessage =
     messages: Array<{ role: 'user' | 'assistant'; content: string }>;
     embedCode?: string;
   }
+  | { type: 'thinking' }
   | { type: 'message'; content: string; done: boolean }
   | { type: 'error'; message: string }
   | { type: 'pong' };

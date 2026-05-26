@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { ToastProvider } from "@/components/toast";
+import { SessionProvider } from "next-auth/react";
 import { Geist } from "next/font/google";
 import { cn } from "@/lib/utils";
 
@@ -19,7 +20,9 @@ export default function RootLayout({
   return (
     <html lang="en" className={cn("dark font-sans", geist.variable)}>
       <body className="bg-[#171717] text-foreground antialiased">
-        <ToastProvider>{children}</ToastProvider>
+        <SessionProvider>
+          <ToastProvider>{children}</ToastProvider>
+        </SessionProvider>
       </body>
     </html>
   );

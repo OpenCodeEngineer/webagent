@@ -11,6 +11,8 @@ import {
   updateDisplayName,
   changePassword,
   getEmbedApiCredentials,
+  getOrCreateApiToken,
+  rotateApiToken,
   getAccountProviders,
   deleteAccount,
 } from "@/lib/settings-actions";
@@ -179,10 +181,24 @@ function SecuritySection() {
 
 function EmbedApiSection() {
   const [creds, setCreds] = useState<{ customerId: string | null; hmacSecret: string | null; hasCredentials: boolean } | null>(null);
+  const [apiToken, setApiToken] = useState<string | null>(null);
+  const [rotating, setRotating] = useState(false);
 
   useEffect(() => {
     getEmbedApiCredentials().then(setCreds);
+    getOrCreateApiToken().then((r) => setApiToken(r.apiToken));
   }, []);
+
+  const handleRotate = async () => {
+    if (!window.confirm("Rotate API token? The old token will stop working immediately.")) return;
+    setRotating(true);
+    try {
+      const r = await rotateApiToken();
+      setApiToken(r.apiToken);
+    } finally {
+      setRotating(false);
+    }
+  };
 
   if (!creds?.hasCredentials) return null;
 
@@ -209,6 +225,18 @@ function EmbedApiSection() {
             <CopyButton value={creds.hmacSecret ?? ""} />
           </div>
         </div>
+        {apiToken !== null && (
+          <div className="space-y-1">
+            <Label>API Token</Label>
+            <div className="flex items-center gap-2">
+              <Input value={apiToken} readOnly type="password" className="font-mono text-xs" />
+              <CopyButton value={apiToken} />
+              <Button variant="outline" size="sm" onClick={handleRotate} disabled={rotating}>
+                {rotating ? "Rotating…" : "Rotate"}
+              </Button>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

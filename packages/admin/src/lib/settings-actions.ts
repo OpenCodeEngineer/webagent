@@ -38,8 +38,8 @@ export async function changePassword(formData: FormData): Promise<{ error?: stri
   if (newPassword !== confirmPassword) {
     return { error: "New passwords do not match." };
   }
-  if (newPassword.length < 8) {
-    return { error: "New password must be at least 8 characters." };
+  if (newPassword.length < 6) {
+    return { error: "New password must be at least 6 characters." };
   }
 
   const db = getDb();
@@ -89,6 +89,27 @@ export async function getEmbedApiCredentials(): Promise<{
     hmacSecret,
     hasCredentials: Boolean(customerId && hmacSecret),
   };
+}
+
+export async function getOrCreateApiToken(): Promise<{ apiToken: string }> {
+  const session = await requireSession();
+  const db = getDb();
+  const rows = await db
+    .select({ apiToken: users.apiToken })
+    .from(users)
+    .where(eq(users.id, session.user.id))
+    .limit(1);
+  if (rows[0]?.apiToken) return { apiToken: rows[0].apiToken };
+  const newToken = `lm_${crypto.randomUUID().replace(/-/g, "")}`;
+  await db.update(users).set({ apiToken: newToken }).where(eq(users.id, session.user.id));
+  return { apiToken: newToken };
+}
+
+export async function rotateApiToken(): Promise<{ apiToken: string }> {
+  const session = await requireSession();
+  const newToken = `lm_${crypto.randomUUID().replace(/-/g, "")}`;
+  await getDb().update(users).set({ apiToken: newToken }).where(eq(users.id, session.user.id));
+  return { apiToken: newToken };
 }
 
 // ── Account detection ─────────────────────────────────────────────────────────

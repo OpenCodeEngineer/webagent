@@ -15,6 +15,7 @@ type ClientMessage =
 type ServerMessage =
   | { type: 'auth_ok'; sessionId?: string; agentId?: string }
   | { type: 'auth_error'; reason?: string }
+  | { type: 'thinking' }
   | { type: 'message'; content?: string; done?: boolean }
   | { type: 'error'; code?: string; message?: string }
   | { type: 'pong' };
@@ -26,6 +27,7 @@ interface ChatMessage {
   id: string;
   role: 'visitor' | 'agent';
   content: string;
+  isThinking?: boolean;
   failed?: boolean;
   retryPayload?: RetryPayload;
 }
@@ -422,8 +424,9 @@ class WebAgentWidget {
         this.isAuthenticated = false;
         this.updateInputState();
         const reason = (parsed.reason ?? '').toLowerCase();
+        const isAgentPaused = reason === 'agent_paused';
         const isTransientAuthError = reason.includes('not authenticated') || reason.includes('unauth');
-        const isFatalAuthError = reason.includes('invalid') || reason.includes('token') || reason.includes('config');
+        const isFatalAuthError = reason.includes('invalid') || reason.includes('token') || reason.includes('config') || isAgentPaused;
 
         if (isTransientAuthError) {
           this.hasFatalAuthError = false;
@@ -438,8 +441,17 @@ class WebAgentWidget {
               this.ws = null;
             }
           }
-          this.setBanner('Invalid configuration. Contact site owner.', 'error');
+          this.setBanner(
+            isAgentPaused
+              ? 'This assistant is temporarily unavailable.'
+              : 'Invalid configuration. Contact site owner.',
+            'error',
+          );
         }
+        break;
+      }
+      case 'thinking': {
+        this.handleThinkingStart();
         break;
       }
       case 'message': {
@@ -475,6 +487,9 @@ class WebAgentWidget {
       return;
     }
 
+    if (message.isThinking) {
+      message.isThinking = false;
+    }
     message.content += content;
 
     if (done) {
@@ -518,6 +533,23 @@ class WebAgentWidget {
   private resetPendingAgentResponse(): void {
     this.waitingForAgent = false;
     this.activeAgentMessageId = null;
+    this.renderTyping();
+  }
+
+  private handleThinkingStart(): void {
+    if (this.activeAgentMessageId) {
+      return;
+    }
+    const message: ChatMessage = {
+      id: this.nextId(),
+      role: 'agent',
+      content: '',
+      isThinking: true,
+    };
+    this.messages.push(message);
+    this.activeAgentMessageId = message.id;
+    this.waitingForAgent = true;
+    this.renderMessages();
     this.renderTyping();
   }
 
@@ -581,12 +613,16 @@ class WebAgentWidget {
 
     this.messagesList.innerHTML = this.messages
       .map((message) => {
-        const rendered = renderMarkdownToSafeHtml(message.content);
-
         if (message.role === 'visitor' && message.failed) {
+          const rendered = renderMarkdownToSafeHtml(message.content);
           return `<div class="wa-message wa-visitor"><button type="button" class="wa-msg wa-failed" data-retry-id="${message.id}" aria-label="Retry sending message">${rendered}<span class="wa-failed-note">Failed to send. Click to retry.</span></button></div>`;
         }
 
+        if (message.isThinking) {
+          return `<div class="wa-message wa-agent"><div class="wa-msg wa-thinking-msg"><span class="wa-thinking-dot"></span><span class="wa-thinking-dot"></span><span class="wa-thinking-dot"></span></div></div>`;
+        }
+
+        const rendered = renderMarkdownToSafeHtml(message.content);
         return `<div class="wa-message ${message.role === 'visitor' ? 'wa-visitor' : 'wa-agent'}"><div class="wa-msg">${rendered}</div></div>`;
       })
       .join('');
@@ -874,6 +910,30 @@ class WebAgentWidget {
             transform: translateY(-3px);
             opacity: 1;
           }
+        }
+
+        .wa-thinking-msg {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          min-width: 44px;
+          padding: 12px 14px;
+        }
+
+        .wa-thinking-dot {
+          width: 7px;
+          height: 7px;
+          border-radius: 999px;
+          background: #64748b;
+          animation: wa-bounce 1s infinite ease-in-out;
+        }
+
+        .wa-thinking-dot:nth-child(2) {
+          animation-delay: 0.15s;
+        }
+
+        .wa-thinking-dot:nth-child(3) {
+          animation-delay: 0.3s;
         }
 
         .wa-form {

@@ -744,6 +744,9 @@ export function handleConnection(
               agentId: state.openclawAgentId,
               sessionKey: state.sessionKey,
               timeoutSeconds: 180,
+              onThinkingStart: () => {
+                send(ws, { type: 'thinking' });
+              },
               onDelta: (delta) => {
                 if (!delta) {
                   return;
@@ -792,6 +795,9 @@ export function handleConnection(
                     agentId: state.openclawAgentId,
                     sessionKey: state.sessionKey,
                     timeoutSeconds: 180,
+                    onThinkingStart: () => {
+                      send(ws, { type: 'thinking' });
+                    },
                     onDelta: (delta) => {
                       if (!delta) {
                         return;
