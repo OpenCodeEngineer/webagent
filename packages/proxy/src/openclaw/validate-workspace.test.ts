@@ -153,12 +153,6 @@ describe('validateGeneratedWorkspace', () => {
       ),
       `expected workflows/ marker error in skill, got: ${result.errors.join('; ')}`,
     );
-    assert.ok(
-      result.errors.some((e) =>
-        e.includes('skills/website-api/SKILL.md') && e.includes('python3'),
-      ),
-      `expected python3 marker error in skill, got: ${result.errors.join('; ')}`,
-    );
   });
 
   it('detects {{PLACEHOLDER}} in .json files', async () => {

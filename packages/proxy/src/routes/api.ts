@@ -1,6 +1,6 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, rmdir, stat } from 'fs/promises';
+import { mkdir, readFile, readdir, rmdir, stat } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'node:os';
 import { execFile } from 'node:child_process';
@@ -498,11 +498,83 @@ export async function detectAgentCreation(
   | null
 > {
   const markerMatch = responseText.match(/\[AGENT_CREATED::\s*<?([a-z0-9_-]+)>?\s*\]/i);
-  if (!markerMatch?.[1]) return null;
 
-  const slug = markerMatch[1];
   const configuredWorkspacesDir = process.env.OPENCLAW_WORKSPACES_DIR?.trim();
   const primaryWorkspacesDir = configuredWorkspacesDir || join(process.cwd(), 'openclaw', 'workspaces');
+
+  let slug: string;
+  if (markerMatch?.[1]) {
+    slug = markerMatch[1];
+  } else {
+    // Fallback: if the LLM omitted the marker, scan for a workspace created in the
+    // last 5 minutes whose slug ends with this customer's first-8-char suffix.
+    const customerSuffix = customerId.replace(/-/g, '').slice(0, 8).toLowerCase();
+    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+    const scanDirs = [primaryWorkspacesDir];
+    if (!configuredWorkspacesDir) {
+      scanDirs.push(join(process.cwd(), '..', '..', 'openclaw', 'workspaces'));
+    }
+    const candidateCreatedAtBySlug = new Map<string, number>();
+    for (const wsDir of scanDirs) {
+      let entries: string[];
+      try {
+        entries = await readdir(wsDir);
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        if (!entry.endsWith(customerSuffix)) continue;
+        try {
+          const raw = await readFile(join(wsDir, entry, 'agent-config.json'), 'utf8');
+          const parsed = JSON.parse(raw) as { createdAt?: string; agentSlug?: string };
+          const createdAtMs = parsed.createdAt ? new Date(parsed.createdAt).getTime() : Number.NaN;
+          if (!Number.isFinite(createdAtMs) || createdAtMs < fiveMinutesAgo) {
+            continue;
+          }
+          if (typeof parsed.agentSlug === 'string' && parsed.agentSlug.trim().length > 0) {
+            if (parsed.agentSlug.trim() !== entry) {
+              continue;
+            }
+          }
+          const existingCreatedAt = candidateCreatedAtBySlug.get(entry);
+          if (existingCreatedAt === undefined || createdAtMs > existingCreatedAt) {
+            candidateCreatedAtBySlug.set(entry, createdAtMs);
+          }
+        } catch {
+          // not a valid config, skip
+        }
+      }
+    }
+
+    let fallbackSlug: string | null = null;
+    let fallbackCreatedAt = Number.NEGATIVE_INFINITY;
+    for (const [candidateSlug, candidateCreatedAt] of candidateCreatedAtBySlug) {
+      if (
+        candidateCreatedAt > fallbackCreatedAt
+        || (
+          candidateCreatedAt === fallbackCreatedAt
+          && fallbackSlug !== null
+          && candidateSlug.localeCompare(fallbackSlug) < 0
+        )
+        || fallbackSlug === null
+      ) {
+        fallbackSlug = candidateSlug;
+        fallbackCreatedAt = candidateCreatedAt;
+      }
+    }
+
+    if (!fallbackSlug) return null;
+    app.log.warn(
+      {
+        customerId,
+        fallbackSlug,
+        fallbackCreatedAt: new Date(fallbackCreatedAt).toISOString(),
+        candidateCount: candidateCreatedAtBySlug.size,
+      },
+      'detectAgentCreation: no [AGENT_CREATED::] marker in response; recovered via recent workspace scan',
+    );
+    slug = fallbackSlug;
+  }
   const configPaths = [join(primaryWorkspacesDir, slug, 'agent-config.json')];
   if (!configuredWorkspacesDir) {
     const fallbackWorkspacesDir = join(process.cwd(), '..', '..', 'openclaw', 'workspaces');

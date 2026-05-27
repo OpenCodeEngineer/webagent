@@ -7,10 +7,6 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [
       {
-        source: "/api/agents/create-via-meta",
-        destination: `${proxyUrl}/api/agents/create-via-meta`,
-      },
-      {
         source: "/api/agents/:path*",
         destination: `${proxyUrl}/api/agents/:path*`,
       },

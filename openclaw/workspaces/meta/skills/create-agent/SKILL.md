@@ -17,7 +17,7 @@ Creates a fully configured customer agent after Phase 1 discovery.
 - **CRITICAL: NEVER write literal `{{placeholder}}` syntax in generated files. All template variables MUST be replaced with actual values discovered during research. After writing all files, re-read each one and verify no `{{` sequences remain.**
 - **MANDATORY MARKERS — validator-enforced, non-negotiable:**
   - `AGENTS.md` MUST contain the literal heading text `Workflow-as-Code` and the literal string `workflows/`. The proxy greps for these exact strings and force-retries on miss — do not rephrase, summarize, or omit.
-  - `skills/website-api/SKILL.md` (when written) MUST contain `workflows/` AND `python3`.
+  - `skills/website-api/SKILL.md` (when written) MUST contain `workflows/`.
   - Copy the full **"Workflow-as-Code (Required for Actions)"** section verbatim from the template — do not LLM-rewrite it. Same for the "Workflow-first" rule line in the numbered Important Rules list. These survive generation only if you copy them literally.
 
 ## Inputs you must carry from discovery
@@ -157,9 +157,17 @@ After writing all workspace files, **re-read every `.md` file** in `<workspacePa
 
 If any unresolved placeholders are found, fix them immediately before proceeding to Step 4. The proxy runs server-side validation and will **reject the agent** if placeholders remain, returning `[AGENT_VALIDATION_FAILED::<slug>::<errors>]` — requiring a full retry.
 
-### Step 4 — Signal completion to proxy
+### Step 4 — Signal completion to proxy (MANDATORY — do not skip)
 
-Include the exact marker `[AGENT_CREATED::<agentSlug>]` in your response message. The proxy will:
+**CRITICAL: You MUST include `[AGENT_CREATED::<agentSlug>]` verbatim in your response text. This is the ONLY way the proxy registers the agent, generates the embed token, and returns the embed code to the customer. Omitting this marker means the agent will NOT be registered and the customer gets no embed code. There are no exceptions.**
+
+Include the exact marker in your response message like this (replace `<agentSlug>` with the actual slug you used):
+
+```
+[AGENT_CREATED::my-company-abc12345]
+```
+
+The proxy will then:
 1. Read `agent-config.json` from the workspace
 2. Create DB records (agent + embed token)
 3. Register the agent in OpenClaw gateway config
@@ -170,6 +178,12 @@ Tell the customer: "Your agent has been created! The embed code will appear belo
 Also include discovered onboarding/install links in the response when available.
 
 **Do NOT** attempt to edit `openclaw.json` or `openclaw.json5` — the proxy handles registration automatically.
+
+**FINAL CHECKLIST before sending your response:**
+- [ ] All workspace files written (AGENTS.md, SOUL.md, IDENTITY.md, TOOLS.md, USER.md, skills/, knowledgebase/, workflows/)
+- [ ] `agent-config.json` written at `<workspacePath>/agent-config.json`
+- [ ] No `{{placeholder}}` patterns remain in any file
+- [ ] `[AGENT_CREATED::<agentSlug>]` marker IS present in your response text
 
 ## Post-Creation Validation Rules
 
