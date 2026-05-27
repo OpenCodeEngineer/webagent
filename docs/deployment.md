@@ -147,6 +147,13 @@ To retarget the workflow to a different VM, update the `VM_HOST` secret in the r
 DOMAIN=myapp.example.com REPO_URL=git@github.com:OpenCodeEngineer/webagent.git bash /path/to/infra/setup.sh
 ```
 
+### Deploy checks and rollback boundary
+
+- `infra/deploy.sh` runs runtime integrity checks on the VM (local health endpoints, static asset check, OpenClaw health).
+- These VM runtime checks are rollback-eligible: if they fail, admin rollback is attempted on the VM.
+- Public availability is then checked from the deploy orchestrator context (`https://${DOMAIN}/`), not from inside the VM.
+- If the public check fails, the deploy exits non-zero, but it does **not** trigger admin rollback.
+
 ### Service ownership
 
 - OpenClaw gateway unit (`openclaw-gateway.service`) is installed/owned by OpenClaw runtime tooling as a user-level systemd service.

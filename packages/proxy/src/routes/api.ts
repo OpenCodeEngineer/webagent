@@ -514,8 +514,8 @@ export async function detectAgentCreation(
     if (!configuredWorkspacesDir) {
       scanDirs.push(join(process.cwd(), '..', '..', 'openclaw', 'workspaces'));
     }
-    let fallbackSlug: string | null = null;
-    outer: for (const wsDir of scanDirs) {
+    const candidateCreatedAtBySlug = new Map<string, number>();
+    for (const wsDir of scanDirs) {
       let entries: string[];
       try {
         entries = await readdir(wsDir);
@@ -526,19 +526,51 @@ export async function detectAgentCreation(
         if (!entry.endsWith(customerSuffix)) continue;
         try {
           const raw = await readFile(join(wsDir, entry, 'agent-config.json'), 'utf8');
-          const parsed = JSON.parse(raw) as { createdAt?: string };
-          if (parsed.createdAt && new Date(parsed.createdAt).getTime() >= fiveMinutesAgo) {
-            fallbackSlug = entry;
-            break outer;
+          const parsed = JSON.parse(raw) as { createdAt?: string; agentSlug?: string };
+          const createdAtMs = parsed.createdAt ? new Date(parsed.createdAt).getTime() : Number.NaN;
+          if (!Number.isFinite(createdAtMs) || createdAtMs < fiveMinutesAgo) {
+            continue;
+          }
+          if (typeof parsed.agentSlug === 'string' && parsed.agentSlug.trim().length > 0) {
+            if (parsed.agentSlug.trim() !== entry) {
+              continue;
+            }
+          }
+          const existingCreatedAt = candidateCreatedAtBySlug.get(entry);
+          if (existingCreatedAt === undefined || createdAtMs > existingCreatedAt) {
+            candidateCreatedAtBySlug.set(entry, createdAtMs);
           }
         } catch {
           // not a valid config, skip
         }
       }
     }
+
+    let fallbackSlug: string | null = null;
+    let fallbackCreatedAt = Number.NEGATIVE_INFINITY;
+    for (const [candidateSlug, candidateCreatedAt] of candidateCreatedAtBySlug) {
+      if (
+        candidateCreatedAt > fallbackCreatedAt
+        || (
+          candidateCreatedAt === fallbackCreatedAt
+          && fallbackSlug !== null
+          && candidateSlug.localeCompare(fallbackSlug) < 0
+        )
+        || fallbackSlug === null
+      ) {
+        fallbackSlug = candidateSlug;
+        fallbackCreatedAt = candidateCreatedAt;
+      }
+    }
+
     if (!fallbackSlug) return null;
     app.log.warn(
-      { customerId, fallbackSlug },
+      {
+        customerId,
+        fallbackSlug,
+        fallbackCreatedAt: new Date(fallbackCreatedAt).toISOString(),
+        candidateCount: candidateCreatedAtBySlug.size,
+      },
       'detectAgentCreation: no [AGENT_CREATED::] marker in response; recovered via recent workspace scan',
     );
     slug = fallbackSlug;

@@ -4,13 +4,16 @@ set -euo pipefail
 # Deploy current LOCAL repo state to the Lamoom VM (not git-pull based).
 # Usage: ./infra/deploy.sh [host]
 
+SCRIPT_DIR_EARLY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=infra/config.env
+[ -f "${SCRIPT_DIR_EARLY}/config.env" ] && source "${SCRIPT_DIR_EARLY}/config.env"
+
 HOST="${1:-${DEPLOY_HOST:-78.47.152.177}}"
 DEPLOY_USER="${DEPLOY_USER:-root}"
 APP_DIR="${APP_DIR:-/opt/webagent}"
 APP_USER="${APP_USER:-openclaw}"
 DOMAIN="${DOMAIN:-dev.lamoom.com}"
 NGINX_SITE_PATH="${NGINX_SITE_PATH:-/etc/nginx/sites-enabled/openclaw}"
-DOMAIN="${DOMAIN:-dev.lamoom.com}"
 SYNC_DELETE="${SYNC_DELETE:-1}"
 REMOTE="${DEPLOY_USER}@${HOST}"
 SSH_OPTS=(
@@ -20,7 +23,7 @@ SSH_OPTS=(
 )
 RUNTIME_CONFIG_BACKUP="/tmp/webagent-openclaw-runtime.json5"
 ROLLBACK_BASE_DIR="/tmp/webagent-admin-rollback"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="${SCRIPT_DIR_EARLY}"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 run_rsync() {
@@ -302,10 +305,7 @@ rollback_admin_service() {
   systemctl restart webagent-admin
 }
 
-run_post_deploy_checks() {
-  local external_status=""
-  local external_url="https://${DOMAIN}/"
-
+run_runtime_integrity_checks() {
   echo "→ Health checks..."
   curl -sf http://127.0.0.1:3001/health >/dev/null
   curl -sf http://127.0.0.1:3000/ >/dev/null
@@ -326,24 +326,11 @@ run_post_deploy_checks() {
     echo "❌ OpenClaw health failed"
     return 1
   fi
-
-  echo "→ External availability check (${external_url})..."
-  external_status="$(curl -sS -L -o /dev/null -w '%{http_code}' --max-time 20 "${external_url}" || true)"
-  if [[ -z "${external_status}" || "${external_status}" == "000" ]]; then
-    echo "❌ External root URL check failed: no HTTP response"
-    return 1
-  fi
-  if [[ "${external_status}" =~ ^5 ]]; then
-    echo "❌ External root URL returned ${external_status}"
-    return 1
-  fi
-
-  echo "✓ External root URL returned ${external_status}"
   return 0
 }
 
-if ! run_post_deploy_checks; then
-  echo "❌ Post-deploy validation failed"
+if ! run_runtime_integrity_checks; then
+  echo "❌ Runtime integrity checks failed"
   rollback_admin_service || true
 
   if curl -sf http://127.0.0.1:3000/ >/dev/null; then
@@ -357,5 +344,21 @@ fi
 
 echo "✅ Remote deploy finished"
 REMOTE
+
+external_url="https://${DOMAIN}/"
+echo "→ Public availability check (${external_url})..."
+external_status="$(curl -sS -L -o /dev/null -w '%{http_code}' --max-time 20 "${external_url}" || true)"
+
+if [[ -z "${external_status}" || "${external_status}" == "000" ]]; then
+  echo "❌ Public root URL check failed: no HTTP response"
+  exit 1
+fi
+
+if [[ "${external_status}" =~ ^5 ]]; then
+  echo "❌ Public root URL returned ${external_status}"
+  exit 1
+fi
+
+echo "✓ Public root URL returned ${external_status}"
 
 echo "── Deploy complete ──"

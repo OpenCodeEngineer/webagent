@@ -1,0 +1,5 @@
+- Cycle 1: Claimed issue ownership by creating #228, corrected issue body/labels, captured phase-1/2/3 artifacts, and selected deploy-check split design (runtime rollback checks vs public non-rollback check).
+- Cycle 2: Completed plan group A via subagents: refactored `infra/deploy.sh` to rollback only on remote runtime-integrity failures and moved public URL check to orchestrator context (fail-only, no rollback), then documented boundary in `docs/deployment.md`.
+- Cycle 3: Ran fresh-eye implementation review (Phase 5b); reviewer produced `.tasks/228/review.md` with `VERDICT: pass` and no findings.
+- Cycle 4: Ran real Phase 5c test loop; first rerun fixed deploy gate (`webagent-dev.duckdns.org` 200) but full E2E still failed (`/api/agents/create-via-meta` returns 500 on T5/T6), so task remains in implement loop.
+- Cycle 5: Diagnosed production mismatch (main missing route-handler/timeout + validator updates), backported required commits to ownership branch, applied widget selector compatibility fix, redeployed to VM, and reached full real E2E pass (14 passed, 0 failed, 1 skipped).

@@ -82,6 +82,7 @@ class WebAgentWidget {
     }
 
     this.host = document.createElement('div');
+    this.host.className = 'lamoom-root-host';
     this.host.setAttribute('data-webagent-widget', 'true');
     this.shadowRootNode = this.host.attachShadow({ mode: 'open' });
     this.shadowRootNode.innerHTML = this.template();
@@ -584,10 +585,10 @@ class WebAgentWidget {
         const rendered = renderMarkdownToSafeHtml(message.content);
 
         if (message.role === 'visitor' && message.failed) {
-          return `<div class="wa-message wa-visitor"><button type="button" class="wa-msg wa-failed" data-retry-id="${message.id}" aria-label="Retry sending message">${rendered}<span class="wa-failed-note">Failed to send. Click to retry.</span></button></div>`;
+          return `<div class="wa-message wa-visitor lamoom-message lamoom-user"><button type="button" class="wa-msg wa-failed" data-retry-id="${message.id}" aria-label="Retry sending message">${rendered}<span class="wa-failed-note">Failed to send. Click to retry.</span></button></div>`;
         }
 
-        return `<div class="wa-message ${message.role === 'visitor' ? 'wa-visitor' : 'wa-agent'}"><div class="wa-msg">${rendered}</div></div>`;
+        return `<div class="wa-message ${message.role === 'visitor' ? 'wa-visitor lamoom-user' : 'wa-agent lamoom-assistant'} lamoom-message"><div class="wa-msg">${rendered}</div></div>`;
       })
       .join('');
 
@@ -737,7 +738,6 @@ class WebAgentWidget {
           color: #92400e;
           background: #fef3c7;
         }
-2m+
         .wa-banner[data-kind='error'] {
           color: #991b1b;
           background: #fee2e2;
@@ -1021,7 +1021,7 @@ class WebAgentWidget {
       </style>
 
       <div class="wa-root">
-        <button class="wa-bubble" type="button" aria-label="Toggle chat" aria-expanded="false">
+        <button class="wa-bubble lamoom-bubble" type="button" aria-label="Toggle chat" aria-expanded="false">
           <span aria-hidden="true">💬</span>
           <span class="wa-badge" data-visible="false" aria-label="Unread messages">0</span>
         </button>
@@ -1040,8 +1040,8 @@ class WebAgentWidget {
           </div>
           <form class="wa-form">
             <label for="${inputId}" class="wa-sr-only">Message input</label>
-            <textarea id="${inputId}" class="wa-input" rows="2" aria-label="Type message"></textarea>
-            <button class="wa-send" type="submit" aria-label="Send message">Send</button>
+            <textarea id="${inputId}" class="wa-input lamoom-textarea" rows="2" aria-label="Type message"></textarea>
+            <button class="wa-send lamoom-send" type="submit" aria-label="Send message">Send</button>
           </form>
           <div class="wa-footer">
             <a href="https://github.com/OpenCodeEngineer/webagent" target="_blank" rel="noopener noreferrer">Powered by WebAgent</a>
