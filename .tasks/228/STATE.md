@@ -12,3 +12,5 @@
 - phase: 5b-pass
 - phase: 5c-loop-1 (deploy pass, e2e fail on meta-agent 500)
 - phase: 5c-pass
+- phase: 6-ci-green
+- phase: 7-ship-recommended
