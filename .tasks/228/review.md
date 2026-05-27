@@ -1,2 +1,2 @@
 No findings.
-VERDICT: pass
+FINAL: ship
