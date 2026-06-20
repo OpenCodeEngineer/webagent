@@ -73,7 +73,6 @@ Use evaluator child sessions to score:
 
 Pass threshold: `>= 5/6` per scenario.
 
-<<<<<<< HEAD
 ## Evidence Requirements (Release Gate)
 
 - Capture **viewport screenshots** (`fullPage: false`) for the full pipeline; do not use long-page screenshots as primary proof.
@@ -88,9 +87,6 @@ Pass threshold: `>= 5/6` per scenario.
   6. HubSpot context page with widget injected, message sent, response shown
 - Assemble a GIF from captured frames and store under `e2e-demo-output/<run-id>/`.
 - A harness PASS without screenshot/GIF artifacts is **not** a release-ready proof.
-
-=======
->>>>>>> chore/test-hubspot-skill-rewrite
 ## Prohibited Shortcuts
 
 - Do not use direct HubSpot API calls (`curl`, SDK, raw fetch) to execute scenario actions.
@@ -122,11 +118,7 @@ Optional:
 Evaluator model overrides:
 
 - `OPENCODE_EVAL_PROVIDER` (defaults to `OPENCODE_PROVIDER`)
-<<<<<<< HEAD
 - `OPENCODE_EVAL_MODEL` (defaults to `OPENCODE_MODEL`; harness retries with main model fallback on evaluator parse failures)
-=======
-- `OPENCODE_EVAL_MODEL` (defaults to `claude-sonnet-4.5`)
->>>>>>> chore/test-hubspot-skill-rewrite
 
 Examples:
 
